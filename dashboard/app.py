@@ -99,8 +99,8 @@ def layout(title, body, day=None, refresh=300, active="home"):
         "<meta name='viewport' content='width=device-width, initial-scale=1'>"
         "<meta http-equiv='refresh' content='%d'>"
         "<title>%s &middot; Focus Core</title>"
-        "<link rel='stylesheet' href='/static/style.css'></head>"
-        "<body>%s<h1>%s</h1>"
+        "<link rel='stylesheet' href='/static/style.css'>"
+        "<link rel='icon' href='/static/icon.png'></head>"        "<body>%s<h1>%s</h1>"
         "<div class='sub'>Focus Core &middot; Phase 5</div>%s%s</body></html>"
         % (refresh, escape(title), nav, escape(title), body, footer)
     )
@@ -855,8 +855,9 @@ def focus_page():
             "onsubmit=\"return confirm('Abort this session? "
             "It will not count toward your streak.');\">"
             "<button type='submit'>Abort</button></form>"
-            "<p class='note'>Keep <code>focus-watch.bat</code> running so "
-            "distractions are actually blocked while you work.</p></div>"
+            "<p class='note'>Blocking starts automatically with the session -- "
+            "open a distracting app or site and you will get a pop-up plus a "
+            "fullscreen reminder.</p></div>"
             "%s"
             % (escape(active["label"]), _fmt_countdown(remaining),
                status_line, active["planned_minutes"],
@@ -900,9 +901,8 @@ def focus_page():
         "Lenient -- block only Distracting (-2)</label></p>"
         "<p><button type='submit'>Start session</button></p>"
         "</form>"
-        "<p class='note'>While a session runs, double-click "
-        "<code>focus-watch.bat</code> so blocked apps trigger a pop-up and a "
-        "fullscreen reminder.</p></div>"
+        "<p class='note'>Blocking starts automatically when the session "
+        "starts -- no extra step needed.</p></div>"
         "<div class='card'><h3>Past sessions</h3>%s</div>"
         % (streak_html, past_table)
     )
@@ -921,6 +921,10 @@ def focus_start():
     else:
         minutes = preset
     result = focus_mod.start_session(label, minutes, block_level=block_level)
+    if "error" not in result:
+        # Blocking starts with the session -- no second manual step.
+        from focuscore.blocker import ensure_guard_running
+        ensure_guard_running()
     if "error" in result:
         return layout("Focus sessions",
                       "<div class='card'><p><b>Could not start:</b> %s</p>"

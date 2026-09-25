@@ -314,6 +314,40 @@ def run_enforcer(poll_seconds=5, db_path=None):
         print("Stopped.")
 
 
+def ensure_guard_running():
+    """Start the enforcement loop in the background; never raises.
+
+    Call this right after a session is *newly* created so blocking works
+    without a second manual step (previously the user had to double-click
+    focus-watch.bat themselves, and most never did). The loop exits on its
+    own when the session ends. Only call it for a fresh session:
+    start_session() refuses to create one while another is active, so a
+    newly created session means no guard is running for it yet.
+    Returns True when the guard process was launched.
+    """
+    import os
+    import subprocess
+    import sys
+    try:
+        root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+        kwargs = {
+            "cwd": root,
+            "stdin": subprocess.DEVNULL,
+            "stdout": subprocess.DEVNULL,
+            "stderr": subprocess.DEVNULL,
+        }
+        if os.name == "nt":
+            # No console window when the server runs under python.exe.
+            kwargs["creationflags"] = getattr(subprocess,
+                                              "CREATE_NO_WINDOW", 0)
+        subprocess.Popen(
+            [sys.executable, "-m", "focuscore.blocker", "--enforce"],
+            **kwargs)
+        return True
+    except Exception:  # noqa: BLE001 -- guard is best-effort
+        return False
+
+
 def main():
     parser = argparse.ArgumentParser(
         description="Enforce the active Focus Core focus session.")

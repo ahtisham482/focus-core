@@ -2,6 +2,15 @@
 
 All notable changes, newest first. Dates are PKT.
 
+## [v1.1.1] — 2026-09-25
+Bug fix from real usage: starting a focus session did not start blocking.
+- The blocking guard now starts automatically whenever a focus session is
+  created — from the Focus page or the tray menu. No more separate
+  `focus-watch.bat` step (it still works as a manual fallback).
+- Dashboard pages now show the Focus Core icon (favicon), so the app-mode
+  window and browser tab carry the app's identity.
+- Focus page copy updated: blocking described as automatic.
+
 ## [v1.1.0] — Unreleased (Sprint 1: Track A + stability)
 Hardening and verification only — no new user-facing features.
 - Backup/restore hardening: atomic writes, SHA256 checksums verified before restore,

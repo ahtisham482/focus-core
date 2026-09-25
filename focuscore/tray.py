@@ -88,6 +88,10 @@ def start_quick_session(db_path=None):
                                      block_level="strict", db_path=db_path)
     except Exception as exc:  # noqa: BLE001
         return {"error": "Could not start: %s" % exc}
+    if "error" not in result:
+        # Blocking starts with the session -- no second manual step.
+        from .blocker import ensure_guard_running
+        ensure_guard_running()
     return result
 
 
