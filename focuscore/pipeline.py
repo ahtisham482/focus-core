@@ -9,7 +9,7 @@ stored events (so per-activity overrides can be applied retroactively).
 """
 
 import argparse
-from datetime import date, datetime, time, timedelta
+from datetime import date, datetime, time
 
 from . import store
 from .ingest import ActivityWatchClient, ActivityWatchError
@@ -108,7 +108,8 @@ def main():
     parser.add_argument("--demo", action="store_true",
                         help="Use synthetic demo events instead of ActivityWatch.")
     parser.add_argument("--db", default=None,
-                        help="SQLite file to use (default: focuscore.db next to the code).")
+                        help="SQLite file to use "
+                             "(default: focuscore.db next to the code).")
     args = parser.parse_args()
 
     try:

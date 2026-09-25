@@ -1,0 +1,104 @@
+CI LOCAL SIMULATION LOG — focus-core
+=============================
+Date: 2026-09-25. Purpose: FC-003 — the CI workflow (.github/workflows/ci.yml)
+was rewritten but a real GitHub Actions run cannot be triggered from this
+environment. Each workflow job was simulated locally on this Linux machine.
+STATUS: CI validated by local simulation; first GitHub-hosted run pending.
+(The workflow file itself has never been executed by GitHub Actions.)
+
+Working tree note: the simulation ran against the working tree, which
+includes uncommitted changes by other agents (M dashboard/app.py,
+M focuscore/backup.py = FC-001/FC-002 fixes; new tests/test_backup_hardening.py,
+tests/test_security_baseline.py). Results below reflect that tree.
+
+Environment
+-----------
+- Python venv: /tmp/fc-venv (throwaway, same machine)
+- App deps: installed from requirements.txt into /tmp/fc-venv
+- Lint tool: ruff 0.16.9, installed via /tmp/fc-venv/bin/pip install ruff
+  (CI-only tool; NOT added to requirements.txt — requirement verified:
+  `git status --short requirements.txt` shows no change)
+
+JOB 1 — lint (mirrors: pip install ruff; ruff check focuscore dashboard tests)
+------------------------------------------------------------------------------
+Command: /tmp/fc-venv/bin/ruff check focuscore dashboard tests
+Exit code: 1  ==> FAIL
+
+Found 318 errors. Per-rule breakdown (ruff --statistics):
+  191  UP031  printf-string-formatting (%-formatting, modernization suggestion)
+   23  DTZ011 call-date-today
+   22  DTZ005 call-datetime-now-without-tzinfo
+   21  DTZ001 call-datetime-without-tzinfo
+   13  BLE001 blind-except
+   11  RUF100 unused-noqa
+    8  F401   unused-import
+    7  I001   unsorted-imports
+    2  S112   try-except-continue
+    2  S110   try-except-pass
+    2  RUF059 unused-unpacked-variable
+    2  F841   unused-variable
+    1  DTZ006 call-datetime-fromtimestamp
+    1  FURB188 slice-to-remove-prefix-or-suffix
+    1  C408   unnecessary-collection-call
+    1  PIE808 unnecessary-range-start
+Per-file counts (worst): dashboard/app.py 135, focuscore/blocker.py 25,
+focuscore/focus.py 22, tests/test_focus.py 20, ... errors span every
+directory — this is pre-existing style debt against ruff's default rule
+set, not confined to the uncommitted FC-001/FC-002 files.
+  28 findings auto-fixable with --fix (not applied here).
+
+Honest reading: plain `ruff check` with ruff 0.16.9's defaults is a much
+broader net than the old compileall step (defaults include pyupgrade,
+flake8-datetime, blind-except, bandit-lite, isort, etc.). The codebase
+does NOT pass it today. The CI lint job will therefore FAIL on the first
+GitHub-hosted run until either (a) the code is cleaned to pass bare
+`ruff check` — 318 findings, mostly style, 28 auto-fixable, none of them
+bugs (compileall-equivalent syntax level is clean), or (b) the workflow
+narrows the lint gate to an agreed rule set (e.g. --select E,F) with a
+documented justification. That decision belongs to the team/parent —
+this agent was told to use bare `ruff check` and did, and must not edit
+code or tests itself.
+
+JOB 2 — test (mirrors: pip install -r requirements.txt; pytest -q)
+------------------------------------------------------------------
+Command: /tmp/fc-venv/bin/python -m pytest -q
+Exit code: 0  ==> PASS
+Result: 170 passed, 1 warning in 3.15s
+
+JOB 3 — artifact (mirrors: zip step with exclusions, then smoke test)
+---------------------------------------------------------------------
+Zip step replicated with the same exclusion set as ci.yml:
+  skip dirs {".git", "__pycache__", ".pytest_cache", "backups"},
+  skip suffixes {".db", ".pyc"}.
+  Result: ZIP_OK, 61 files, 148664 bytes.
+  Exclusion audit: no .db / .pyc / backups / __pycache__ / .pytest_cache /
+  .git entries in the zip ==> EXCLUSIONS_OK.
+
+Smoke test (the new CI step: unzip to temp dir, run
+  python -c "import dashboard.app; print('smoke ok')" with requirements
+  installed):
+  Result: SMOKE_OK — stdout "smoke ok", returncode 0.
+
+VERDICT
+-------
+  lint   FAIL (318 ruff findings; code needs cleanup or an agreed rule-set decision)
+  test   PASS (170/170)
+  zip    PASS (61 files, exclusions verified)
+  smoke  PASS (dashboard.app imports from the built artifact)
+
+First GitHub Actions run still pending — nobody can trigger it from here.
+The workflow will go red on the lint job until the 318 findings are
+resolved or scoped.
+
+================================================================
+ADDENDUM (orchestrator, Sprint 1 fix-loop, 2026-09-25)
+================================================================
+Lint-gate policy decision: bare `ruff check` (default ruleset) reports
+318 pre-existing style findings (mostly UP031 %-formatting) -- cleaning
+them is parked in ROADMAP.md as style debt, not a defect. CI now enforces
+`ruff check --select E,F` (pycodestyle errors + pyflakes), which is GREEN:
+  ruff check --select E,F focuscore dashboard tests -> All checks passed!
+Mechanical cleanups applied to reach green (unused imports, 2 dead
+variables incl. an unused cats_table HTML block in the report view, 6
+long lines wrapped). Full suite re-run after cleanups: 170/170 passed.
+CI status: validated by local simulation; first GitHub-hosted run pending.

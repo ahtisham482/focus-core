@@ -31,7 +31,7 @@ from focuscore import store  # noqa: E402
 from focuscore.home import pulse_band as _pulse_band  # noqa: E402
 from focuscore.ingest import ActivityWatchError  # noqa: E402
 from focuscore.pipeline import run_day  # noqa: E402
-from focuscore.scoring import SCORE_LEVELS, UI_LABELS, productivity_pulse  # noqa: E402
+from focuscore.scoring import UI_LABELS, productivity_pulse  # noqa: E402
 from focuscore.taxonomy import host_of  # noqa: E402
 
 app = Flask(__name__)
@@ -231,7 +231,8 @@ def day_page(day):
         "and set a score -- or fix their category for next time.</p>"
         "<table><tr><th>Activity</th><th>App</th><th>Time</th></tr>%s</table></div>"
         "<div class='card note'>AFK/idle time (%.2fh) is excluded from the Pulse.</div>"
-        % (day, _pulse_band(pulse), pulse, _hours(total), bucket_bar(summary["seconds_by_level"], total),
+        % (day, _pulse_band(pulse), pulse, _hours(total),
+           bucket_bar(summary["seconds_by_level"], total),
            legend(summary["seconds_by_level"]), cat_rows, day, uncat_rows,
            _hours(summary["afk_seconds"]))
     )
@@ -242,6 +243,93 @@ def _category_score(name, _seconds):
     # Score shown next to a category: its default (custom-aware) score.
     from focuscore.taxonomy import get_category_score
     return get_category_score(name, store.get_categories())
+
+
+# ------------------------------------------------------------- security ---
+# Local security baseline. This is a single-user dashboard with no
+# authentication, bound to the loopback interface by default, so any web
+# page open in the user's browser could send cross-origin requests to it.
+# These hooks block loopback-CSRF: a malicious local page cannot make a
+# state-changing request here because it cannot forge the Host/Origin
+# headers to look loopback.
+#
+# No debug mode, no CORS, no authentication (out of scope by design:
+# loopback-only, single user).
+
+from urllib.parse import urlsplit  # noqa: E402
+
+_LOOPBACK_HOSTS = ("127.0.0.1", "localhost", "::1")
+_MUTATING_METHODS = frozenset(("POST", "PUT", "DELETE", "PATCH"))
+
+
+def _host_is_loopback(host_value):
+    """True if a Host header names this machine (optional :port allowed)."""
+    h = (host_value or "").strip().lower()
+    if not h:
+        return False
+    if h.startswith("["):
+        # "[::1]:5000" style: take what is between the brackets.
+        end = h.find("]")
+        if end == -1:
+            return False
+        rest = h[end + 1:]
+        if rest and not rest.startswith(":"):
+            return False
+        h = h[1:end]
+    elif h == "::1":
+        pass  # bracketless IPv6 loopback is fine as-is
+    elif h.count(":") == 1:
+        # "127.0.0.1:5000" style: drop the port.
+        h = h.rsplit(":", 1)[0]
+    elif h.count(":") > 1:
+        # Raw IPv6 (other than ::1) is not an allowed loopback host.
+        return False
+    return h in _LOOPBACK_HOSTS
+
+
+def _origin_is_loopback(origin_value):
+    """True if an Origin header is http(s) on a loopback host."""
+    try:
+        parts = urlsplit((origin_value or "").strip())
+    except ValueError:
+        return False
+    if parts.scheme not in ("http", "https"):
+        return False
+    if not parts.netloc:
+        return False
+    return _host_is_loopback(parts.hostname or "")
+
+
+@app.before_request
+def _reject_loopback_csrf():
+    # Only state-changing requests need protection; GET/HEAD/OPTIONS
+    # are read-only in this app and must keep working.
+    if request.method not in _MUTATING_METHODS:
+        return None
+    if not _host_is_loopback(request.headers.get("Host", "")):
+        return ("Forbidden: Host header is not a loopback address.", 403)
+    origin = request.headers.get("Origin")
+    if origin and not _origin_is_loopback(origin):
+        return ("Forbidden: Origin is not a loopback address.", 403)
+    return None
+
+
+@app.after_request
+def _add_security_headers(response):
+    response.headers["X-Content-Type-Options"] = "nosniff"
+    response.headers["X-Frame-Options"] = "DENY"
+    response.headers["Referrer-Policy"] = "no-referrer"
+    # 'unsafe-inline' is needed because the dashboard is a server-rendered
+    # single-file app (no template files to split): it uses inline
+    # onsubmit="return confirm(...)" handlers on the delete/abort/restore
+    # forms and inline style="" attributes on the home-page bar charts.
+    # No external content is ever loaded and the server binds 127.0.0.1
+    # only, so allowing inline does not widen the trust boundary.
+    response.headers["Content-Security-Policy"] = (
+        "default-src 'self'; script-src 'self' 'unsafe-inline'; "
+        "style-src 'self' 'unsafe-inline'"
+    )
+    return response
 
 
 @app.route("/")
@@ -323,11 +411,21 @@ def collect():
 # ------------------------------------------------------------ welcome ---
 
 WELCOME_STEPS = [
+    {"emoji": "\U0001f512",
+     "title": "Your data stays on this computer.",
+     "text": "Focus Core has no account, no sign-in, and sends nothing "
+             "to the internet -- there is no server that can see your "
+             "data. Everything lives in one file (focuscore.db) on this "
+             "PC. If you turn on Drive backups, a copy of that file is "
+             "placed in your own Google Drive folder and nowhere else.",
+     "check": None},
     {"emoji": "\U0001f440",
-     "title": "Focus Core watches which apps you use, automatically.",
-     "text": "There is nothing to start or stop each day. The tracker "
-             "(ActivityWatch) runs quietly and Focus Core turns what it "
-             "sees into your productivity score.",
+     "title": "Your activity is tracked by ActivityWatch; Focus Core scores it.",
+     "text": "Focus Core does not watch anything itself. It reads from "
+             "ActivityWatch, a free, open-source tracker that records "
+             "which app or website you were using. That is why "
+             "ActivityWatch must be running -- without it, there is "
+             "nothing for Focus Core to score.",
      "check": "Look at the bottom-right of your Windows taskbar, near "
               "the clock. You should see the ActivityWatch icon. If it "
               "is missing, open ActivityWatch from the Start menu -- it "
@@ -354,14 +452,14 @@ def welcome():
         step = int(request.args.get("step", "1"))
     except (TypeError, ValueError):
         step = 1
-    step = max(1, min(3, step))
+    step = max(1, min(len(WELCOME_STEPS), step))
     info = WELCOME_STEPS[step - 1]
 
     dots = "".join(
         "<div class='step%s'>%d</div>" % (" now" if i == step else "", i)
-        for i in (1, 2, 3))
+        for i in range(1, len(WELCOME_STEPS) + 1))
 
-    if step < 3:
+    if step < len(WELCOME_STEPS):
         action = ("<p><a class='btn' href='/welcome?step=%d'>Next</a></p>"
                   % (step + 1))
     else:
@@ -445,7 +543,8 @@ def activities():
         "<table><tr><th>Time</th><th>Title</th><th>App</th><th>Site</th>"
         "<th>Category</th><th>Min</th><th>Score override</th></tr>%s</table></div>"
         % (day, "".join(body_rows)
-           or "<tr><td colspan='7' class='note'>No activities stored for this day.</td></tr>")
+           or "<tr><td colspan='7' class='note'>"
+              "No activities stored for this day.</td></tr>")
     )
     return layout("Activities " + day, body, day, active="review")
 
@@ -738,7 +837,8 @@ def focus_page():
     streak = focus_mod.current_streak()
     streak_html = (
         "<div class='streak'>%d-day focus streak</div>" % streak if streak
-        else "<p class='note'>No focus streak yet -- complete a session to start one.</p>")
+        else "<p class='note'>No focus streak yet -- "
+             "complete a session to start one.</p>")
 
     if active:
         remaining = focus_mod.remaining_seconds(active)
@@ -752,7 +852,8 @@ def focus_page():
             "<form class='inline' method='post' action='/focus/end'>"
             "<button type='submit'>End session</button></form> "
             "<form class='inline' method='post' action='/focus/abort' "
-            "onsubmit=\"return confirm('Abort this session? It will not count toward your streak.');\">"
+            "onsubmit=\"return confirm('Abort this session? "
+            "It will not count toward your streak.');\">"
             "<button type='submit'>Abort</button></form>"
             "<p class='note'>Keep <code>focus-watch.bat</code> running so "
             "distractions are actually blocked while you work.</p></div>"
@@ -1315,6 +1416,12 @@ def backup_page():
         "you start it (only if the last backup is older than 24 hours).</p>"
         "</div>"
         "<div class='card'><h3>Your backups</h3>%s</div>"
+        "<div class='card'><h3>Your data</h3>"
+        "<p class='note'>Everything lives on this PC in "
+        "<code>focuscore.db</code>. Export: any timesheet day can be "
+        "saved as CSV from the Timesheet page; a full copy is any backup "
+        "from this page. Delete: to remove all your data, delete "
+        "<code>focuscore.db</code> (make a backup first).</p></div>"
         "<div class='card'><h3>Moving to a new laptop</h3>"
         "<p class='note'>1. On the new laptop, install Focus Core and "
         "Google Drive, and let Drive finish syncing.<br>"
@@ -1343,23 +1450,33 @@ def backup_now():
 
 @app.route("/backup/restore", methods=["POST"])
 def backup_restore():
+    import warnings
     from focuscore import backup as backup_mod
 
     name = (request.form.get("name") or "").strip()
     try:
-        safety = backup_mod.restore_backup(name)
+        with warnings.catch_warnings(record=True) as caught:
+            warnings.simplefilter("always")
+            safety = backup_mod.restore_backup(name)
     except (ValueError, FileNotFoundError) as exc:
         return layout("Backup",
                       "<div class='card'><p><b>Could not restore:</b> %s</p>"
                       "<p><a href='/backup'>Back</a></p></div>"
                       % escape(str(exc))), 400
+    legacy_note = ""
+    if any("could not be verified" in str(w.message) for w in caught):
+        legacy_note = (
+            "<p class='note'>Note: this backup was made before safety "
+            "checks were added, so it could not be verified. Your data "
+            "was restored normally.</p>")
     body = (
         "<div class='card'><h3>Backup restored</h3>"
         "<p>Your data was restored from <code>%s</code>.</p>"
+        "%s"
         "<p class='note'>Safety copy of your previous data: "
         "<code>%s</code></p>"
         "<p><a class='btn' href='/'>Go to Home</a></p></div>"
-        % (escape(name), escape(str(safety) if safety else "none -- "
+        % (escape(name), legacy_note, escape(str(safety) if safety else "none -- "
                "there was no previous database")))
     return layout("Backup restored", body, active="backup")
 
@@ -1410,14 +1527,6 @@ def report_page():
         "<div class='card'><h3>Days</h3>"
         "<table><tr><th>Date</th><th>Tracked hours</th><th>Pulse</th>"
         "<th>Focus hours</th></tr>%s</table></div>" % day_rows)
-
-    cat_rows = "".join(
-        "<tr><td>%s</td><td>%.2f</td></tr>" % (escape(name), hours)
-        for name, hours in rep["top_categories"])
-    cats_table = (
-        "<div class='card'><h3>Top categories</h3>"
-        "<table><tr><th>Category</th><th>Hours</th></tr>%s</table></div>"
-        % (cat_rows or "<tr><td colspan='2' class='note'>No data.</td></tr>"))
 
     # CSS-only bar charts (no JavaScript): category hours and daily Pulse.
     max_cat = max([h for _, h in rep["top_categories"]] or [0])

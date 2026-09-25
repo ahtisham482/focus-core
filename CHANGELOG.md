@@ -1,0 +1,53 @@
+# Changelog — Focus Core
+
+All notable changes, newest first. Dates are PKT.
+
+## [v1.1.0] — Unreleased (Sprint 1: Track A + stability)
+Hardening and verification only — no new user-facing features.
+- Backup/restore hardening: atomic writes, SHA256 checksums verified before restore,
+  interrupted backup never listed, interrupted restore leaves the old DB intact (FC-001).
+- Flask local-security baseline: Host/Origin validation on mutating routes, secure
+  response headers; 127.0.0.1 default bind and no debug mode unchanged (FC-002).
+- CI workflow: lint + pytest + artifact build on `windows-latest` and `ubuntu-latest`,
+  Python 3.12 (FC-003).
+- PC-verify checklist for Windows-only features (tray, Drive detection, notifications,
+  launchers, app-mode window) — exact human steps, all `pending-pc` (FC-004).
+- Troubleshooting guide for common errors (FC-005).
+- STRIDE threat model + security checklist (FC-006).
+- Dependency audit (pip-audit) + secrets scan, evidence recorded (FC-007).
+- QA CYCLE-1 report + evidence bundle + flaky-test check (FC-008).
+- UX copy (approved proposals): clearer restore-failure message in plain language;
+  legacy-backup note on the restore-success card; new welcome-tour step "Your data stays
+  on this computer"; step 1 rewritten to explain what ActivityWatch is; "Your data"
+  card (export/delete) on the Backup page.
+
+## [v1.0.0] — 2026-09-25
+First complete release: local-first RescueTime-style tracker, verified on the user's
+Windows PC. 111/111 pytest tests pass (Python 3.12).
+
+### Phase 1 — Capture, scoring, dashboard
+- ActivityWatch ingest (apps, window titles, browser URLs; AFK excluded); SQLite store.
+- Generic category taxonomy with RescueTime's exact 5-level scale (+2 … −2) and the
+  official weighted Productivity Pulse formula; per-activity overrides; uncategorized queue.
+- Local Flask dashboard (127.0.0.1): Pulse, breakdowns, categories, review queue.
+
+### Phase 2 — Goals, alerts, notifications
+- Goals with daily targets and live progress; threshold alerts; Windows notifications.
+  30/30 tests.
+
+### Phase 3 — Focus sessions with blocking
+- Countdown focus sessions, strict/lenient blocking of −1/−2 apps via pop-up +
+  fullscreen overlay, session summary, streaks. Verified live on PC (YouTube blocked,
+  VS Code allowed). 4 PC-found bugs fixed with regression tests. 58/58 tests.
+
+### Phase 4 — Timesheets, weekly report, focus coaching
+- Timesheets (suggested blocks, accept/edit/add/remove, project+client+task tagging,
+  day lock, CSV export); weekly report page; focus coaching (7-day hourly heatmap,
+  top focus windows, burnout warnings). DB backup preserved all history. 78/78 tests.
+
+### Phase 5 — Real-app experience
+- "Focus Core" desktop icon opens the dashboard in its own app window (no address bar);
+  guided home page; 3-screen welcome tour; system tray (open, 25-min session, pulse,
+  backup now, quit); full UI polish; automatic backups into the user's Google Drive
+  folder with one-click restore + new-laptop guide. Server binds 127.0.0.1 only.
+  111/111 tests.

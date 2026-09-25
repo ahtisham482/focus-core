@@ -154,7 +154,8 @@ def save_events(day, events, path=None):
             [
                 (
                     e.get("ts"), e.get("duration", 0), e.get("app", ""),
-                    e.get("title", ""), e.get("url"), e.get("category", "Uncategorized"),
+                    e.get("title", ""), e.get("url"),
+                    e.get("category", "Uncategorized"),
                     e.get("score", 0), e.get("override_score"), e.get("match_key", ""),
                     day,
                 )

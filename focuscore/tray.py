@@ -17,16 +17,13 @@ The tray OWNS the server subprocess: it starts the server on launch
 below is a plain function so tests can exercise them without a GUI.
 """
 
-import sys
 from datetime import date
-from io import BytesIO
 from pathlib import Path
 
 PROJECT_ROOT = Path(__file__).resolve().parent.parent
 
 try:
     import pystray  # noqa: F401
-    from PIL import Image, ImageDraw
     _DEPS_OK = True
     _IMPORT_ERROR = None
 except Exception as exc:  # noqa: BLE001

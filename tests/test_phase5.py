@@ -8,8 +8,6 @@ formulas, so every expectation below is hand-checkable.
 import os
 import socket
 import sqlite3
-import threading
-import time
 from datetime import datetime, timedelta
 
 import pytest

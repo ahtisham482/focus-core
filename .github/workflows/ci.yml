@@ -1,0 +1,87 @@
+name: CI
+
+on:
+  push:
+    branches: ["**"]
+  pull_request:
+
+jobs:
+  lint:
+    name: Ruff lint check
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Install ruff (CI-only; not in requirements.txt)
+        run: pip install ruff
+      # Lint policy (orchestrator decision, Sprint 1): error-level rules only
+      # (E = pycodestyle errors, F = pyflakes). The full default ruleset
+      # reports ~300 pre-existing style nits (mostly UP031 %-formatting)
+      # across this codebase; cleaning those is parked in ROADMAP.md.
+      # The gate below enforces zero real errors.
+      - name: Ruff check
+        run: ruff check --select E,F focuscore dashboard tests
+
+  test:
+    name: pytest (Python 3.12, ${{ matrix.os }})
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [windows-latest, ubuntu-latest]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Install dependencies
+        run: pip install -r requirements.txt
+      - name: Run test suite
+        run: pytest -q
+
+  artifact:
+    name: Build release zip
+    needs: [lint, test]
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Zip repo (exclude .git, caches, backups, databases)
+        shell: python
+        run: |
+          import pathlib, zipfile
+          root = pathlib.Path(".")
+          skip_dirs = {".git", "__pycache__", ".pytest_cache", "backups"}
+          with zipfile.ZipFile("focus-core-v1.1.0.zip", "w", zipfile.ZIP_DEFLATED) as z:
+              for p in sorted(root.rglob("*")):
+                  if not p.is_file():
+                      continue
+                  rel = p.relative_to(root)
+                  if rel.name == "focus-core-v1.1.0.zip":
+                      continue
+                  if any(part in skip_dirs for part in rel.parts):
+                      continue
+                  if rel.suffix in {".db", ".pyc"}:
+                      continue
+                  z.write(p, rel)
+      - name: Install dependencies (for smoke test)
+        run: pip install -r requirements.txt
+      - name: Smoke test — import the artifact
+        shell: python
+        run: |
+          import tempfile, zipfile, pathlib, subprocess, sys
+          tmp = pathlib.Path(tempfile.mkdtemp(prefix="fc-smoke-"))
+          with zipfile.ZipFile("focus-core-v1.1.0.zip") as z:
+              z.extractall(tmp)
+          r = subprocess.run(
+              [sys.executable, "-c", "import dashboard.app; print('smoke ok')"],
+              cwd=tmp, capture_output=True, text=True, timeout=120)
+          print(r.stdout, r.stderr)
+          assert r.returncode == 0 and "smoke ok" in r.stdout, "smoke import failed"
+          print("SMOKE OK")
+      - name: Upload release zip
+        uses: actions/upload-artifact@v4
+        with:
+          name: focus-core-v1.1.0
+          path: focus-core-v1.1.0.zip

@@ -1,0 +1,21 @@
+============================= test session starts ==============================
+platform linux -- Python 3.12.3, pytest-9.1.1, pluggy-1.6.0
+rootdir: /home/hatch/workspace/focus-core
+collected 170 items
+
+tests/test_backup_hardening.py ..............                            [  8%]
+tests/test_focus.py ..........................                           [ 23%]
+tests/test_goals_alerts.py ...............                               [ 32%]
+tests/test_phase4.py ....................                                [ 44%]
+tests/test_phase5.py .................................                   [ 63%]
+tests/test_scoring.py .................                                  [ 73%]
+tests/test_security_baseline.py ........................................ [ 97%]
+.....                                                                    [100%]
+
+=============================== warnings summary ===============================
+tests/test_phase5.py::test_tray_icon_image_draws_in_code
+  /home/hatch/workspace/focus-core/tests/test_phase5.py:457: DeprecationWarning: Image.Image.getdata is deprecated and will be removed in Pillow 14 (2027-10-15). Use get_flattened_data instead.
+    assert any(px[3] > 0 for px in img.getdata())
+
+-- Docs: https://docs.pytest.org/en/stable/how-to/capture-warnings.html
+======================== 170 passed, 1 warning in 2.59s ========================

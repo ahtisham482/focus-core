@@ -420,7 +420,7 @@ def test_summary_mixes_naive_session_with_aware_events(tmp_path):
     db = _db(tmp_path)
     day = date(2026, 9, 25)
     now = datetime(2026, 9, 25, 10, 0, 0)  # naive local, like the real code
-    session = focus_mod.start_session("Mixed tz", 60, db_path=db, now=now)
+    focus_mod.start_session("Mixed tz", 60, db_path=db, now=now)
     store.save_events(
         "2026-09-25",
         [_aware_event(day, 10, 0, 30, "code", 2),
