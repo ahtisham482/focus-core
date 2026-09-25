@@ -2,6 +2,16 @@
 
 All notable changes, newest first. Dates are PKT.
 
+## [v1.1.3] — 2026-09-25
+Test-isolation fix found by the on-PC loop.
+- `test_home_pulse_band_colors` now stubs the ActivityWatch refresh, so it
+  passes on a real PC (where ActivityWatch is live) as well as in CI.
+
+## [v1.1.2] — 2026-09-25
+Small fixes from real usage.
+- The security block page (403) now explains in plain language what happened
+  and links back Home, instead of jargon about loopback addresses.
+
 ## [v1.1.1] — 2026-09-25
 Bug fix from real usage: starting a focus session did not start blocking.
 - The blocking guard now starts automatically whenever a focus session is

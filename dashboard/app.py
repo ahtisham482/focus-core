@@ -300,6 +300,17 @@ def _origin_is_loopback(origin_value):
     return _host_is_loopback(parts.hostname or "")
 
 
+_BLOCKED_PAGE = (
+    "<h1>Focus Core</h1>"
+    "<p><b>Forbidden:</b> this action was blocked because the request did "
+    "not come from Focus Core itself.</p>"
+    "<p>Please go back and use the button on the Focus Core page. If you "
+    "clicked a button inside Focus Core and still see this, a browser "
+    "extension may be changing the request -- try the Focus Core desktop "
+    "window instead.</p>"
+    "<p><a href='/'>Back to Home</a></p>")
+
+
 @app.before_request
 def _reject_loopback_csrf():
     # Only state-changing requests need protection; GET/HEAD/OPTIONS
@@ -307,10 +318,10 @@ def _reject_loopback_csrf():
     if request.method not in _MUTATING_METHODS:
         return None
     if not _host_is_loopback(request.headers.get("Host", "")):
-        return ("Forbidden: Host header is not a loopback address.", 403)
+        return (_BLOCKED_PAGE, 403)
     origin = request.headers.get("Origin")
     if origin and not _origin_is_loopback(origin):
-        return ("Forbidden: Origin is not a loopback address.", 403)
+        return (_BLOCKED_PAGE, 403)
     return None
 
 

@@ -520,6 +520,10 @@ def test_home_pulse_band_colors(monkeypatch, env, tmp_path):
     monkeypatch.setattr(store, "DEFAULT_DB_PATH", db)
     monkeypatch.setattr(dash_app, "ONBOARDED_FLAG", flag)
     monkeypatch.setattr(backup, "newest_backup", lambda dest_dir=None: None)
+    # Hermetic: the home page refreshes today's data from ActivityWatch on
+    # every load; stub that out so the seeded day survives. (On a real PC
+    # ActivityWatch is live and would overwrite the seed with real data.)
+    monkeypatch.setattr(dash_app, "run_day", lambda day: None)
     day = datetime.now().date().isoformat()
     # All +2: Pulse 100 -> green band.
     _seed_day(db, day, [_event(day + "T09:00:00", 3600)])
