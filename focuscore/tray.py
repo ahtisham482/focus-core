@@ -126,8 +126,14 @@ class TrayApp:
 
     def __init__(self, db_path=None):
         self.db_path = db_path
+        self.db_path = db_path
         self.server_proc = None
         self.icon = None
+        # Native window (pywebview) when available; None in browser fallback.
+        self.window = None
+        # True only while the tray menu's Quit action is running, so the
+        # window's closing handler can tell "hide to tray" from "really quit".
+        self._quitting = False
 
     # -- server lifecycle -------------------------------------------------
     def ensure_server(self):
@@ -160,6 +166,23 @@ class TrayApp:
                 pass
 
     def on_open(self, icon=None, item=None):
+        from . import desktop, launcher
+        window = self.window
+        if window is not None:
+            # Native window already exists: just bring it back.
+            try:
+                window.show()
+                window.restore()
+            except Exception:  # noqa: BLE001
+                pass
+            return
+        if desktop.available():
+            # Should not normally happen (run() creates the window), but
+            # recover gracefully instead of doing nothing.
+            self.window = self._create_window(desktop, launcher)
+            if self.window is not None:
+                self.window.events.closing += self._on_window_closing
+                return
         open_app(self.db_path)
 
     def on_quick_session(self, icon=None, item=None):
@@ -177,10 +200,35 @@ class TrayApp:
         else:
             self._notify("Backup saved: %s" % result)
 
+    def _on_window_closing(self):
+        """pywebview closing event: hide to the tray on user close.
+
+        Returns True to allow the close (real quit), False to cancel it.
+        """
+        if self._quitting:
+            return True
+        from . import desktop
+        desktop.hide_window(self.window)
+        return False
+
     def on_quit(self, icon=None, item=None):
-        self.stop_server()
-        if self.icon is not None:
-            self.icon.stop()
+        self._quitting = True
+        window, self.window = self.window, None
+        if window is not None:
+            # Native mode: destroying the window ends start_loop(); run()
+            # then stops the server and the tray icon.
+            try:
+                window.destroy()
+            except Exception:  # noqa: BLE001
+                pass
+        else:
+            # Browser-fallback mode: clean up directly, as before.
+            self.stop_server()
+            if self.icon is not None:
+                try:
+                    self.icon.stop()
+                except Exception:  # noqa: BLE001
+                    pass
 
     def build_menu(self):
         import pystray
@@ -196,17 +244,46 @@ class TrayApp:
             pystray.MenuItem("Quit", self.on_quit),
         )
 
+    def _create_window(self, desktop, launcher):
+        """Create the native window, or None when it is unavailable.
+
+        Never raises: pywebview missing, or unusable (e.g. WebView2 not
+        installed), simply means the browser fallback.
+        """
+        if not desktop.available():
+            return None
+        try:
+            return desktop.create_window(launcher.APP_URL)
+        except Exception:  # noqa: BLE001 -- fall back to the browser window
+            return None
+
     def run(self):
         """Start server (if needed), open the window, run the tray loop."""
         import pystray
-        from . import launcher
+        from . import launcher, desktop
 
         self.ensure_server()
         launcher.maybe_backup()
-        open_app(self.db_path)
         self.icon = pystray.Icon("focus-core", make_icon_image(),
                                  "Focus Core", self.build_menu())
-        self.icon.run()
+        self.window = self._create_window(desktop, launcher)
+        if self.window is None:
+            # Browser fallback: unchanged behavior.
+            open_app(self.db_path)
+            self.icon.run()
+            return
+        # Native window: tray runs detached, GUI loop owns the main thread.
+        self.window.events.closing += self._on_window_closing
+        self.icon.run_detached()
+        try:
+            desktop.start_loop()  # blocks until the window is destroyed
+        finally:
+            self.window = None
+            self.stop_server()
+            try:
+                self.icon.stop()
+            except Exception:  # noqa: BLE001
+                pass
 
 
 def run(db_path=None):

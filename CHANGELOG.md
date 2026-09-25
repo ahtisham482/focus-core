@@ -2,6 +2,17 @@
 
 All notable changes, newest first. Dates are PKT.
 
+## [v1.2.0] — 2026-09-25
+Sprint 2, Phase 1: the app now opens in a real native desktop window
+(pywebview, backed by WebView2 on Windows) instead of a browser --app
+window. Own titled window, taskbar entry, minimize/restore, no address
+bar. Closing the window hides it to the tray (the app keeps running);
+Quit is still in the tray menu. If pywebview is missing or unusable,
+the app falls back to the previous browser window, so it always works.
+- New module `focuscore/desktop.py` (window config, cancellable
+  close-to-tray, main-thread GUI loop); tray owns the window + server.
+- `pywebview>=5.0` added to requirements (installed by setup.bat).
+
 ## [v1.1.3] — 2026-09-25
 Test-isolation fix found by the on-PC loop.
 - `test_home_pulse_band_colors` now stubs the ActivityWatch refresh, so it
