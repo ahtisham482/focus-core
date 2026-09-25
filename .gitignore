@@ -1,0 +1,19 @@
+# Personal data -- never commit the database or its backups.
+focuscore.db
+focuscore.db.*
+*.bak*
+backups/
+.pre-restore-*
+
+# First-run flag is per-machine.
+.onboarded
+
+# Python caches.
+__pycache__/
+*.py[cod]
+
+# Test / build leftovers.
+.pytest_cache/
+*.egg-info/
+dist/
+build/

@@ -1,0 +1,6 @@
+flask>=3.0
+requests>=2.2
+pytest>=8.0
+plyer>=2.0
+pystray>=0.19
+Pillow>=10.0
