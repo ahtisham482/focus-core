@@ -4,7 +4,9 @@
 ;   ISCC.exe installer\installer.iss /DAppVersion="1.3.0"
 ; AppVersion can also be edited below; the /D flag overrides it.
 
+#ifndef AppVersion
 #define AppVersion "0.0.0-dev"
+#endif
 
 [Setup]
 AppId={{C7A3F2E1-8B4D-4F6A-9E2C-1D5A7B3F9E2C4}
