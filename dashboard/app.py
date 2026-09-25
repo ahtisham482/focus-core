@@ -27,6 +27,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
 from flask import Flask, Response, abort, redirect, request  # noqa: E402
 
+from focuscore import paths
 from focuscore import store  # noqa: E402
 from focuscore.home import pulse_band as _pulse_band  # noqa: E402
 from focuscore.ingest import ActivityWatchError  # noqa: E402
@@ -36,8 +37,7 @@ from focuscore.taxonomy import host_of  # noqa: E402
 
 app = Flask(__name__)
 
-PROJECT_ROOT = Path(__file__).resolve().parent.parent
-ONBOARDED_FLAG = PROJECT_ROOT / ".onboarded"
+ONBOARDED_FLAG = paths.onboarded_flag()
 
 # Top navigation: (key, label, href). "Review" jumps to today's
 # uncategorized activities when a day is known.

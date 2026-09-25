@@ -61,11 +61,10 @@ import warnings
 from datetime import datetime
 from pathlib import Path
 
+from . import paths
 from . import store
 
 logger = logging.getLogger(__name__)
-
-PROJECT_ROOT = Path(__file__).resolve().parent.parent
 
 BACKUP_NAME_PATTERN = re.compile(r"^focuscore-\d{8}-\d{6}(-\d+)?\.db$")
 BACKUP_FOLDER_NAME = "Focus Core Backups"
@@ -103,7 +102,7 @@ def backup_dir(dest_dir=None):
     else:
         drive = find_drive_folder()
         folder = (drive / BACKUP_FOLDER_NAME) if drive else (
-            PROJECT_ROOT / "backups")
+            paths.backups_dir())
     folder.mkdir(parents=True, exist_ok=True)
     return folder
 

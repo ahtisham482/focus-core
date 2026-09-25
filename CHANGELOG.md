@@ -2,16 +2,30 @@
 
 All notable changes, newest first. Dates are PKT.
 
-## [v1.2.0] — 2026-09-25
-Sprint 2, Phase 1: the app now opens in a real native desktop window
-(pywebview, backed by WebView2 on Windows) instead of a browser --app
-window. Own titled window, taskbar entry, minimize/restore, no address
-bar. Closing the window hides it to the tray (the app keeps running);
-Quit is still in the tray menu. If pywebview is missing or unusable,
-the app falls back to the previous browser window, so it always works.
-- New module `focuscore/desktop.py` (window config, cancellable
-  close-to-tray, main-thread GUI loop); tray owns the window + server.
-- `pywebview>=5.0` added to requirements (installed by setup.bat).
+## [v1.3.0] — 2026-09-26 (in progress)
+Sprint 2, Phase 2: zero-setup installer for strangers.
+- New `focuscore/paths.py`: single place that decides where user data
+  lives. Installed copies (`.installed` marker) keep the database,
+  backups, and flags in `%LOCALAPPDATA%\Focus Core`; portable/dev
+  installs work exactly as before, and a database already sitting next
+  to the code is always honored (grandfathered).
+- New `installer/`: `build.py` stages embedded Python 3.12 + pip + all
+  runtime deps + app code + WebView2 bootstrapper + icon.ico;
+  `installer.iss` (Inno Setup 6) compiles it to
+  `FocusCore-Setup-<version>.exe` — per-user install, no admin/UAC,
+  desktop icon, optional start-with-Windows, and uninstall never
+  deletes user data. `README.md` documents local + CI builds.
+- New `.github/workflows/installer.yml`: pushing a tag like `v1.3.0`
+  builds the installer on Windows CI and attaches it to the GitHub
+  Release; manual runs keep it as an artifact.
+
+## [v1.2.0] — 2026-09-25 (DEPLOYED)
+Sprint 2, Phase 1 approved by Ahtisham 2026-09-25 night: native window via
+pywebview. Source commit d57ea5a (189/189 tests, ruff E,F clean).
+PC deploy verified by operator loop 2026-09-25 ~23:50: 189/189 pytest on PC,
+commit 7d44686 pushed to origin/main, app running. Visual check PASS: real
+"Focus Core" pywebview/WebView2 window (no browser chrome), X hides to tray
+(tray icon stays alive), tray "Open Focus Core" brings the window back.
 
 ## [v1.1.3] — 2026-09-25
 Test-isolation fix found by the on-PC loop.

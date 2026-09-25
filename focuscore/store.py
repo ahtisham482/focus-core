@@ -1,14 +1,15 @@
-"""SQLite store. The database file lives next to the code (focuscore.db).
+"""SQLite store. The database location is resolved by focuscore.paths
+(portable: next to the code; installed: per-user data folder).
 
 All paths are derived from this file's location, so the project works
 wherever the folder is placed -- no absolute paths anywhere.
 """
 
 import sqlite3
-from pathlib import Path
 
-PROJECT_ROOT = Path(__file__).resolve().parent.parent
-DEFAULT_DB_PATH = PROJECT_ROOT / "focuscore.db"
+from . import paths
+
+DEFAULT_DB_PATH = paths.db_path()
 
 SCHEMA = """
 CREATE TABLE IF NOT EXISTS activities (

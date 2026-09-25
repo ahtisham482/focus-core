@@ -138,6 +138,10 @@ def open_app_window(url=APP_URL):
 
 
 def main():
+    # Make sure the data folder exists before anything writes to it
+    # (matters for installed copies, where it lives outside the app).
+    from . import paths
+    paths.ensure_data_dir()
     # Prefer the tray app when its dependencies are installed: it owns
     # the server process and adds quick actions.
     try:

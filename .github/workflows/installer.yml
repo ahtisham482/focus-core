@@ -1,0 +1,73 @@
+# Builds the zero-setup Windows installer (Sprint 2, Phase 2).
+#
+# Triggers:
+#   - push a tag like v1.3.0  -> builds + attaches FocusCore-Setup-*.exe
+#                                to the GitHub Release
+#   - manual dispatch          -> builds, keeps the exe as an artifact
+
+name: Build installer
+
+on:
+  push:
+    tags:
+      - "v*"
+  workflow_dispatch:
+    inputs:
+      version:
+        description: "Version number, e.g. 1.3.0"
+        required: true
+
+permissions:
+  contents: write  # needed to attach the exe to a release
+
+jobs:
+  build:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Work out the version
+        id: ver
+        shell: pwsh
+        run: |
+          if ("${{ github.ref_type }}" -eq "tag") {
+            $v = "${{ github.ref_name }}".TrimStart("v")
+          } else {
+            $v = "${{ inputs.version }}"
+          }
+          if (-not $v) { throw "No version given" }
+          "VERSION=$v" >> $env:GITHUB_ENV
+          Write-Host "Building installer for version $v"
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Install build deps
+        run: pip install pillow
+
+      - name: Stage the app (embedded Python + code)
+        run: python installer/build.py --version "${{ env.VERSION }}"
+
+      - name: Install Inno Setup
+        run: choco install innosetup --no-progress -y
+
+      - name: Compile the installer
+        shell: pwsh
+        run: |
+          & "C:\Program Files (x86)\Inno Setup 6\ISCC.exe" `
+            installer\installer.iss /DAppVersion="${{ env.VERSION }}"
+          Get-ChildItem installer\FocusCore-Setup-*.exe
+
+      - name: Upload installer artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: FocusCore-Setup-${{ env.VERSION }}
+          path: installer/FocusCore-Setup-*.exe
+
+      - name: Attach to GitHub Release
+        if: github.ref_type == 'tag'
+        uses: softprops/action-gh-release@v2
+        with:
+          files: installer/FocusCore-Setup-*.exe
+          generate_release_notes: true
