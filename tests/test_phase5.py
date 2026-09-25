@@ -360,7 +360,7 @@ def test_port_open_and_wait_for_port():
     assert not launcher.port_open(port=port)
     server = socket.socket()
     server.bind(("127.0.0.1", port))
-    server.listen(1)
+    server.listen(5)
     try:
         assert launcher.port_open(port=port)
         assert launcher.wait_for_port(port=port, timeout=2)
