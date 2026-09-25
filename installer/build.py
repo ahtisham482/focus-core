@@ -125,6 +125,10 @@ def main():
     run_embedded_python(python_dir, str(get_pip))
     get_pip.unlink()
 
+    # The embeddable Python ships without setuptools/wheel; packages that
+    # have no wheel for this Python need them at install time.
+    run_embedded_python(python_dir, "-m", "pip", "install", "--quiet", "setuptools", "wheel")
+
     # Install runtime deps (skip dev-only packages).
     req_src = repo_root / "requirements.txt"
     req_tmp = staging / "_requirements.txt"
