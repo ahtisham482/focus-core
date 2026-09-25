@@ -120,6 +120,18 @@ def main():
 
     enable_site_packages(python_dir)
 
+    # Add the app root to sys.path so focuscore/dashboard are importable.
+    # The embedded .pth only enables site-packages by default; without this
+    # line every new install silently fails to import our packages.
+    pth_files = sorted(python_dir.glob("python3*._pth"))
+    if pth_files:
+        pth = pth_files[0]
+        with open(pth, 'a') as f:
+            f.write('..\n')
+        print("Patched %s (added app root '..' to path)" % pth.name)
+    else:
+        print("WARNING: no ._pth file found — imports may fail in installed copy!")
+
     get_pip = staging / "_get-pip.py"
     download(GET_PIP_URL, get_pip)
     run_embedded_python(python_dir, str(get_pip))
