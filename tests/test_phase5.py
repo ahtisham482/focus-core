@@ -529,3 +529,74 @@ def test_home_pulse_band_colors(monkeypatch, env, tmp_path):
     _seed_day(db, day, [_event(day + "T09:00:00", 3600)])
     html = dash_app.app.test_client().get("/").data.decode()
     assert 'pulse good' in html
+
+
+# ------------------------------------------------- Phase 3: one-click ---
+
+def test_card_update_available(monkeypatch, env):
+    from focuscore import updater
+    db, bdir = env
+    day = "2026-09-24"
+    _seed_day(db, day, [_event(day + "T11:55:00", 300)])
+    now = _noon(day)
+    monkeypatch.setattr(updater, "read_cached_check", lambda: {
+        "status": "ok", "current": "1.3.0", "latest": "v1.4.0",
+        "update_available": True})
+    cards = _cards(db, now, bdir)
+    assert "update" in cards
+    assert "v1.4.0" in cards["update"]["title"]
+    assert cards["update"]["button_href"] == "/update"
+
+
+def test_card_update_hidden_when_up_to_date(monkeypatch, env):
+    from focuscore import updater
+    db, bdir = env
+    day = "2026-09-24"
+    _seed_day(db, day, [_event(day + "T11:55:00", 300)])
+    now = _noon(day)
+    monkeypatch.setattr(updater, "read_cached_check", lambda: {
+        "status": "ok", "current": "v1.4.0", "latest": "v1.4.0",
+        "update_available": False})
+    assert "update" not in _cards(db, now, bdir)
+
+
+def test_card_update_hidden_for_dev_copy(monkeypatch, env):
+    from focuscore import updater
+    db, bdir = env
+    day = "2026-09-24"
+    _seed_day(db, day, [_event(day + "T11:55:00", 300)])
+    now = _noon(day)
+    monkeypatch.setattr(updater, "read_cached_check", lambda: None)
+    assert "update" not in _cards(db, now, bdir)
+
+
+def test_tray_menu_has_check_for_updates():
+    pytest.importorskip("pystray")
+    app = tray.TrayApp()
+    labels = [getattr(i, "text", "") for i in app.build_menu()
+              if isinstance(getattr(i, "text", ""), str)]
+    assert "Check for updates..." in labels
+
+
+def test_tray_apply_pending_update_spawns_and_quits(monkeypatch):
+    from focuscore import updater
+    spawned = []
+    monkeypatch.setattr(updater, "write_update_launcher",
+                        lambda exe: spawned.append(exe) or "C:\\T\\u.bat")
+
+    import subprocess
+    popped = []
+    class FakePopen:
+        def __init__(self, *args, **kwargs):
+            popped.append(args[0])
+    monkeypatch.setattr(subprocess, "Popen", FakePopen)
+
+    app = tray.TrayApp()
+    quit_called = []
+    monkeypatch.setattr(tray.TrayApp, "on_quit",
+                        lambda self: quit_called.append(True))
+    app._apply_pending_update({"installer": "C:\\T\\setup.exe",
+                               "version": "v1.4.0"})
+    assert spawned == ["C:\\T\\setup.exe"]
+    assert popped and "u.bat" in str(popped[0][-1])
+    assert quit_called == [True]

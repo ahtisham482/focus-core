@@ -185,6 +185,44 @@ class TrayApp:
                 return
         open_app(self.db_path)
 
+    def on_check_updates(self, icon=None, item=None):
+        import webbrowser
+        from . import launcher
+        webbrowser.open(launcher.APP_URL + "/update")
+
+    def _apply_pending_update(self, pending):
+        """Install a downloaded update, then quit so files can be replaced.
+
+        Called by the update watcher when the dashboard flags a pending
+        install. Spawns a small bat (waits a few seconds, runs the setup
+        silently, deletes itself) and then quits the app.
+        """
+        import subprocess
+        from . import launcher, updater
+        try:
+            bat = updater.write_update_launcher(pending["installer"])
+            subprocess.Popen(["cmd", "/c", str(bat)],
+                             stdout=subprocess.DEVNULL,
+                             stderr=subprocess.DEVNULL,
+                             **launcher._no_window_kwargs())
+        except Exception:  # noqa: BLE001 -- never break the tray on update
+            return
+        self.on_quit()
+
+    def _watch_for_update(self):
+        """Background: apply a pending one-click update when flagged."""
+        import time
+        from . import updater
+        while not self._quitting:
+            time.sleep(2)
+            try:
+                pending = updater.take_pending_install()
+            except Exception:  # noqa: BLE001
+                continue
+            if pending:
+                self._apply_pending_update(pending)
+                return
+
     def on_quick_session(self, icon=None, item=None):
         result = start_quick_session(self.db_path)
         if "error" in result:
@@ -241,6 +279,7 @@ class TrayApp:
                              None, enabled=False),
             pystray.Menu.SEPARATOR,
             pystray.MenuItem("Back up now", self.on_backup),
+            pystray.MenuItem("Check for updates...", self.on_check_updates),
             pystray.MenuItem("Quit", self.on_quit),
         )
 
@@ -260,10 +299,20 @@ class TrayApp:
     def run(self):
         """Start server (if needed), open the window, run the tray loop."""
         import pystray
-        from . import launcher, desktop
+        import threading
+        from . import launcher, desktop, updater
+
+        # Safety net: a pending one-click update that never got applied
+        # (e.g. the app was quit by hand right after clicking Update).
+        pending = updater.take_pending_install()
+        if pending:
+            self._apply_pending_update(pending)
+            return
 
         self.ensure_server()
         launcher.maybe_backup()
+        threading.Thread(target=self._watch_for_update, daemon=True,
+                         name="focuscore-update-watch").start()
         self.icon = pystray.Icon("focus-core", make_icon_image(),
                                  "Focus Core", self.build_menu())
         self.window = self._create_window(desktop, launcher)

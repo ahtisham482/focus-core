@@ -4,8 +4,11 @@
 ;   ISCC.exe installer\installer.iss /DAppVersion="1.3.0"
 ; AppVersion can also be edited below; the /D flag overrides it.
 
+; AppVersion is passed on the ISCC command line (/DAppVersion="1.3.0").
+; The #ifndef guard matters: a plain #define here would silently beat the
+; command-line value (Inno gives the script the last word).
 #ifndef AppVersion
-#define AppVersion "0.0.0-dev"
+  #define AppVersion "0.0.0-dev"
 #endif
 
 [Setup]
@@ -47,6 +50,8 @@ Name: "{userstartup}\Focus Core"; Filename: "{app}\python\pythonw.exe"; Paramete
 Filename: "{app}\webview2bootstrapper.exe"; Parameters: "/silent /install"; StatusMsg: "Installing the WebView2 window component..."; Flags: waituntilterminated; Check: NeedsWebView2
 ; Offer to start the app at the end of setup.
 Filename: "{app}\python\pythonw.exe"; Parameters: "-m focuscore.launcher"; WorkingDir: "{app}"; Description: "Launch Focus Core now"; Flags: nowait postinstall skipifsilent
+; One-click updates run this installer silently; reopen the app afterwards.
+Filename: "{app}\python\pythonw.exe"; Parameters: "-m focuscore.launcher"; WorkingDir: "{app}"; Flags: nowait skipifnotsilent
 
 [UninstallDelete]
 ; Remove the program files. The user's data (%LOCALAPPDATA%\Focus Core)

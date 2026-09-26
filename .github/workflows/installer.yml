@@ -47,7 +47,7 @@ jobs:
         run: pip install pillow
 
       - name: Stage the app (embedded Python + code)
-        run: python installer/build.py --version "${{ env.VERSION }}"
+        run: python installer/build.py --version "${{ env.VERSION }}" --repo "${{ github.repository }}"
 
       - name: Install Inno Setup
         run: choco install innosetup --no-progress -y

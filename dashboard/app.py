@@ -1496,7 +1496,116 @@ def backup_restore():
     return layout("Backup restored", body, active="backup")
 
 
-# -------------------------------------------------------------- report ---
+# -------------------------------------------------------------- update ---
+
+@app.route("/update")
+def update_page():
+    from focuscore import updater as updater_mod
+
+    refresh = request.args.get("refresh") == "1"
+    status = updater_mod.check_for_update(force=refresh)
+
+    if status["status"] == "dev-copy":
+        body = (
+            "<div class='card'><h3>Updates</h3>"
+            "<p>This is a developer copy of Focus Core, so it doesn't "
+            "update itself. Pull the newest code (or grab the newest zip) "
+            "the way you usually do.</p>"
+            "<p class='note'>One-click updates are for installed copies "
+            "only.</p></div>")
+        return layout("Updates", body)
+
+    if status["status"] == "error":
+        body = (
+            "<div class='card'><h3>Updates</h3>"
+            "<p><b>Couldn't check for updates:</b> %s</p>"
+            "<p class='note'>This usually means no internet, or the releases "
+            "page isn't public. Nothing changed -- you're still on %s.</p>"
+            "<p><a class='btn' href='/update?refresh=1'>Check again</a></p>"
+            "</div>"
+            % (escape(status["error"]), escape(status["current"])))
+        return layout("Updates", body)
+
+    head = ("<div class='card'><h3>Updates</h3>"
+            "<p>You're on <b>%s</b>.</p>"
+            % escape(status["current"]))
+    if not status["update_available"]:
+        body = (head +
+                "<p><b>You're up to date.</b> Focus Core checks once a day "
+                "by itself.</p>"
+                "<p><a class='btn' href='/update?refresh=1'>Check again</a>"
+                "</p></div>")
+        return layout("Updates", body)
+
+    body = (
+        head +
+        "<p><b>Version %s is available.</b></p>"
+        "<form method='post' action='/update/start' onsubmit=\"return "
+        "confirm('Update to %s now? A safety backup is made first, then "
+        "Focus Core closes, updates, and reopens by itself.');\">"
+        "<button type='submit'>Update to %s now</button></form>"
+        "<p class='note'>Your data is never touched by the update -- and a "
+        "safety backup is made first anyway. The download is about 25 MB."
+        "</p></div>"
+        % (escape(status["latest"]), escape(status["latest"]),
+           escape(status["latest"])))
+    return layout("Updates", body)
+
+
+@app.route("/update/start", methods=["POST"])
+def update_start():
+    import tempfile
+    from focuscore import backup as backup_mod
+    from focuscore import updater as updater_mod
+
+    status = updater_mod.check_for_update(force=True)
+    if status["status"] != "ok" or not status["update_available"]:
+        return layout(
+            "Updates",
+            "<div class='card'><p><b>Nothing to update.</b> "
+            "<a href='/update'>Back</a></p></div>"), 400
+
+    active = store.get_active_session()
+    if active:
+        return layout(
+            "Updates",
+            "<div class='card'><p><b>Can't update right now:</b> a focus "
+            "session (%s) is in progress. Finish or stop it first, then "
+            "come back.</p><p><a href='/update'>Back</a></p></div>"
+            % escape(active.get("label") or "untitled")), 400
+
+    try:
+        backup_mod.create_backup()
+    except Exception as exc:  # noqa: BLE001 -- backup must not be skipped
+        return layout(
+            "Updates",
+            "<div class='card'><p><b>Update stopped:</b> the safety backup "
+            "failed (%s). Nothing was downloaded.</p>"
+            "<p><a href='/update'>Back</a></p></div>"
+            % escape(str(exc))), 500
+
+    asset = status["asset"]
+    dest = Path(tempfile.gettempdir()) / asset["name"]
+    try:
+        updater_mod.download_installer(asset["url"], dest,
+                                       asset["size"])
+    except updater_mod.UpdateError as exc:
+        return layout(
+            "Updates",
+            "<div class='card'><p><b>Update stopped:</b> %s Nothing was "
+            "changed.</p><p><a href='/update'>Back</a></p></div>"
+            % escape(str(exc))), 500
+
+    updater_mod.write_pending_install(dest, status["latest"])
+    body = (
+        "<div class='card'><h3>Updating to %s...</h3>"
+        "<p>The new version is downloaded and a safety backup is made. "
+        "Focus Core will now close, install the update, and reopen by "
+        "itself -- about a minute.</p>"
+        "<p class='note'>If it doesn't reopen by itself, start it from "
+        "the desktop icon as usual.</p></div>"
+        % escape(status["latest"]))
+    return layout("Updating", body)
 
 @app.route("/report")
 def report_page():

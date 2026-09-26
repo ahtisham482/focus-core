@@ -24,6 +24,7 @@ Only the standard library is used, except Pillow for the icon step.
 """
 
 import argparse
+import json
 import shutil
 import subprocess
 import sys
@@ -45,7 +46,14 @@ def download(url, dest):
 
 
 def enable_site_packages(python_dir):
-    """Uncomment `import site` in python3XX._pth (disabled by default)."""
+    """Uncomment `import site` in python3XX._pth and add the app root.
+
+    The embeddable Python only sees its own folder by default, but the
+    app code (focuscore/, dashboard/) lives one level above it, so we
+    append `..` (relative to the ._pth file) to sys.path. Without this,
+    `-m focuscore.launcher` fails with "No module named focuscore".
+    (Mirrors PC commit 1225f0d, found during the v1.3.0 install test.)
+    """
     matches = sorted(python_dir.glob("python3*._pth"))
     if not matches:
         raise RuntimeError("No python3*._pth found in %s" % python_dir)
@@ -62,8 +70,9 @@ def enable_site_packages(python_dir):
             out.append(line)
     if not changed:
         raise RuntimeError("Could not find '#import site' in %s" % pth)
+    out.append("..\n")
     pth.write_text("".join(out))
-    print("Patched %s (enabled import site)" % pth.name)
+    print("Patched %s (enabled import site, added app root)" % pth.name)
 
 
 def run_embedded_python(python_dir, *args):
@@ -97,10 +106,14 @@ def main():
                              % DEFAULT_PYTHON_VERSION)
     parser.add_argument("--staging", default=None,
                         help="Staging dir (default installer/staging)")
+    parser.add_argument("--repo", default="",
+                        help="GitHub repo slug for updates, e.g. owner/name "
+                             "(enables one-click updates; empty disables)")
     args = parser.parse_args()
 
     repo_root = Path(__file__).resolve().parent.parent
-    staging = Path(args.staging) if args.staging else repo_root / "installer" / "staging"
+    staging = (Path(args.staging) if args.staging
+               else repo_root / "installer" / "staging")
     python_dir = staging / "python"
 
     if staging.exists():
@@ -120,18 +133,6 @@ def main():
 
     enable_site_packages(python_dir)
 
-    # Add the app root to sys.path so focuscore/dashboard are importable.
-    # The embedded .pth only enables site-packages by default; without this
-    # line every new install silently fails to import our packages.
-    pth_files = sorted(python_dir.glob("python3*._pth"))
-    if pth_files:
-        pth = pth_files[0]
-        with open(pth, 'a') as f:
-            f.write('..\n')
-        print("Patched %s (added app root '..' to path)" % pth.name)
-    else:
-        print("WARNING: no ._pth file found — imports may fail in installed copy!")
-
     get_pip = staging / "_get-pip.py"
     download(GET_PIP_URL, get_pip)
     run_embedded_python(python_dir, str(get_pip))
@@ -139,7 +140,8 @@ def main():
 
     # The embeddable Python ships without setuptools/wheel; packages that
     # have no wheel for this Python need them at install time.
-    run_embedded_python(python_dir, "-m", "pip", "install", "--quiet", "setuptools", "wheel")
+    run_embedded_python(python_dir, "-m", "pip", "install", "--quiet",
+                        "setuptools", "wheel")
 
     # Install runtime deps (skip dev-only packages).
     req_src = repo_root / "requirements.txt"
@@ -162,6 +164,13 @@ def main():
     (staging / ".installed").write_text(
         "Focus Core %s -- installed copy; user data lives in the per-user "
         "data folder (see focuscore.paths).\n" % args.version)
+
+    # Stamp the release source + version so installed copies can check
+    # GitHub Releases for one-click updates (focuscore/updater.py).
+    if args.repo:
+        info = {"repo": args.repo, "version": args.version}
+        (staging / "update-info.json").write_text(json.dumps(info) + "\n")
+        print("Wrote update-info.json (repo %s)" % args.repo)
 
     download(WEBVIEW2_BOOTSTRAPPER_URL,
              staging / "webview2bootstrapper.exe")

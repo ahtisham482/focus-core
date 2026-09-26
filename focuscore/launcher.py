@@ -137,11 +137,25 @@ def open_app_window(url=APP_URL):
     return "browser"
 
 
+def _background_update_check():
+    """Quietly check for a newer release once per day. Never raises."""
+    try:
+        from . import updater
+        updater.check_for_update()
+    except Exception:  # noqa: BLE001 -- updates must never break launch
+        pass
+
+
 def main():
     # Make sure the data folder exists before anything writes to it
     # (matters for installed copies, where it lives outside the app).
     from . import paths
     paths.ensure_data_dir()
+    # Check for updates in the background; the home page shows a card
+    # when a newer release is waiting.
+    import threading
+    threading.Thread(target=_background_update_check, daemon=True,
+                     name="focuscore-update-check").start()
     # Prefer the tray app when its dependencies are installed: it owns
     # the server process and adds quick actions.
     try:

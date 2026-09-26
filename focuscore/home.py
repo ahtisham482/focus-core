@@ -11,7 +11,7 @@ with exactly one button, so the user always knows the single next step.
 
 from datetime import datetime, timedelta
 
-from . import backup, focus, goals as goals_mod, store
+from . import backup, focus, goals as goals_mod, store, updater
 
 # Pulse color bands shown on the home page (0-100 scale).
 PULSE_GOOD = 60  # green at/above this
@@ -161,6 +161,21 @@ def attention_cards(db_path=None, now=None, backup_dest_dir=None):
                 "button_text": "Open Backup",
                 "button_href": "/backup",
             })
+
+    # 7. A newer version is waiting (installed copies only). Reads the
+    # cached check only -- never touches the network from here.
+    update = updater.read_cached_check()
+    if update and update.get("status") == "ok" \
+            and update.get("update_available"):
+        cards.append({
+            "code": "update",
+            "title": "Focus Core %s is available" % update["latest"],
+            "detail": "You're on %s. One click updates the app; your data "
+                      "is backed up first and never touched."
+                      % update["current"],
+            "button_text": "Update now",
+            "button_href": "/update",
+        })
 
     return cards
 

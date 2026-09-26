@@ -2,22 +2,38 @@
 
 All notable changes, newest first. Dates are PKT.
 
-## [v1.3.0] — 2026-09-26 (in progress)
-Sprint 2, Phase 2: zero-setup installer for strangers.
-- New `focuscore/paths.py`: single place that decides where user data
-  lives. Installed copies (`.installed` marker) keep the database,
-  backups, and flags in `%LOCALAPPDATA%\Focus Core`; portable/dev
-  installs work exactly as before, and a database already sitting next
-  to the code is always honored (grandfathered).
-- New `installer/`: `build.py` stages embedded Python 3.12 + pip + all
-  runtime deps + app code + WebView2 bootstrapper + icon.ico;
-  `installer.iss` (Inno Setup 6) compiles it to
-  `FocusCore-Setup-<version>.exe` — per-user install, no admin/UAC,
-  desktop icon, optional start-with-Windows, and uninstall never
-  deletes user data. `README.md` documents local + CI builds.
-- New `.github/workflows/installer.yml`: pushing a tag like `v1.3.0`
-  builds the installer on Windows CI and attaches it to the GitHub
-  Release; manual runs keep it as an artifact.
+## [v1.4.0] — 2026-09-26 (in progress)
+Sprint 2, Phase 3: one-click updates for installed copies.
+- New `focuscore/updater.py`: checks the GitHub Releases API for a newer
+  version (result cached a day, checked in a background thread at startup
+  so launch never blocks), downloads the new `FocusCore-Setup-<ver>.exe`
+  and verifies its size.
+- New `/update` dashboard page: current version, check status, and an
+  "Update now" button. The home page shows an attention card when an
+  update is waiting; the tray menu gains "Check for updates...".
+- Update flow: safety backup first, then download; the dashboard flags a
+  pending install and the tray's watcher thread spawns the installer
+  silently and quits the app; the installer upgrades in place and reopens
+  the app (new `skipifnotsilent` `[Run]` entry in installer.iss).
+  Refuses to update while a focus session is active.
+- `installer/build.py --repo owner/name` stamps `update-info.json`
+  (repo + version) into the installer; CI passes
+  `${{ github.repository }}`. Portable/dev copies don't self-update --
+  the page says so plainly.
+- Note: GitHub's releases API answers without a login only for PUBLIC
+  repos. With a private repo the check fails gracefully ("couldn't
+  check for updates") and one-click updates stay dormant.
+
+## [v1.3.0] — 2026-09-26 (DEPLOYED)
+Sprint 2, Phase 2: zero-setup installer for strangers. Fully verified on
+the PC via the operator loop 2026-09-26: CI built FocusCore-Setup-1.3.0.exe
+from tag v1.3.0 and attached it to the GitHub Release; installed cleanly
+(desktop icon + Start Menu, fresh db in %LOCALAPPDATA%\Focus Core);
+uninstall removed the program but preserved user data; release cleaned.
+Two real bugs found and fixed during the cycle: (1) embedded Python had
+no setuptools/wheel (CI staging failed); (2) app root missing from
+python312._pth so focuscore wasn't importable (PC commit 1225f0d, mirrored
+in source). 194/194 tests.
 
 ## [v1.2.0] — 2026-09-25 (DEPLOYED)
 Sprint 2, Phase 1 approved by Ahtisham 2026-09-25 night: native window via
