@@ -8,6 +8,7 @@ formulas, so every expectation below is hand-checkable.
 import os
 import socket
 import sqlite3
+import sys
 from datetime import datetime, timedelta
 
 import pytest
@@ -571,6 +572,10 @@ def test_card_update_hidden_for_dev_copy(monkeypatch, env):
 
 
 def test_tray_menu_has_check_for_updates():
+    # Windows-only: pystray needs a real display, which headless Linux
+    # CI doesn't have.
+    if sys.platform != "win32":
+        pytest.skip("tray menu is Windows-only")
     pytest.importorskip("pystray")
     app = tray.TrayApp()
     labels = [getattr(i, "text", "") for i in app.build_menu()
