@@ -80,9 +80,16 @@ def _parse_day(value):
         return None
 
 
-def layout(title, body, day=None, refresh=300, active="home"):
+def layout(title, body, day=None, refresh=300, active="home", help_key=None):
     """Page shell: nav bar, shared stylesheet, footer. No inline CSS --
-    everything visual lives in dashboard/static/style.css (offline)."""
+    everything visual lives in dashboard/static/style.css (offline).
+
+    help_key selects the contextual /help/<key> article linked in the
+    footer. When omitted it is derived from the nav key (review -> the
+    activities article); pages outside the nav pass it explicitly, and
+    the help pages themselves use active="help" so the footer falls
+    back to the /help index.
+    """
     links = []
     for key, label, href in NAV_LINKS:
         url = href
@@ -91,9 +98,17 @@ def layout(title, body, day=None, refresh=300, active="home"):
         cls = " class='active'" if key == active else ""
         links.append("<a href='%s'%s>%s</a>" % (url, cls, label))
     nav = "<nav class='topnav'>" + "".join(links) + "</nav>"
+    if help_key is None:
+        help_key = {"home": "home", "timesheet": "timesheet",
+                    "report": "report", "coaching": "coaching",
+                    "focus": "focus", "goals": "goals", "alerts": "alerts",
+                    "backup": "backup", "review": "activities"}.get(active)
+    help_href = "/help/" + help_key if help_key else "/help"
     footer = (
         "<footer>Focus Core &middot; your data never leaves this PC "
-        "&middot; <a href='/welcome/restart'>Take the tour again</a></footer>")
+        "&middot; <a href='%s'>Help</a> "
+        "&middot; <a href='/welcome/restart'>Take the tour again</a></footer>"
+        % help_href)
     return (
         "<!doctype html><html><head><meta charset='utf-8'>"
         "<meta name='viewport' content='width=device-width, initial-scale=1'>"
@@ -205,7 +220,7 @@ def day_page(day):
                 "<p class='note'>Run <code>python -m focuscore.pipeline "
                 "--day %s</code> (add <code>--demo</code> to try it without "
                 "ActivityWatch).</p></div>" % day)
-        return layout("Day " + day, aw_note + empty, day)
+        return layout("Day " + day, aw_note + empty, day, help_key="day")
 
     cat_rows = "".join(
         "<tr><td>%s</td><td>%s (%+d)</td><td>%.2fh</td><td>%.1f%%</td></tr>"
@@ -245,7 +260,7 @@ def day_page(day):
            legend(summary["seconds_by_level"]), cat_rows, day, uncat_rows,
            _hours(summary["afk_seconds"]))
     )
-    return layout("Day " + day, body, day)
+    return layout("Day " + day, body, day, help_key="day")
 
 
 def _category_score(name, _seconds):
@@ -513,7 +528,7 @@ def welcome():
         "<div class='big-emoji'>%s</div><h2>%s</h2><p>%s</p>%s%s%s</div>"
         % (dots, info["emoji"], escape(info["title"]),
            escape(info["text"]), check_html, extra_html, action))
-    return layout("Welcome", body, refresh=3600)
+    return layout("Welcome", body, refresh=3600, help_key="welcome")
 
 
 @app.route("/setup/activitywatch")
@@ -526,7 +541,29 @@ def setup_activitywatch():
     aw_status = aw_mod.server_status()
     aw_state = aw_mod.detection_state(status=aw_status)
     body = ob_mod.setup_page_html(aw_state, version=aw_status.get("version"))
-    return layout("Set up ActivityWatch", body, active="home")
+    return layout("Set up ActivityWatch", body, active="home",
+                  help_key="setup")
+
+
+@app.route("/help")
+def help_index():
+    """Index of all in-app help articles."""
+    from focuscore import help as help_mod
+    return layout("Help", help_mod.index_html(), active="help")
+
+
+@app.route("/help/<key>")
+def help_article(key):
+    """One help article. Unknown keys show the index with a short note."""
+    from focuscore import help as help_mod
+    article = help_mod.get_article(key)
+    if article is None:
+        body = ("<div class='card'><p>There's no help article for "
+                "'%s' yet -- here is everything we have:</p></div>"
+                % escape(key)) + help_mod.index_html()
+        return layout("Help", body, active="help")
+    return layout(article["title"] + " - Help", help_mod.article_html(key),
+                  active="help")
 
 
 @app.route("/welcome/finish", methods=["POST"])
@@ -709,7 +746,7 @@ def goals_add():
         return layout("Goals",
                       "<div class='card'><p><b>Could not add goal:</b> %s</p>"
                       "<p><a href='/goals'>Back to goals</a></p></div>"
-                      % escape(error)), 400
+                      % escape(error), help_key="goals"), 400
     return redirect("/goals")
 
 
@@ -842,7 +879,7 @@ def alerts_add():
         return layout("Alerts",
                       "<div class='card'><p><b>Could not add alert:</b> %s</p>"
                       "<p><a href='/alerts'>Back to alerts</a></p></div>"
-                      % escape(error)), 400
+                      % escape(error), help_key="alerts"), 400
     return redirect("/alerts")
 
 
@@ -976,7 +1013,7 @@ def focus_start():
         return layout("Focus sessions",
                       "<div class='card'><p><b>Could not start:</b> %s</p>"
                       "<p><a href='/focus'>Back</a></p></div>"
-                      % escape(result["error"])), 400
+                      % escape(result["error"]), help_key="focus"), 400
     return redirect("/focus")
 
 
@@ -1007,7 +1044,7 @@ def focus_end():
            s["neutral_minutes"], s["distracting_minutes"], s["blocks_count"],
            s["planned_minutes"], s["actual_minutes"])
     )
-    return layout("Session summary", body)
+    return layout("Session summary", body, help_key="focus")
 
 
 @app.route("/focus/abort", methods=["POST"])
@@ -1307,7 +1344,7 @@ def timesheet_add():
         return layout("Timesheet",
                       "<div class='card'><p><b>Could not add entry:</b> %s</p>"
                       "<p><a href='/timesheet?day=%s'>Back</a></p></div>"
-                      % (escape(result["error"]), day)), 400
+                      % (escape(result["error"]), day), help_key="timesheet"), 400
     return redirect("/timesheet?day=" + day)
 
 
@@ -1495,7 +1532,7 @@ def backup_now():
         return layout("Backup",
                       "<div class='card'><p><b>Could not back up:</b> %s</p>"
                       "<p><a href='/backup'>Back</a></p></div>"
-                      % escape(str(exc))), 400
+                      % escape(str(exc)), help_key="backup"), 400
     return redirect("/backup")
 
 
@@ -1549,7 +1586,7 @@ def update_page():
             "the way you usually do.</p>"
             "<p class='note'>One-click updates are for installed copies "
             "only.</p></div>")
-        return layout("Updates", body)
+        return layout("Updates", body, help_key="update")
 
     if status["status"] == "error":
         body = (
@@ -1560,7 +1597,7 @@ def update_page():
             "<p><a class='btn' href='/update?refresh=1'>Check again</a></p>"
             "</div>"
             % (escape(status["error"]), escape(status["current"])))
-        return layout("Updates", body)
+        return layout("Updates", body, help_key="update")
 
     head = ("<div class='card'><h3>Updates</h3>"
             "<p>You're on <b>%s</b>.</p>"
@@ -1571,7 +1608,7 @@ def update_page():
                 "by itself.</p>"
                 "<p><a class='btn' href='/update?refresh=1'>Check again</a>"
                 "</p></div>")
-        return layout("Updates", body)
+        return layout("Updates", body, help_key="update")
 
     body = (
         head +
@@ -1585,7 +1622,7 @@ def update_page():
         "</p></div>"
         % (escape(status["latest"]), escape(status["latest"]),
            escape(status["latest"])))
-    return layout("Updates", body)
+    return layout("Updates", body, help_key="update")
 
 
 @app.route("/update/start", methods=["POST"])
@@ -1599,7 +1636,8 @@ def update_start():
         return layout(
             "Updates",
             "<div class='card'><p><b>Nothing to update.</b> "
-            "<a href='/update'>Back</a></p></div>"), 400
+            "<a href='/update'>Back</a></p></div>",
+            help_key="update"), 400
 
     active = store.get_active_session()
     if active:
@@ -1608,7 +1646,8 @@ def update_start():
             "<div class='card'><p><b>Can't update right now:</b> a focus "
             "session (%s) is in progress. Finish or stop it first, then "
             "come back.</p><p><a href='/update'>Back</a></p></div>"
-            % escape(active.get("label") or "untitled")), 400
+            % escape(active.get("label") or "untitled"),
+            help_key="update"), 400
 
     try:
         backup_mod.create_backup()
@@ -1618,7 +1657,8 @@ def update_start():
             "<div class='card'><p><b>Update stopped:</b> the safety backup "
             "failed (%s). Nothing was downloaded.</p>"
             "<p><a href='/update'>Back</a></p></div>"
-            % escape(str(exc))), 500
+            % escape(str(exc)),
+            help_key="update"), 500
 
     asset = status["asset"]
     dest = Path(tempfile.gettempdir()) / asset["name"]
@@ -1630,7 +1670,8 @@ def update_start():
             "Updates",
             "<div class='card'><p><b>Update stopped:</b> %s Nothing was "
             "changed.</p><p><a href='/update'>Back</a></p></div>"
-            % escape(str(exc))), 500
+            % escape(str(exc)),
+            help_key="update"), 500
 
     updater_mod.write_pending_install(dest, status["latest"])
     body = (
@@ -1641,7 +1682,7 @@ def update_start():
         "<p class='note'>If it doesn't reopen by itself, start it from "
         "the desktop icon as usual.</p></div>"
         % escape(status["latest"]))
-    return layout("Updating", body)
+    return layout("Updating", body, help_key="update")
 
 @app.route("/report")
 def report_page():

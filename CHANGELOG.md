@@ -1,9 +1,24 @@
-# Changelog — Focus Core
+# Changelog
+
+## [v1.6.0] — 2026-09-26 (in progress)
+Sprint 2, Phase 5: release polish — in-app help system + stranger-friendly
+docs. New `focuscore/help.py` with 13 plain-English help articles (one per
+dashboard page: what it's for, what to do, "if something looks wrong");
+every page footer now links to its contextual article via `/help/<key>`,
+plus a `/help` index; unknown keys show the index with a friendly note.
+README rewritten for first-time users (what it costs, privacy, installer
+steps, daily use, FAQ); dev details condensed at the bottom. — Focus Core
 
 All notable changes, newest first. Dates are PKT.
 
-## [v1.5.0] — 2026-09-26 (in progress)
+## [v1.5.0] — 2026-09-26 (DEPLOYED)
 Sprint 2, Phase 4: stranger onboarding — ActivityWatch detection + setup guide.
+Fully verified on the PC via the operator loop 2026-09-26: 256/256 tests
+green (21 new), committed 27841a1, tag v1.5.0, CI built
+FocusCore-Setup-1.5.0.exe; installed copy verified all three detection
+states live (/setup/activitywatch green "running" with AW v0.13.2, welcome
+step 2 green, "installed but not running" after quitting AW, green again
+after restart via "Check again"); test copy uninstalled, dev setup restored.
 - New `focuscore/activitywatch.py`: probes ActivityWatch's local API
   (`/api/0/info`, 2s timeout, never raises) and reports one of three
   plain states — `running`, `installed_not_running`, `not_installed`
