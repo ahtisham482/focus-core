@@ -357,7 +357,8 @@ def test_legacy_9_tables_data_preservation_and_defaults(tmp_path: Path) -> None:
         # Migration 2 & 3 defaults:
         assert fs_rows[0]["enforcement_mode"] == "strict"
         assert fs_rows[0]["intercepted_count"] == 0
-        assert fs_rows[0]["session_type"] == "pomodoro"
+        # Migration 6 normalizes pre-Phase-8 rows to classic.
+        assert fs_rows[0]["session_type"] == "classic"
         assert fs_rows[0]["completed_cycles"] == 0
         assert fs_rows[0]["target_cycles"] == 1
         assert fs_rows[0]["break_minutes"] == 0.0
@@ -400,8 +401,8 @@ def test_legacy_9_tables_data_preservation_and_defaults(tmp_path: Path) -> None:
         assert "idx_afk_intervals_start" in idx_names
         assert "idx_timesheet_session" in idx_names
 
-        # PRAGMA user_version is 5
-        assert conn.execute("PRAGMA user_version").fetchone()[0] == 5
+        # PRAGMA user_version is 6
+        assert conn.execute("PRAGMA user_version").fetchone()[0] == 6
     finally:
         conn.close()
 
@@ -457,7 +458,8 @@ def test_upgrade_with_pre_existing_columns_and_custom_values(
             "SELECT enforcement_mode, session_type FROM focus_sessions"
         ).fetchone()
         assert s["enforcement_mode"] == "gentle"  # Not overwritten by 'strict'!
-        assert s["session_type"] == "pomodoro"  # Added missing column with default
+        # Migration 6 normalizes the migration-3 default to classic.
+        assert s["session_type"] == "classic"
 
         p = conn.execute(
             "SELECT color, is_billable, hourly_rate FROM projects"

@@ -1,5 +1,23 @@
 # Changelog
 
+## [v1.9.0] — 2026-09-27 (Sprint 3, Phase 8 — UNRELEASED, pending PC verification)
+Adaptive Flowtime and Smart Pomodoro: focus sessions now come in three
+modes — **Classic** (the fixed timer you already know, unchanged),
+**Flowtime** (no fixed end; work until a natural break with a soft
+target as a hint), and **Smart Pomodoro** (work/break cycles whose
+lengths adapt to your own history). A suggestion card on the Focus page
+recommends lengths learned from your last 14 days, in plain English
+("your best stretches lately average about 50 minutes"). Timers use a
+hybrid resilient clock (monotonic + wall clock + sleep detection), so a
+nap never counts as focus and sleep-inflated cycles are never marked
+complete. During pomodoro breaks the Shield rests too (only gentle
+reminders; 30-minute snap-back cap); after a sleep resume, enforcement
+waits 60 seconds before returning. Soft sound cues play on transitions
+(toggleable, never blocking, silent if anything fails). Database
+migration 6 (`session_cycles` with a one-active-cycle guarantee).
+Safety: everything is advisory — suggestions never force anything, and
+hardcore locks are never extended.
+
 ## [v1.8.0] — 2026-09-27 (Sprint 3, Phase 7 — UNRELEASED, pending PC verification)
 Hardcore Distraction Blocker: the old pop-up blocker is replaced by a
 single "Shield" background guard built only from the Python standard

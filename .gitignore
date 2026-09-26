@@ -17,5 +17,7 @@ __pycache__/
 *.egg-info/
 dist/
 build/
+*.exe
+installer/staging/
 
 .agents/

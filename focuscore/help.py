@@ -111,12 +111,19 @@ ARTICLES = {
                  "you're working on and how long, work, and get a summary: "
                  "focus minutes, Pulse, blocked distractions. Completed "
                  "sessions build your streak -- days in a row with at least "
-                 "one finished session."),
+                 "one finished session. Three modes: Classic (fixed timer), "
+                 "Flowtime (no fixed end -- work until a natural break), "
+                 "and Smart Pomodoro (work/break cycles whose lengths "
+                 "adapt to your own focus history)."),
         "do": [
             "Type your task, pick 25, 50 or 90 minutes (or any custom "
-            "length), and start.",
+            "length), choose a mode, and start. The suggestion card "
+            "above the form shows lengths learned from your history.",
             "Strict mode blocks -1 (Personal) and -2 (Distracting) apps; "
             "lenient mode blocks only -2.",
+            "In Pomodoro, blocking rests during breaks (only gentle "
+            "reminders); breaks end by themselves after 30 minutes at "
+            "most. You can always end or skip a break early.",
             "End the session to see your summary.",
         ],
         "trouble": [
@@ -127,6 +134,10 @@ ARTICLES = {
             "be blocked again.",
             "Can't start a session? Finish or end the one already running "
             "first.",
+            "Woke the PC from sleep during a session? Blocking waits 60 "
+            "seconds before coming back, so you are never ambushed.",
+            "Transition sounds annoy you? Untick 'Sound cues' on the "
+            "Focus page -- they are optional and never block anything.",
         ],
     },
     "shield": {

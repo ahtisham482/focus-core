@@ -64,7 +64,7 @@ def test_fresh_db_applies_all_migrations(tmp_path: Path) -> None:
         ).fetchall()
         assert len(rows) == migrations.LATEST_VERSION
         versions = [r["version"] for r in rows]
-        assert versions == [1, 2, 3, 4, 5]
+        assert versions == [1, 2, 3, 4, 5, 6]
 
         # Table & Column verifications
         # 1. afk_intervals
@@ -223,7 +223,8 @@ def test_upgrade_from_legacy_db(tmp_path: Path) -> None:
         ).fetchone()
         assert s_row["label"] == "Legacy Deep Work"
         assert s_row["enforcement_mode"] == "strict"
-        assert s_row["session_type"] == "pomodoro"
+        # Migration 6 normalizes every pre-Phase-8 session to classic.
+        assert s_row["session_type"] == "classic"
         assert s_row["completed_cycles"] == 0
 
         t_row = conn.execute(

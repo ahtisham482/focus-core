@@ -252,7 +252,8 @@ def shield_once(state, client, categorize_fn, db_path=None, now=None,
                 fg_info=None, notify_fn=None, minimize_fn=None,
                 overlay_fn=None, fullscreen_fn=None,
                 last_notified=None, session_only=False,
-                foreground_fn=None):
+                foreground_fn=None, now_mono=None,
+                resume_grace_until=None):
     """Run one enforcement cycle.
 
     Pure decision flow with injected side effects. ``session_only``
@@ -301,6 +302,16 @@ def shield_once(state, client, categorize_fn, db_path=None, now=None,
             return {"action": "allow", "reason": "emergency pass",
                     "app": window["app"]}
 
+        # 3b. Resume grace (Phase 8 R2): for 60 s after a sleep resume,
+        # enforcement stays paused. Fail open on any error.
+        try:
+            mono_now = time.monotonic() if now_mono is None else now_mono
+            if resume_grace_until and mono_now < resume_grace_until:
+                return {"action": "allow", "reason": "resume grace",
+                        "app": window["app"]}
+        except Exception:
+            pass
+
         # 4. Session + rules.
         try:
             session = focus_mod.get_active_session(db_path=db_path)
@@ -319,7 +330,19 @@ def shield_once(state, client, categorize_fn, db_path=None, now=None,
         session_blocked = False
         session_enforcement = "strict"
         session_id = None
-        if session and session.get("status") == "active":
+        # Phase 8 R2: pomodoro break soft stand-down. Session-driven
+        # enforcement pauses during a break; global soft rules keep
+        # applying; firm/hardcore rules are capped at soft.
+        on_break = False
+        if session and session.get("status") == "active" \
+                and session.get("session_type") == "pomodoro":
+            try:
+                cycle = store.get_active_cycle(session.get("id"),
+                                               path=db_path)
+                on_break = bool(cycle and cycle.get("kind") == "break")
+            except Exception:
+                on_break = False
+        if session and session.get("status") == "active" and not on_break:
             session_id = session.get("id")
             session_enforcement = session.get("enforcement_mode") \
                 or "strict"
@@ -345,6 +368,10 @@ def shield_once(state, client, categorize_fn, db_path=None, now=None,
                                  category, now)
         rule_actions = [r.get("action") or "soft" for r in matched
                         if (r.get("action") or "soft") in ACTION_RANK]
+        if on_break:
+            # Soft stand-down: firm/hardcore rules drop to soft.
+            rule_actions = ["soft" if a in ("firm", "hardcore") else a
+                            for a in rule_actions]
 
         action, source = resolve_action(
             session_blocked, session_enforcement, rule_actions,
@@ -353,7 +380,8 @@ def shield_once(state, client, categorize_fn, db_path=None, now=None,
         base = {"app": window["app"], "title": window["title"],
                 "url": window["url"], "score": score,
                 "category": category, "source": source,
-                "process_name": process_name, "hwnd": hwnd}
+                "process_name": process_name, "hwnd": hwnd,
+                "break_standdown": on_break}
         if action == "allow":
             return {"action": "allow", **base}
 
@@ -528,11 +556,24 @@ def _worker_main(stop_event, event_q, ui_q, db_path, session_only):
     last_fallback = 0.0
     swallow_handle = None
     swallow_until = 0.0
+    resume_grace_until = 0.0  # Phase 8 R2: monotonic deadline
 
     def _engine_cycle():
+        from . import focus as focus_mod
+        nonlocal swallow_handle, swallow_until, resume_grace_until
+        # Phase 8: settle pomodoro cycles first (hybrid timer, R1).
+        # Idempotent and cheap; never raises out of here.
+        try:
+            settled = focus_mod.settle_session(db_path=db_path)
+            if settled.get("suspend_detected"):
+                resume_grace_until = (time.monotonic()
+                                      + focus_mod.RESUME_GRACE_SECONDS)
+        except Exception:
+            pass
         result = shield_once(
             state, client, categorize_fn, db_path=db_path,
-            last_notified=last_notified, session_only=session_only)
+            last_notified=last_notified, session_only=session_only,
+            resume_grace_until=resume_grace_until)
         # An emergency pass dismisses any open overlay immediately.
         if result.get("reason") == "emergency pass":
             try:
@@ -544,7 +585,6 @@ def _worker_main(stop_event, event_q, ui_q, db_path, session_only):
         # discipline; failure just means no swallow (fail-safe).
         if result.get("action") == "hardcore" \
                 and result.get("notified"):
-            nonlocal swallow_handle, swallow_until
             if swallow_handle is None:
                 try:
                     swallow_handle = \

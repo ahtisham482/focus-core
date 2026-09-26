@@ -919,8 +919,14 @@ def _fmt_countdown(total_seconds):
 
 @app.route("/focus")
 def focus_page():
+    from focuscore import adaptive
     from focuscore import focus as focus_mod
 
+    # Phase 8: settle pomodoro cycles on every view (idempotent).
+    try:
+        focus_mod.settle_session()
+    except Exception:
+        pass
     active = focus_mod.get_active_session()
     streak = focus_mod.current_streak()
     streak_html = (
@@ -928,7 +934,22 @@ def focus_page():
         else "<p class='note'>No focus streak yet -- "
              "complete a session to start one.</p>")
 
+    cues_on = focus_mod.cue_enabled()
+    cues_form = (
+        "<form class='inline' method='post' action='/focus/cues'>"
+        "<label><input type='checkbox' name='audio_cues' value='1'%s "
+        "onchange='this.form.submit()'> Sound cues</label>"
+        "<noscript><button type='submit'>Save</button></noscript></form>"
+        % (" checked" if cues_on else ""))
+
     if active:
+        mode = active.get("session_type") or "classic"
+        if mode == "pomodoro":
+            return _pomodoro_active_page(active, streak_html, cues_form,
+                                         focus_mod)
+        if mode == "flowtime":
+            return _flowtime_active_page(active, streak_html, cues_form,
+                                        focus_mod)
         remaining = focus_mod.remaining_seconds(active)
         status_line = ("Time is up -- finish the session to see your summary."
                        if remaining <= 0 else "Stay focused. The page refreshes "
@@ -946,10 +967,11 @@ def focus_page():
             "<p class='note'>Blocking starts automatically with the session -- "
             "open a distracting app or site and you will get a pop-up plus a "
             "fullscreen reminder.</p></div>"
+            "<div class='card'><h3>Preferences</h3><p>%s</p></div>"
             "%s"
             % (escape(active["label"]), _fmt_countdown(remaining),
                status_line, active["planned_minutes"],
-               escape(active["block_level"]), streak_html)
+               escape(active["block_level"]), cues_form, streak_html)
         )
         return layout("Focus session", body, refresh=10, active="focus")
 
@@ -971,18 +993,46 @@ def focus_page():
         % ("".join(past_rows)
            or "<tr><td colspan='6' class='note'>No sessions yet.</td></tr>"))
 
+    try:
+        work_min, work_reason = adaptive.suggest_work_minutes()
+        flow_min, flow_reason = adaptive.suggest_flow_target()
+        tired, tired_msg = adaptive.fatigue_check()
+    except Exception:
+        work_min, work_reason = 25, ""
+        flow_min, flow_reason = 50, ""
+        tired, tired_msg = False, ""
+    suggestion_card = (
+        "<div class='card'><h3>Suggestion for today</h3>"
+        "<p>Pomodoro work block: <b>%d min</b> -- %s</p>"
+        "<p>Flowtime soft target: <b>%d min</b> -- %s</p>"
+        "%s</div>"
+        % (work_min, escape(work_reason), flow_min, escape(flow_reason),
+           ("<p><b>%s</b></p>" % escape(tired_msg)) if tired else ""))
+
     body = (
+        "%s"
         "%s"
         "<div class='card'><h3>Start a focus session</h3>"
         "<form method='post' action='/focus/start'>"
         "<p><label>Label <input type='text' name='label' required "
         "placeholder='e.g. Deep work' size='28'></label></p>"
+        "<p><label><input type='radio' name='mode' value='classic' "
+        "checked> Classic -- fixed timer</label><br>"
+        "<label><input type='radio' name='mode' value='flowtime'> "
+        "Flowtime -- no fixed end, work until a natural break</label><br>"
+        "<label><input type='radio' name='mode' value='pomodoro'> "
+        "Smart Pomodoro -- work/break cycles that adapt to you</label></p>"
         "<p><label><input type='radio' name='preset' value='25'> 25 min</label> "
         "<label><input type='radio' name='preset' value='50' checked> 50 min</label> "
         "<label><input type='radio' name='preset' value='90'> 90 min</label> "
         "<label><input type='radio' name='preset' value='custom'> custom "
         "<input type='number' name='custom_minutes' min='1' max='480' "
-        "style='width:70px' placeholder='min'></label></p>"
+        "style='width:70px' placeholder='min'></label>"
+        "<span class='note'>For Pomodoro this is the work-block length; "
+        "for Flowtime it is a soft target, not an alarm.</span></p>"
+        "<p><label>Work blocks (Pomodoro): "
+        "<input type='number' name='target_cycles' value='4' min='1' "
+        "max='24' style='width:60px'></label></p>"
         "<p><label><input type='radio' name='block_level' value='strict' "
         "checked> Strict -- block Personal (-1) and Distracting (-2)</label><br>"
         "<label><input type='radio' name='block_level' value='lenient'> "
@@ -998,26 +1048,156 @@ def focus_page():
         "</form>"
         "<p class='note'>Blocking starts automatically when the session "
         "starts -- no extra step needed.</p></div>"
+        "<div class='card'><h3>Preferences</h3><p>%s</p></div>"
         "<div class='card'><h3>Past sessions</h3>%s</div>"
-        % (streak_html, past_table)
+        % (streak_html, suggestion_card, cues_form, past_table)
     )
     return layout("Focus sessions", body, active="focus")
 
 
+def _session_buttons():
+    return (
+        "<form class='inline' method='post' action='/focus/end'>"
+        "<button type='submit'>End session</button></form> "
+        "<form class='inline' method='post' action='/focus/abort' "
+        "onsubmit=\"return confirm('Abort this session? "
+        "It will not count toward your streak.');\">"
+        "<button type='submit'>Abort</button></form>")
+
+
+def _pomodoro_active_page(active, streak_html, cues_form, focus_mod):
+    from focuscore import adaptive
+    from focuscore import store as store_mod
+    cycle = store_mod.get_active_cycle(active["id"])
+    done = active.get("completed_cycles") or 0
+    target = active.get("target_cycles") or 4
+    try:
+        tired, tired_msg = adaptive.fatigue_check()
+    except Exception:
+        tired, tired_msg = False, ""
+    if cycle:
+        remaining = focus_mod.cycle_remaining_seconds(cycle)
+        if cycle["kind"] == "work":
+            headline = "Work block %d of %d" % (done + 1, target)
+            controls = (
+                "<form class='inline' method='post' "
+                "action='/focus/cycle/break/start'>"
+                "<button type='submit'>Start break</button></form> ")
+            note = ("Blocking is on. The page refreshes every 10 seconds; "
+                    "a sound cue plays when the block ends.")
+        else:
+            headline = "Break -- relax"
+            controls = (
+                "<form class='inline' method='post' "
+                "action='/focus/cycle/break/end'>"
+                "<button type='submit'>End break early</button></form> "
+                "<form class='inline' method='post' "
+                "action='/focus/cycle/break/skip'>"
+                "<button type='submit'>Skip break</button></form> ")
+            note = ("Blocking is resting too (only gentle reminders). "
+                    "Breaks end by themselves after 30 minutes at most.")
+        cycle_html = (
+            "<div class='countdown'>%s</div>"
+            "<p class='note'>%s &middot; %s</p>"
+            "<p>%s%s</p>"
+            % (_fmt_countdown(remaining), headline, note, controls,
+               _session_buttons()))
+    else:
+        cycle_html = (
+            "<p><b>Target reached: %d work blocks.</b> End the session "
+            "whenever you are ready -- well done.</p>"
+            "<p>%s</p>" % _session_buttons())
+    tired_card = (("<div class='card'><p><b>%s</b></p></div>"
+                   % escape(tired_msg)) if tired else "")
+    body = (
+        "<div class='card'><div class='focus-label'>%s</div>%s</div>"
+        "%s"
+        "<div class='card'><h3>Preferences</h3><p>%s</p></div>"
+        "%s"
+        % (escape(active["label"]), cycle_html, tired_card, cues_form,
+           streak_html))
+    return layout("Focus session", body, refresh=10, active="focus")
+
+
+def _flowtime_deferral_offered(session_id, db_path=None):
+    """True once the one-time 10-minute deferral has been shown (R4)."""
+    from focuscore import store
+    return store.get_setting(
+        "flow_deferral_shown_%s" % session_id, path=db_path) == "1"
+
+
+def _mark_flowtime_deferral_offered(session_id, db_path=None):
+    from focuscore import store
+    store.set_setting("flow_deferral_shown_%s" % session_id, "1",
+                      path=db_path)
+
+
+def _flowtime_active_page(active, streak_html, cues_form, focus_mod,
+                          db_path=None):
+    from datetime import datetime
+    start = focus_mod._to_naive(active["started_at"])
+    elapsed_min = max(0.0, (datetime.now() - start).total_seconds() / 60.0)
+    target = active["planned_minutes"] or 50
+    deferral = ""
+    if elapsed_min >= target:
+        # R4: at most one gentle 10-minute deferral suggestion per
+        # session — shown once, then never again for this session.
+        if not _flowtime_deferral_offered(active["id"], db_path=db_path):
+            deferral = (
+                "<p class='note'>You passed your soft target of %.0f min. "
+                "Take 10 more minutes, or end at a natural break -- "
+                "your call.</p>" % target)
+            _mark_flowtime_deferral_offered(active["id"], db_path=db_path)
+    body = (
+        "<div class='card'><div class='focus-label'>%s</div>"
+        "<div class='countdown'>%s elapsed</div>"
+        "<p class='note'>Soft target %.0f min (no alarm) &middot; %s "
+        "blocking &middot; page refreshes every 10 seconds</p>"
+        "%s"
+        "<p>%s</p>"
+        "<p class='note'>Blocking is on for the whole session -- "
+        "there is no timer to beat, just your natural stopping point.</p>"
+        "</div>"
+        "<div class='card'><h3>Preferences</h3><p>%s</p></div>"
+        "%s"
+        % (escape(active["label"]), focus_mod._fmt_hms(elapsed_min * 60),
+           target, escape(active["block_level"]), deferral,
+           _session_buttons(), cues_form, streak_html))
+    return layout("Focus session", body, refresh=10, active="focus")
+
+
 @app.route("/focus/start", methods=["POST"])
 def focus_start():
+    from focuscore import adaptive
     from focuscore import focus as focus_mod
 
     label = (request.form.get("label") or "").strip()
     preset = request.form.get("preset") or "50"
     block_level = request.form.get("block_level") or "strict"
     enforcement_mode = request.form.get("enforcement_mode") or "strict"
+    mode = request.form.get("mode") or "classic"
+    if mode not in ("classic", "flowtime", "pomodoro"):
+        mode = "classic"
+    try:
+        target_cycles = int(request.form.get("target_cycles") or 4)
+    except (TypeError, ValueError):
+        target_cycles = 4
     if preset == "custom":
         minutes = request.form.get("custom_minutes")
     else:
         minutes = preset
+    try:
+        suggested = adaptive.suggest_work_minutes(
+            mode=mode)[0] if mode == "pomodoro" else \
+            adaptive.suggest_flow_target()[0] if mode == "flowtime" \
+            else None
+    except Exception:
+        suggested = None
     result = focus_mod.start_session(label, minutes, block_level=block_level,
-                                     enforcement_mode=enforcement_mode)
+                                     enforcement_mode=enforcement_mode,
+                                     session_type=mode,
+                                     target_cycles=target_cycles,
+                                     suggested_minutes=suggested)
     if "error" not in result:
         # Blocking starts with the session -- no second manual step.
         from focuscore.blocker import ensure_guard_running
@@ -1027,6 +1207,53 @@ def focus_start():
                       "<div class='card'><p><b>Could not start:</b> %s</p>"
                       "<p><a href='/focus'>Back</a></p></div>"
                       % escape(result["error"]), help_key="focus"), 400
+    return redirect("/focus")
+
+
+@app.route("/focus/cycle/break/start", methods=["POST"])
+def focus_cycle_break_start():
+    from focuscore import focus as focus_mod
+    result = focus_mod.start_break_now()
+    if "error" in result:
+        return layout("Focus sessions",
+                      "<div class='card'><p><b>Could not start break:</b> %s</p>"
+                      "<p><a href='/focus'>Back</a></p></div>"
+                      % escape(result["error"]), help_key="focus"), 400
+    return redirect("/focus")
+
+
+@app.route("/focus/cycle/break/end", methods=["POST"])
+def focus_cycle_break_end():
+    from focuscore import focus as focus_mod
+    result = focus_mod.end_break_now()
+    if "error" in result:
+        return layout("Focus sessions",
+                      "<div class='card'><p><b>Could not end break:</b> %s</p>"
+                      "<p><a href='/focus'>Back</a></p></div>"
+                      % escape(result["error"]), help_key="focus"), 400
+    return redirect("/focus")
+
+
+@app.route("/focus/cycle/break/skip", methods=["POST"])
+def focus_cycle_break_skip():
+    from focuscore import focus as focus_mod
+    result = focus_mod.end_break_now(skipped=True)
+    if "error" in result:
+        return layout("Focus sessions",
+                      "<div class='card'><p><b>Could not skip break:</b> %s</p>"
+                      "<p><a href='/focus'>Back</a></p></div>"
+                      % escape(result["error"]), help_key="focus"), 400
+    return redirect("/focus")
+
+
+@app.route("/focus/cues", methods=["POST"])
+def focus_cues_toggle():
+    from focuscore import store as store_mod
+    enabled = "1" if request.form.get("audio_cues") else "0"
+    try:
+        store_mod.set_setting("audio_cues", enabled)
+    except Exception:
+        pass
     return redirect("/focus")
 
 

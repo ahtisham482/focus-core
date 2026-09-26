@@ -19,7 +19,7 @@ from . import backup, paths, store
 
 logger = logging.getLogger(__name__)
 
-LATEST_VERSION = 5
+LATEST_VERSION = 6
 
 
 class MigrationError(Exception):
@@ -272,6 +272,67 @@ def _migration_0005_shield_rules(conn: sqlite3.Connection) -> None:
     )
 
 
+def _migration_0006_session_modes(conn: sqlite3.Connection) -> None:
+    """Migration 6: Phase 8 session modes + pomodoro cycle tracking.
+
+    Reuses the migration-3 columns (session_type, completed_cycles,
+    target_cycles, break_minutes, work_minutes): every pre-Phase-8
+    session was a classic fixed timer, so old rows are normalized to
+    'classic'. New table session_cycles holds work/break cycles; a
+    partial unique index guarantees at most one active cycle per
+    session (R3). Idempotent: UPDATE and CREATE IF NOT EXISTS are
+    safe to re-run.
+
+    Defensive: a database merely *marked* as v5 may not have the
+    migration-3 columns (e.g. hand-built fixtures). Never crash the
+    UPDATE when the table or column is absent.
+    """
+    cols = (get_table_columns(conn, "focus_sessions")
+            if table_exists(conn, "focus_sessions") else set())
+    if "session_type" in cols:
+        conn.execute(
+            "UPDATE focus_sessions SET session_type = 'classic' "
+            "WHERE session_type = 'pomodoro'"
+        )
+    add_column_if_missing(
+        conn, "focus_sessions", "suggested_minutes", "INTEGER")
+    # New columns for already-created tables (idempotent).
+    add_column_if_missing(
+        conn, "session_cycles", "last_tick_wall", "TEXT")
+    add_column_if_missing(
+        conn, "session_cycles", "last_tick_mono", "REAL")
+    conn.execute(
+        """
+        CREATE TABLE IF NOT EXISTS session_cycles (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            session_id INTEGER NOT NULL
+                REFERENCES focus_sessions(id),
+            kind TEXT NOT NULL,              -- 'work' | 'break'
+            planned_minutes REAL NOT NULL,
+            started_at TEXT NOT NULL,        -- UTC wall clock
+            started_monotonic REAL,          -- monotonic() at start
+            last_tick_wall TEXT,             -- wall clock at previous settle
+            last_tick_mono REAL,             -- monotonic() at previous settle
+            elapsed_offset_seconds REAL NOT NULL DEFAULT 0,
+            ended_at TEXT,
+            status TEXT NOT NULL DEFAULT 'active'
+        )
+        """
+    )
+    conn.execute(
+        "CREATE UNIQUE INDEX IF NOT EXISTS uq_one_active_cycle "
+        "ON session_cycles(session_id) WHERE status = 'active'"
+    )
+    conn.execute(
+        "CREATE INDEX IF NOT EXISTS idx_cycles_session "
+        "ON session_cycles(session_id)"
+    )
+    conn.execute(
+        "INSERT OR IGNORE INTO settings (key, value) VALUES "
+        "('audio_cues', '1')"
+    )
+
+
 MIGRATIONS: List[Migration] = [
     Migration(1, "0001_afk_intervals", _migration_0001_afk_intervals),
     Migration(2, "0002_shield_columns", _migration_0002_shield_columns),
@@ -285,6 +346,11 @@ MIGRATIONS: List[Migration] = [
         5,
         "0005_shield_rules",
         _migration_0005_shield_rules,
+    ),
+    Migration(
+        6,
+        "0006_session_modes",
+        _migration_0006_session_modes,
     ),
 ]
 

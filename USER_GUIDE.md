@@ -26,9 +26,12 @@ uncategorized activities (one click each), accept yesterday's timesheet
 blocks, start a focus session.
 
 **During work — focus sessions.** Open the **Focus** page, type what
-you are working on, pick 25/50/90 minutes, start. Keep
-`focus-watch.bat` running if you want distractions blocked with a
-pop-up. Ending the session shows your summary.
+you are working on, pick a mode and length, start. **Classic** is a
+fixed timer. **Flowtime** has no fixed end — work until a natural
+break (the minutes you pick are only a soft hint). **Smart Pomodoro**
+runs work/break cycles; the page suggests lengths learned from your
+own history, plays a soft sound when a block ends, and rests blocking
+during breaks. Ending the session shows your summary.
 
 **Evening — timesheet (2 minutes).** Open the **Timesheet** page. The
 top shows your day as suggested blocks on a visual timeline — click a

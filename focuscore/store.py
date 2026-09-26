@@ -534,24 +534,44 @@ def _session_row(row):
         if "enforcement_mode" in keys else "strict",
         "intercepted_count": row["intercepted_count"]
         if "intercepted_count" in keys else 0,
+        # Phase 8 session modes (migration 6); old rows read as classic.
+        "session_type": row["session_type"]
+        if "session_type" in keys else "classic",
+        "completed_cycles": row["completed_cycles"]
+        if "completed_cycles" in keys else 0,
+        "target_cycles": row["target_cycles"]
+        if "target_cycles" in keys else 1,
+        "break_minutes": row["break_minutes"]
+        if "break_minutes" in keys else 0.0,
+        "work_minutes": row["work_minutes"]
+        if "work_minutes" in keys else 0.0,
+        "suggested_minutes": row["suggested_minutes"]
+        if "suggested_minutes" in keys else None,
     }
 
 
 def create_session(label, planned_minutes, started_at, planned_end_at,
-                   block_level, enforcement_mode="strict", path=None):
+                   block_level, enforcement_mode="strict", path=None,
+                   session_type="classic", suggested_minutes=None,
+                   target_cycles=1):
     """Insert a new focus session; returns its new id."""
     if enforcement_mode not in ("strict", "hardcore"):
         enforcement_mode = "strict"
+    if session_type not in ("classic", "flowtime", "pomodoro"):
+        session_type = "classic"
     init_db(path)
     conn = get_db(path)
     try:
         cur = conn.execute(
             "INSERT INTO focus_sessions (label, planned_minutes, started_at, "
             "planned_end_at, ended_at, status, block_level, "
-            "enforcement_mode) "
-            "VALUES (?, ?, ?, ?, NULL, 'active', ?, ?)",
+            "enforcement_mode, session_type, suggested_minutes, "
+            "target_cycles) "
+            "VALUES (?, ?, ?, ?, NULL, 'active', ?, ?, ?, ?, ?)",
             (label, float(planned_minutes), started_at, planned_end_at,
-             block_level, enforcement_mode),
+             block_level, enforcement_mode, session_type,
+             suggested_minutes,
+             int(target_cycles) if target_cycles else 1),
         )
         conn.commit()
         return cur.lastrowid
@@ -595,6 +615,171 @@ def end_session(session_id, status, ended_at, path=None):
             (status, ended_at, session_id),
         )
         conn.commit()
+    finally:
+        conn.close()
+
+
+# ------------------------------------------------- Pomodoro cycle tracking ---
+
+def _cycle_row(row):
+    return {
+        "id": row["id"],
+        "session_id": row["session_id"],
+        "kind": row["kind"],
+        "planned_minutes": row["planned_minutes"],
+        "started_at": row["started_at"],
+        "started_monotonic": row["started_monotonic"],
+        "last_tick_wall": row["last_tick_wall"]
+        if "last_tick_wall" in row.keys() else None,
+        "last_tick_mono": row["last_tick_mono"]
+        if "last_tick_mono" in row.keys() else None,
+        "elapsed_offset_seconds": row["elapsed_offset_seconds"] or 0.0,
+        "ended_at": row["ended_at"],
+        "status": row["status"],
+    }
+
+
+def start_cycle(session_id, kind, planned_minutes, started_at,
+                started_monotonic, path=None):
+    """Start a work/break cycle; returns its id.
+
+    The partial unique index (R3) raises sqlite3.IntegrityError if the
+    session already has an active cycle — callers end it first.
+    """
+    if kind not in ("work", "break"):
+        raise ValueError("kind must be 'work' or 'break'")
+    init_db(path)
+    conn = get_db(path)
+    try:
+        cur = conn.execute(
+            "INSERT INTO session_cycles (session_id, kind, planned_minutes, "
+            "started_at, started_monotonic, last_tick_wall, last_tick_mono,"
+            " status) "
+            "VALUES (?, ?, ?, ?, ?, ?, ?, 'active')",
+            (session_id, kind, float(planned_minutes), started_at,
+             started_monotonic, started_at, started_monotonic),
+        )
+        conn.commit()
+        return cur.lastrowid
+    finally:
+        conn.close()
+
+
+def end_cycle(cycle_id, status, ended_at, path=None):
+    """Mark a cycle completed/skipped/aborted."""
+    if status not in ("completed", "skipped", "aborted"):
+        raise ValueError("bad cycle status: %r" % (status,))
+    init_db(path)
+    conn = get_db(path)
+    try:
+        conn.execute(
+            "UPDATE session_cycles SET status = ?, ended_at = ? "
+            "WHERE id = ?",
+            (status, ended_at, cycle_id),
+        )
+        conn.commit()
+    finally:
+        conn.close()
+
+
+def resync_cycle_monotonic(cycle_id, started_monotonic,
+                           elapsed_offset_seconds, path=None):
+    """Resync a cycle's monotonic clock (daemon restart / R1).
+
+    Keeps previously credited time in elapsed_offset_seconds —
+    conservative, never over-credits.
+    """
+    init_db(path)
+    conn = get_db(path)
+    try:
+        conn.execute(
+            "UPDATE session_cycles SET started_monotonic = ?, "
+            "elapsed_offset_seconds = ? WHERE id = ?",
+            (started_monotonic, float(elapsed_offset_seconds), cycle_id),
+        )
+        conn.commit()
+    finally:
+        conn.close()
+
+
+def get_active_cycle(session_id, path=None):
+    """The session's active cycle, or None."""
+    init_db(path)
+    conn = get_db(path)
+    try:
+        row = conn.execute(
+            "SELECT * FROM session_cycles WHERE session_id = ? "
+            "AND status = 'active' ORDER BY started_at DESC LIMIT 1",
+            (session_id,),
+        ).fetchone()
+        return _cycle_row(row) if row else None
+    finally:
+        conn.close()
+
+
+def update_cycle_ticks(cycle_id, wall_iso, mono, focused_seconds, path=None):
+    """Persist the latest settle tick and accumulated focus seconds."""
+    init_db(path)
+    conn = get_db(path)
+    try:
+        conn.execute(
+            "UPDATE session_cycles SET last_tick_wall = ?,"
+            " last_tick_mono = ?, elapsed_offset_seconds = ?"
+            " WHERE id = ?",
+            (wall_iso, mono, float(focused_seconds), cycle_id),
+        )
+        conn.commit()
+    finally:
+        conn.close()
+
+
+def cycles_for_session(session_id, path=None):
+    """All cycles for a session, oldest first."""
+    init_db(path)
+    conn = get_db(path)
+    try:
+        rows = conn.execute(
+            "SELECT * FROM session_cycles WHERE session_id = ? "
+            "ORDER BY started_at ASC",
+            (session_id,),
+        ).fetchall()
+        return [_cycle_row(r) for r in rows]
+    finally:
+        conn.close()
+
+
+def bump_completed_cycles(session_id, path=None):
+    """Increment focus_sessions.completed_cycles; returns the new count."""
+    init_db(path)
+    conn = get_db(path)
+    try:
+        conn.execute(
+            "UPDATE focus_sessions SET completed_cycles = "
+            "completed_cycles + 1 WHERE id = ?",
+            (session_id,),
+        )
+        row = conn.execute(
+            "SELECT completed_cycles FROM focus_sessions WHERE id = ?",
+            (session_id,),
+        ).fetchone()
+        conn.commit()
+        return int(row["completed_cycles"]) if row else 0
+    finally:
+        conn.close()
+
+
+def work_cycles_completed_today(day, path=None):
+    """Completed work cycles started on the given day (YYYY-MM-DD)."""
+    init_db(path)
+    conn = get_db(path)
+    try:
+        row = conn.execute(
+            "SELECT COUNT(*) AS n FROM session_cycles "
+            "WHERE kind = 'work' AND status = 'completed' "
+            "AND substr(started_at, 1, 10) = ?",
+            (day,),
+        ).fetchone()
+        return int(row["n"]) if row else 0
     finally:
         conn.close()
 
