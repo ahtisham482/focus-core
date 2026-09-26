@@ -57,6 +57,8 @@ import os
 import re
 import shutil
 import sqlite3
+import threading
+import uuid
 import warnings
 from datetime import datetime
 from pathlib import Path
@@ -65,6 +67,8 @@ from . import paths
 from . import store
 
 logger = logging.getLogger(__name__)
+
+_backup_lock = threading.Lock()
 
 BACKUP_NAME_PATTERN = re.compile(r"^focuscore-\d{8}-\d{6}(-\d+)?\.db$")
 BACKUP_FOLDER_NAME = "Focus Core Backups"
@@ -190,25 +194,32 @@ def create_backup(db_path=None, dest_dir=None):
         raise FileNotFoundError(
             "No database found at %s -- nothing to back up yet." % src)
     folder = backup_dir(dest_dir)
-    target = folder / ("focuscore-%s.db" % _timestamp())
-    # Two backups inside the same second must not overwrite each other.
-    counter = 2
-    while target.exists():
-        target = folder / ("focuscore-%s-%d.db" % (_timestamp(), counter))
-        counter += 1
-    tmp = Path(str(target) + TMP_SUFFIX)
+    ts = _timestamp()
+
+    # Unique tempfile per invocation prevents WinError 32 / WinError 5
+    # collisions on Windows
+    unique_suffix = f"{os.getpid()}_{threading.get_ident()}_{uuid.uuid4().hex[:8]}"
+    tmp = folder / f"focuscore-{ts}-{unique_suffix}.tmp"
+
     try:
-        src_conn = sqlite3.connect(str(src))
+        src_conn = sqlite3.connect(str(src), timeout=30.0)
         try:
-            dst_conn = sqlite3.connect(str(tmp))
+            dst_conn = sqlite3.connect(str(tmp), timeout=30.0)
             try:
                 src_conn.backup(dst_conn)
             finally:
                 dst_conn.close()
         finally:
             src_conn.close()
-        # Atomic publish: the final name never points at a partial file.
-        os.replace(str(tmp), str(target))
+
+        # Atomic publish: synchronize target resolution and rename
+        with _backup_lock:
+            target = folder / ("focuscore-%s.db" % ts)
+            counter = 2
+            while target.exists():
+                target = folder / ("focuscore-%s-%d.db" % (ts, counter))
+                counter += 1
+            os.replace(str(tmp), str(target))
     finally:
         # An interrupted write must not leave a partial backup behind.
         try:

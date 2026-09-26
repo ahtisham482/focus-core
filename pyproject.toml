@@ -1,0 +1,17 @@
+[tool.ruff]
+line-length = 88
+target-version = "py311"
+extend-exclude = [
+    ".agents",
+    "backups",
+]
+
+[tool.ruff.lint]
+select = ["E", "F"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+filterwarnings = [
+    "ignore::DeprecationWarning:Pillow.*",
+    "ignore:.*Pillow.*:DeprecationWarning",
+]

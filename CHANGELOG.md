@@ -1,13 +1,25 @@
 # Changelog
 
-## [v1.6.0] — 2026-09-26 (in progress)
+## [v1.7.0] — 2026-09-26 (Sprint 3, Phase 6)
+Deep Time Intelligence: a new "Deep time" page with your chronotype
+(morning person / night owl / balanced, from 28 days of per-weekday
+hourly curves), each weekday's best 2-hour focus window, focus depth
+(longest unbroken stretches, median time-to-first-focus, app-switch
+rate), distraction anatomy (top distractors + the apps that pull you
+into them), this-week-vs-last-week trends, and an interactive day
+timeline (click any hour to see its activities). New module
+`focuscore/intelligence.py` -- pure documented arithmetic, no ML; all
+thresholds are named constants; every card explains how it is computed.
+In-app help article included.
+
+## [v1.6.0] — 2026-09-26 (DEPLOYED)
 Sprint 2, Phase 5: release polish — in-app help system + stranger-friendly
-docs. New `focuscore/help.py` with 13 plain-English help articles (one per
-dashboard page: what it's for, what to do, "if something looks wrong");
-every page footer now links to its contextual article via `/help/<key>`,
-plus a `/help` index; unknown keys show the index with a friendly note.
-README rewritten for first-time users (what it costs, privacy, installer
-steps, daily use, FAQ); dev details condensed at the bottom. — Focus Core
+docs. Fully verified on the PC via the operator loop 2026-09-26: 263/263
+tests green (7 new), committed 6e0efa0, tag v1.6.0, CI green
+(FocusCore-Setup-1.6.0.exe); installed copy verified the footer Help link
+on Home/Timesheet/Focus pages, the /help index with all 13 articles, and
+the graceful unknown-key fallback; test copy uninstalled, dev setup
+restored. — Focus Core
 
 All notable changes, newest first. Dates are PKT.
 

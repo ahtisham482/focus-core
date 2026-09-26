@@ -129,16 +129,15 @@ CREATE INDEX IF NOT EXISTS idx_ts_entries_day ON timesheet_entries(day);
 def get_db(path=None):
     conn = sqlite3.connect(str(path or DEFAULT_DB_PATH))
     conn.row_factory = sqlite3.Row
+    conn.execute("PRAGMA busy_timeout = 5000")
     return conn
 
 
 def init_db(path=None):
-    conn = get_db(path)
-    try:
-        conn.executescript(SCHEMA)
-        conn.commit()
-    finally:
-        conn.close()
+    from . import migrations
+
+    migrations.apply_migrations(path)
+
 
 
 def save_events(day, events, path=None):

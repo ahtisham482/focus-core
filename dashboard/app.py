@@ -46,6 +46,7 @@ NAV_LINKS = [
     ("timesheet", "Timesheet", "/timesheet"),
     ("report", "Report", "/report"),
     ("coaching", "Coaching", "/coaching"),
+    ("intelligence", "Deep time", "/intelligence"),
     ("focus", "Focus", "/focus"),
     ("goals", "Goals", "/goals"),
     ("alerts", "Alerts", "/alerts"),
@@ -101,6 +102,7 @@ def layout(title, body, day=None, refresh=300, active="home", help_key=None):
     if help_key is None:
         help_key = {"home": "home", "timesheet": "timesheet",
                     "report": "report", "coaching": "coaching",
+                    "intelligence": "intelligence",
                     "focus": "focus", "goals": "goals", "alerts": "alerts",
                     "backup": "backup", "review": "activities"}.get(active)
     help_href = "/help/" + help_key if help_key else "/help"
@@ -116,7 +118,7 @@ def layout(title, body, day=None, refresh=300, active="home", help_key=None):
         "<title>%s &middot; Focus Core</title>"
         "<link rel='stylesheet' href='/static/style.css'>"
         "<link rel='icon' href='/static/icon.png'></head>"        "<body>%s<h1>%s</h1>"
-        "<div class='sub'>Focus Core &middot; Phase 5</div>%s%s</body></html>"
+        "<div class='sub'>Focus Core &middot; Phase 6</div>%s%s</body></html>"
         % (refresh, escape(title), nav, escape(title), body, footer)
     )
 
@@ -1883,6 +1885,266 @@ def coaching_page():
 
     body = heatmap + avg_row + windows_html + warnings_html
     return layout("Coaching", body, active="coaching")
+
+
+_SCORE_CELL_COLORS = {2: ("#2e7d32", "#fff"), 1: ("#81c784", "#222"),
+                      0: ("#e0e0e0", "#222"), -1: ("#ef9a9a", "#222"),
+                      -2: ("#e53935", "#fff")}
+
+_WEEKDAY_NAMES = ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"]
+
+
+def _delta_str(value):
+    if value is None:
+        return "--"
+    if value > 0:
+        return "&#9650; %.1f" % abs(value)
+    if value < 0:
+        return "&#9660; %.1f" % abs(value)
+    return "= 0"
+
+
+@app.route("/intelligence")
+def intelligence_page():
+    from focuscore import intelligence as intel_mod
+
+    today = date.today()
+    day_from = today - timedelta(days=intel_mod.CHRONOTYPE_DAYS - 1)
+
+    curves = intel_mod.chronotype_curves(day_from, today)
+    chrono = intel_mod.classify_chronotype(curves)
+    peaks = intel_mod.weekday_peak_windows(curves)
+    depth = intel_mod.depth_summary(day_from, today)
+    ttf = intel_mod.median_time_to_focus(day_from, today)
+    anatomy = intel_mod.distraction_anatomy(day_from, today)
+    trends = intel_mod.week_trends()
+
+    rates = []
+    d = day_from
+    while d <= today:
+        rate = intel_mod.switch_rate(d.isoformat())["per_hour"]
+        if rate is not None:
+            rates.append(rate)
+        d += timedelta(days=1)
+    avg_switch = round(sum(rates) / len(rates), 1) if rates else None
+
+    sel_day = request.args.get("day", today.isoformat())
+    try:
+        date.fromisoformat(sel_day)
+    except ValueError:
+        sel_day = today.isoformat()
+    timeline = intel_mod.day_timeline(sel_day)
+
+    # --- card 1: chronotype ---
+    type_labels = {"morning": "a morning person",
+                   "evening": "a night owl",
+                   "balanced": "balanced -- no strong pattern yet"}
+    if chrono["peak_hour"] is None:
+        chrono_html = ("<p class='note'>Not enough data yet -- keep "
+                       "tracking and your rhythm will appear here.</p>")
+    else:
+        if chrono["type"] == "morning":
+            advice = ("You do %.0f%% of your focused work before noon -- "
+                      "schedule your hardest work in the morning."
+                      % (chrono["morning_share"] * 100))
+        elif chrono["type"] == "evening":
+            advice = ("You do %.0f%% of your focused work after 6pm -- "
+                      "protect your evenings for deep work."
+                      % (chrono["evening_share"] * 100))
+        else:
+            advice = ("Your focus is spread through the day -- watch the "
+                      "rhythm grid below for your personal peaks.")
+        chrono_html = (
+            "<p>You are <b>%s</b>. Your peak hour is "
+            "<b>%02d:00</b>.</p><p class='note'>%s</p>"
+            % (type_labels[chrono["type"]], chrono["peak_hour"], advice))
+    chrono_card = (
+        "<div class='card'><h3>Your chronotype</h3>%s"
+        "<details class='how'><summary>How we compute this</summary>"
+        "<p class='note'>We add up your focused minutes (scores +1/+2) per "
+        "hour over the last %d days, separately for each weekday. If 55%% "
+        "or more fall between 05:00-12:00 you are a morning person; "
+        "18:00-24:00, a night owl.</p></details></div>"
+        % (chrono_html, intel_mod.CHRONOTYPE_DAYS))
+
+    # --- card 2: rhythm by weekday ---
+    rhythm_rows = []
+    for weekday in range(7):
+        cells = []
+        for hour in range(24):
+            cell = curves[weekday][hour]
+            pulse = cell["pulse"]
+            bg, fg = _pulse_cell_color(pulse, cell["minutes"])
+            text = ("%.0f" % pulse) if pulse is not None else "--"
+            title = "%s %02d:00 -- %.0f min over %d day(s)" % (
+                _WEEKDAY_NAMES[weekday], hour, cell["minutes"], cell["days"])
+            cells.append(
+                "<td style='background:%s;color:%s;text-align:center' "
+                "title='%s'>%s</td>" % (bg, fg, title, text))
+        rhythm_rows.append(
+            "<tr><td><b>%s</b></td>%s</tr>"
+            % (_WEEKDAY_NAMES[weekday], "".join(cells)))
+    rhythm_card = (
+        "<div class='card'><h3>Rhythm by weekday</h3>"
+        "<p class='note'>Your Pulse per hour, one row per weekday. Green = "
+        "focused, red = distracted. Last %d days.</p>"
+        "<table>%s</table>"
+        "<details class='how'><summary>How we compute this</summary>"
+        "<p class='note'>Each cell is the weighted Pulse for that "
+        "weekday-hour across the last %d days. Hover a cell for the "
+        "minutes and days behind it.</p></details></div>"
+        % (intel_mod.CHRONOTYPE_DAYS, "".join(rhythm_rows),
+           intel_mod.CHRONOTYPE_DAYS))
+
+    # --- card 3: peak windows ---
+    if peaks:
+        peak_items = "".join(
+            "<li><b>%s:</b> %02d:00 - %02d:00 (%.0f focus minutes)</li>"
+            % (_WEEKDAY_NAMES[w], peaks[w][0]["start_hour"],
+               peaks[w][0]["end_hour"], peaks[w][0]["focus_minutes"])
+            for w in sorted(peaks))
+    else:
+        peak_items = "<li class='note'>Not enough data yet.</li>"
+    peaks_card = (
+        "<div class='card'><h3>Protect these hours</h3>"
+        "<p class='note'>The 2-hour block where each weekday does its "
+        "best focused work. Guard these like meetings.</p>"
+        "<ul>%s</ul>"
+        "<details class='how'><summary>How we compute this</summary>"
+        "<p class='note'>For each weekday, the 2-hour window with the "
+        "most focused minutes (+1/+2) over the last %d days.</p>"
+        "</details></div>" % (peak_items, intel_mod.CHRONOTYPE_DAYS))
+
+    # --- card 4: focus depth ---
+    if depth["avg_longest"] is None:
+        depth_html = ("<p class='note'>No productive stretches yet -- "
+                      "your longest focused runs will appear here.</p>")
+    else:
+        ttf_str = ("%.0f min" % ttf) if ttf is not None else "--"
+        switch_str = ("%.1f / hour" % avg_switch) \
+            if avg_switch is not None else "--"
+        depth_html = (
+            "<ul><li>Average longest stretch: "
+            "<b>%.0f min</b></li><li>Best day: <b>%s</b> (%.0f min)</li>"
+            "<li>Median time to first focus: <b>%s</b></li>"
+            "<li>App switches: <b>%s</b></li></ul>"
+            % (depth["avg_longest"], depth["best_day"],
+               depth["best_minutes"], ttf_str, switch_str))
+    depth_card = (
+        "<div class='card'><h3>Focus depth</h3>%s"
+        "<details class='how'><summary>How we compute this</summary>"
+        "<p class='note'>A 'stretch' is unbroken productive time (scores "
+        "+1/+2); gaps under 5 minutes don't break it. Time-to-first-focus "
+        "is measured from your first tracked activity to your first "
+        "25-minute stretch.</p></details></div>" % depth_html)
+
+    # --- card 5: distraction anatomy ---
+    if anatomy["top"]:
+        max_min = anatomy["top"][0]["minutes"]
+        distractor_rows = "".join(
+            "<li><b>%s</b> -- %.1fh (%.0f%%)<br>"
+            "<div style='background:#eee;height:8px;width:220px'>"
+            "<div style='background:#e53935;height:8px;width:%d%%'>"
+            "</div></div><span class='note'>e.g. %s</span></li>"
+            % (escape(item["app"]), item["minutes"] / 60.0,
+               item["share"],
+               int(item["minutes"] / max_min * 100) if max_min else 0,
+               escape(item["example"][:60]))
+            for item in anatomy["top"])
+    else:
+        distractor_rows = "<li class='note'>No distracting time recorded.</li>"
+    if anatomy["entry_points"]:
+        entry_rows = "".join(
+            "<li><b>%s</b> pulled you in %d time(s)</li>"
+            % (escape(e["app"]), e["count"])
+            for e in anatomy["entry_points"])
+    else:
+        entry_rows = "<li class='note'>No entry pattern found.</li>"
+    anatomy_card = (
+        "<div class='card'><h3>What breaks your focus</h3>"
+        "<p class='note'>Where your distracting time (-1/-2) goes, and "
+        "which app you were using right before each distraction "
+        "started.</p><ul>%s</ul><ul>%s</ul>"
+        "<details class='how'><summary>How we compute this</summary>"
+        "<p class='note'>Distractors are apps scoring -1/-2. An 'entry "
+        "point' is the app you were using right before a distraction "
+        "block started.</p></details></div>"
+        % (distractor_rows, entry_rows))
+
+    # --- card 6: week trends ---
+    tw, lw, dl = (trends["this_week"], trends["last_week"],
+                  trends["deltas"])
+    def _fmt(value, suffix=""):
+        if value is None:
+            return "--"
+        return "%.1f%s" % (value, suffix)
+    trend_rows = "".join(
+        "<tr><td>%s</td><td>%s</td><td>%s</td><td>%s</td></tr>"
+        % (label, _fmt(lw[key], suffix), _fmt(tw[key], suffix),
+           _delta_str(dl[key]))
+        for label, key, suffix in [
+            ("Tracked hours", "hours", "h"),
+            ("Average Pulse", "avg_pulse", ""),
+            ("Focus minutes", "focus_minutes", ""),
+            ("Switches / hour", "switches_per_hour", ""),
+            ("Avg longest stretch (min)", "longest_stretch_avg", "")])
+    trends_card = (
+        "<div class='card'><h3>This week vs last week</h3>"
+        "<p class='note'>%s vs %s.</p>"
+        "<table><tr><th></th><th>Last week</th><th>This week</th>"
+        "<th>Change</th></tr>%s</table>"
+        "<details class='how'><summary>How we compute this</summary>"
+        "<p class='note'>This week runs Monday to today; last week is "
+        "Monday to Sunday. Change is this week minus last week.</p>"
+        "</details></div>"
+        % (trends["this_label"], trends["last_label"], trend_rows))
+
+    # --- card 7: interactive day timeline ---
+    prev_day = (date.fromisoformat(sel_day) - timedelta(days=1)).isoformat()
+    hour_blocks = []
+    for info in timeline["hours"]:
+        hour = info["hour"]
+        if info["minutes"] <= 0:
+            hour_blocks.append(
+                "<div class='note'>%02d:00 -- no activity</div>" % hour)
+            continue
+        quarters = "".join(
+            "<span style='display:inline-block;width:14px;height:14px;"
+            "background:%s' title='%s'></span>"
+            % (_SCORE_CELL_COLORS[q][0] if q is not None else "#f0f0f0",
+               ("score %+d" % q) if q is not None else "no activity")
+            for q in info["quarters"])
+        pulse_str = ("Pulse %.0f" % info["pulse"]) \
+            if info["pulse"] is not None else "no score"
+        act_rows = "".join(
+            "<tr><td>%s</td><td>%s</td><td>%.0f min</td>"
+            "<td style='background:%s;color:%s;text-align:center'>%+d</td>"
+            "</tr>"
+            % (escape(a["app"]), escape(a["title"][:50]), a["minutes"],
+               _SCORE_CELL_COLORS[a["score"]][0],
+               _SCORE_CELL_COLORS[a["score"]][1], a["score"])
+            for a in info["activities"])
+        hour_blocks.append(
+            "<details><summary>%s <b>%02d:00</b> -- %.0f min, %s"
+            "</summary><table><tr><th>App</th><th>Title</th><th>Time</th>"
+            "<th>Score</th></tr>%s</table></details>"
+            % (quarters, hour, info["minutes"], pulse_str, act_rows))
+    timeline_card = (
+        "<div class='card'><h3>Day timeline</h3>"
+        "<p class='note'>Showing <b>%s</b> -- "
+        "<a href='/intelligence?day=%s'>previous day</a> | "
+        "<a href='/intelligence'>today</a>. Click any hour to see the "
+        "activities inside it.</p>%s"
+        "<details class='how'><summary>How we compute this</summary>"
+        "<p class='note'>Each hour splits into 15-minute blocks, colored "
+        "by the dominant score (green = productive, red = distracting). "
+        "Expanding an hour lists the apps and titles in it.</p>"
+        "</details></div>"
+        % (sel_day, prev_day, "".join(hour_blocks)))
+
+    body = (chrono_card + rhythm_card + peaks_card + depth_card
+            + anatomy_card + trends_card + timeline_card)
+    return layout("Deep time", body, active="intelligence")
 
 
 if __name__ == "__main__":

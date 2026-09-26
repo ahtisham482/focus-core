@@ -90,16 +90,22 @@ def likely_installed(candidates=None):
     return None
 
 
-def detection_state(status=None, installed=None):
+_OMITTED = object()
+
+
+def detection_state(status=_OMITTED, installed=_OMITTED):
     """One of RUNNING / INSTALLED_NOT_RUNNING / NOT_INSTALLED.
 
     ``status`` and ``installed`` are injectable for tests; when omitted
     they are probed live.
     """
-    if status is None:
+    if status is _OMITTED:
         status = server_status()
+    elif status is None:
+        status = {}
     if status.get("running"):
         return RUNNING
-    if installed is None:
+    if installed is _OMITTED:
         installed = likely_installed()
     return INSTALLED_NOT_RUNNING if installed else NOT_INSTALLED
+

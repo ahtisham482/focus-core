@@ -100,8 +100,8 @@ ARTICLES = {
         ],
         "trouble": [
             "No pop-ups? Make sure Focus Core is running and Windows "
-            "notifications are turned on (Settings / System / "
-            "Notifications).",
+            "notifications are turned on (open Settings, then System, "
+            "then Notifications).",
         ],
     },
     "focus": {
@@ -208,6 +208,35 @@ ARTICLES = {
             "then.",
         ],
     },
+    "intelligence": {
+        "title": "Deep time",
+        "href": "/intelligence",
+        "what": ("Answers three deeper questions: WHEN you are at your best "
+                 "(your chronotype -- morning person, night owl, or balanced "
+                 "-- plus a rhythm grid for each weekday), HOW DEEP you go "
+                 "(your longest unbroken focus stretches, how fast you get "
+                 "into focus, how often you switch apps), and WHAT breaks "
+                 "your focus (top distractors and the apps that pull you "
+                 "into them). It also has an interactive timeline: click "
+                 "any hour of the day to see the activities inside it."),
+        "do": [
+            "Read your chronotype, then schedule hard work inside your "
+            "peak hours.",
+            "Check \"Protect these hours\" for each weekday's best 2-hour "
+            "block and guard it like a meeting.",
+            "Use \"What breaks your focus\" to spot your biggest "
+            "distractors -- the entry points show what pulls you in.",
+            "Click an hour in the Day timeline to inspect what actually "
+            "happened inside it.",
+        ],
+        "trouble": [
+            "\"Not enough data yet\"? The rhythm, peaks, and depth cards "
+            "need several days of tracked history before they're useful.",
+            "Week trends look flat? They compare this week (Monday to "
+            "today) with last week -- early in the week there is less to "
+            "compare.",
+        ],
+    },
     "update": {
         "title": "Updates",
         "href": "/update",
@@ -264,6 +293,7 @@ NAV_HELP = {
     "timesheet": "timesheet",
     "report": "report",
     "coaching": "coaching",
+    "intelligence": "intelligence",
     "focus": "focus",
     "goals": "goals",
     "alerts": "alerts",

@@ -50,6 +50,11 @@ changed, so your records stay trustworthy.
 - **Coaching** — the 7-day hourly heatmap (when you focus best), your
   top 3 two-hour focus windows, and warnings (late nights, marathon
   days, distraction creep, low recovery).
+- **Deep time** — your chronotype (morning person / night owl), a
+  rhythm grid per weekday, each weekday's best 2-hour window, focus
+  depth (longest stretches, time to first focus, app switches), what
+  breaks your focus (top distractors + entry points), week-over-week
+  trends, and an interactive day timeline (click any hour).
 - **Focus** — start/end sessions, see your streak and past summaries.
 - **Goals** — daily targets with live progress bars. Pin the important
   ones to see them on Home.
