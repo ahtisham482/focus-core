@@ -56,6 +56,13 @@ changed, so your records stay trustworthy.
   breaks your focus (top distractors + entry points), week-over-week
   trends, and an interactive day timeline (click any hour).
 - **Focus** — start/end sessions, see your streak and past summaries.
+  Choose **Standard** (reminds you and minimizes the app) or **Hardcore**
+  (minimizes it and locks a 30-second "back to work" note on screen).
+- **Shield** — the distraction blocker: turn it on or off, add rules
+  (e.g. "no social apps on weekdays 9 to 6"), grant yourself an
+  emergency pass (1 to 60 minutes) when life interrupts, and see how
+  many times it stepped in today. A small floating badge can also show
+  the Shield's status on your desktop.
 - **Goals** — daily targets with live progress bars. Pin the important
   ones to see them on Home.
 - **Alerts** — pop-up warnings when you pass a limit (needs

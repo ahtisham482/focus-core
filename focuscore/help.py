@@ -129,6 +129,38 @@ ARTICLES = {
             "first.",
         ],
     },
+    "shield": {
+        "title": "Shield",
+        "href": "/shield",
+        "what": ("The hardcore distraction blocker. It watches which "
+                 "window is active and steps in at three levels: Soft "
+                 "reminds you, Firm reminds and minimizes the window, "
+                 "Hardcore minimizes and locks a full-screen note for "
+                 "30 seconds. Rules keep working outside focus sessions "
+                 "-- for example, no social media on weekday work hours. "
+                 "The small HUD in the corner always shows the shield's "
+                 "state."),
+        "do": [
+            "Add a rule: name it, pick app/website or category, choose "
+            "Soft/Firm/Hardcore, and set when it applies (days and "
+            "hours, or leave it always on).",
+            "Need a few minutes for something urgent? Start an "
+            "emergency pass -- it pauses the shield and is always "
+            "logged, so use it honestly.",
+            "Use the tray menu to turn the shield on or off and to "
+            "show or hide the HUD.",
+        ],
+        "trouble": [
+            "Shield not stopping anything? Make sure it is running on "
+            "the Shield page, and check the rule's schedule -- a rule "
+            "set to 09:00-18:00 does nothing at 20:00.",
+            "Windows system apps, the lock screen and installers are "
+            "never touched, on purpose.",
+            "Stuck in a Hardcore lock? Wait out the 30 seconds, end "
+            "the session, or start an emergency pass from the tray. "
+            "Ctrl+Alt+Del always works.",
+        ],
+    },
     "timesheet": {
         "title": "Timesheet",
         "href": "/timesheet",
@@ -295,6 +327,7 @@ NAV_HELP = {
     "coaching": "coaching",
     "intelligence": "intelligence",
     "focus": "focus",
+    "shield": "shield",
     "goals": "goals",
     "alerts": "alerts",
     "backup": "backup",

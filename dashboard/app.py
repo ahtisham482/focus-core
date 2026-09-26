@@ -48,6 +48,7 @@ NAV_LINKS = [
     ("coaching", "Coaching", "/coaching"),
     ("intelligence", "Deep time", "/intelligence"),
     ("focus", "Focus", "/focus"),
+    ("shield", "Shield", "/shield"),
     ("goals", "Goals", "/goals"),
     ("alerts", "Alerts", "/alerts"),
     ("backup", "Backup", "/backup"),
@@ -103,7 +104,8 @@ def layout(title, body, day=None, refresh=300, active="home", help_key=None):
         help_key = {"home": "home", "timesheet": "timesheet",
                     "report": "report", "coaching": "coaching",
                     "intelligence": "intelligence",
-                    "focus": "focus", "goals": "goals", "alerts": "alerts",
+                    "focus": "focus", "shield": "shield",
+                    "goals": "goals", "alerts": "alerts",
                     "backup": "backup", "review": "activities"}.get(active)
     help_href = "/help/" + help_key if help_key else "/help"
     footer = (
@@ -985,6 +987,13 @@ def focus_page():
         "checked> Strict -- block Personal (-1) and Distracting (-2)</label><br>"
         "<label><input type='radio' name='block_level' value='lenient'> "
         "Lenient -- block only Distracting (-2)</label></p>"
+        "<p><label><input type='radio' name='enforcement_mode' "
+        "value='strict' checked> Standard -- pop-up reminder and a "
+        "dismissible full-screen note</label><br>"
+        "<label><input type='radio' name='enforcement_mode' "
+        "value='hardcore'> Hardcore -- minimize the window and lock the "
+        "note for 30 seconds (no Alt+Tab). Choose this only if you mean "
+        "it.</label></p>"
         "<p><button type='submit'>Start session</button></p>"
         "</form>"
         "<p class='note'>Blocking starts automatically when the session "
@@ -1002,11 +1011,13 @@ def focus_start():
     label = (request.form.get("label") or "").strip()
     preset = request.form.get("preset") or "50"
     block_level = request.form.get("block_level") or "strict"
+    enforcement_mode = request.form.get("enforcement_mode") or "strict"
     if preset == "custom":
         minutes = request.form.get("custom_minutes")
     else:
         minutes = preset
-    result = focus_mod.start_session(label, minutes, block_level=block_level)
+    result = focus_mod.start_session(label, minutes, block_level=block_level,
+                                     enforcement_mode=enforcement_mode)
     if "error" not in result:
         # Blocking starts with the session -- no second manual step.
         from focuscore.blocker import ensure_guard_running
@@ -1902,6 +1913,264 @@ def _delta_str(value):
     if value < 0:
         return "&#9660; %.1f" % abs(value)
     return "= 0"
+
+
+@app.route("/shield")
+def shield_page():
+    from focuscore import shield as shield_mod
+
+    daemon = shield_mod.shield_daemon_running()
+    killed = shield_mod.shield_killswitch_on()
+    active_pass = shield_mod.pass_active()
+    hud_on = store.get_setting("hud_enabled", "1") == "1"
+    rules = store.get_block_rules()
+    passes = store.get_recent_passes(limit=10)
+    blocks = store.get_today_blocks(limit=30)
+
+    if killed:
+        status_html = ("<p><b>Status:</b> Shield is <b>off</b> (kill "
+                       "switch is on).</p>")
+    elif daemon:
+        status_html = ("<p><b>Status:</b> Shield is <b>running</b> -- "
+                       "watching for distractions.</p>")
+    else:
+        status_html = ("<p><b>Status:</b> Shield is <b>not running</b>. "
+                       "Turn it on below.</p>")
+    if active_pass:
+        try:
+            until = (datetime.fromisoformat(active_pass["started_at"])
+                     + timedelta(minutes=float(
+                         active_pass["minutes"]))).strftime("%H:%M")
+        except (ValueError, TypeError):
+            until = "soon"
+        status_html += ("<p class='note'>Emergency pass active until %s "
+                        "(%s).</p>" % (until,
+                                        escape(active_pass.get("reason")
+                                               or "")))
+    status_html += (
+        "<form method='post' action='/shield/toggle' style='display:inline'>"
+        "<button type='submit' name='on' value='%s'>%s</button></form> "
+        "<form method='post' action='/shield/hud' style='display:inline'>"
+        "<button type='submit' name='enabled' value='%s'>HUD: %s</button>"
+        "</form>"
+        % ("0" if (daemon and not killed) else "1",
+           "Turn shield off" if (daemon and not killed)
+           else "Turn shield on",
+           "0" if hud_on else "1", "on" if hud_on else "off"))
+
+    if rules:
+        rows = []
+        for r in rules:
+            sched = _rule_schedule_text(r)
+            rows.append(
+                "<tr><td>%s</td><td>%s</td><td>%s</td><td>%s</td>"
+                "<td>%s</td><td>%s</td>"
+                "<td><form method='post' action='/shield/rule/toggle' "
+                "style='display:inline'>"
+                "<input type='hidden' name='id' value='%d'>"
+                "<button type='submit' name='enabled' value='%s'>%s</button>"
+                "</form> "
+                "<form method='post' action='/shield/rule/delete' "
+                "style='display:inline' "
+                "onsubmit=\"return confirm('Delete this rule?')\">"
+                "<input type='hidden' name='id' value='%d'>"
+                "<button type='submit'>Delete</button></form></td></tr>"
+                % (escape(r["name"]), escape(r["rule_type"]),
+                   escape(r["key"]), escape(r["action"]), sched,
+                   "on" if r["enabled"] else "off", r["id"],
+                   "0" if r["enabled"] else "1",
+                   "Disable" if r["enabled"] else "Enable", r["id"]))
+        rules_html = ("<table><tr><th>Name</th><th>Type</th><th>Key</th>"
+                      "<th>Action</th><th>Schedule</th><th>On</th>"
+                      "<th></th></tr>%s</table>" % "".join(rows))
+    else:
+        rules_html = ("<p class='note'>No rules yet. Add one below -- "
+                      "for example, block <i>twitter.com</i> every "
+                      "weekday 09:00-18:00.</p>")
+    rules_html += (
+        "<h3>Add a rule</h3>"
+        "<form method='post' action='/shield/rule/add'>"
+        "<p><label>Name <input type='text' name='name' required "
+        "placeholder='e.g. No social at work' size='24'></label></p>"
+        "<p><label>Type <select name='rule_type'>"
+        "<option value='app'>App / website</option>"
+        "<option value='category'>Category</option></select></label> "
+        "<label>Key <input type='text' name='key' required "
+        "placeholder='chrome.exe or twitter.com or social' size='24'>"
+        "</label></p>"
+        "<p class='note'>Key: for an app, the program name or website "
+        "(e.g. chrome.exe, youtube.com). For a category, one of: social, "
+        "entertainment, news, shopping, other.</p>"
+        "<p><label>Action <select name='action'>"
+        "<option value='soft'>Soft -- remind me</option>"
+        "<option value='firm'>Firm -- remind + minimize</option>"
+        "<option value='hardcore'>Hardcore -- minimize + 30 s lock"
+        "</option></select></label></p>"
+        "<p><label>Days <input type='text' name='days' value='all' "
+        "size='14'></label> <span class='note'>all, or e.g. 0,1,2,3,4 "
+        "for Mon-Fri (Mon=0, Sun=6)</span></p>"
+        "<p><label>From <input type='text' name='start_time' "
+        "placeholder='09:00' size='6'></label> "
+        "<label>To <input type='text' name='end_time' "
+        "placeholder='18:00' size='6'></label> "
+        "<span class='note'>24-hour HH:MM; empty = all day</span></p>"
+        "<p><button type='submit'>Add rule</button></p></form>")
+
+    pass_html = (
+        "<form method='post' action='/shield/pass'>"
+        "<p><label>Minutes <input type='number' name='minutes' value='5' "
+        "min='1' max='120' style='width:70px'></label> "
+        "<label>Reason <input type='text' name='reason' required "
+        "placeholder='e.g. waiting for a delivery call' size='30'>"
+        "</label></p>"
+        "<p><button type='submit'>Start emergency pass</button></p></form>")
+    if passes:
+        prows = []
+        for p in passes:
+            try:
+                when = datetime.fromisoformat(
+                    p["started_at"]).strftime("%H:%M")
+            except (ValueError, TypeError):
+                when = "?"
+            prows.append("<tr><td>%s</td><td>%s min</td><td>%s</td></tr>"
+                         % (when, p["minutes"],
+                            escape(p.get("reason") or "")))
+        pass_html += ("<table><tr><th>Started</th><th>Length</th>"
+                      "<th>Reason</th></tr>%s</table>" % "".join(prows))
+
+    if blocks:
+        brows = []
+        for b in blocks:
+            try:
+                when = datetime.fromisoformat(b["ts"]).strftime("%H:%M")
+            except (ValueError, TypeError):
+                when = "?"
+            brows.append(
+                "<tr><td>%s</td><td>%s</td><td>%s</td><td>%s</td></tr>"
+                % (when, escape(b.get("app") or ""),
+                   escape(b.get("title") or "")[:60],
+                   escape(b.get("action_taken") or "")))
+        blocks_html = ("<table><tr><th>Time</th><th>App</th><th>Window</th>"
+                       "<th>What happened</th></tr>%s</table>"
+                       % "".join(brows))
+    else:
+        blocks_html = ("<p class='note'>Nothing blocked today yet.</p>")
+
+    body = (
+        "<div class='card'><h3>Shield status</h3>%s</div>"
+        "<div class='card'><h3>Always-on rules</h3>%s</div>"
+        "<div class='card'><h3>Emergency pass</h3>"
+        "<p class='note'>Need 5 minutes for something urgent? A pass "
+        "pauses the shield -- it is always logged, so use it honestly."
+        "</p>%s</div>"
+        "<div class='card'><h3>Blocked today</h3>%s</div>"
+        % (status_html, rules_html, pass_html, blocks_html)
+    )
+    return layout("Shield", body, active="shield", help_key="shield")
+
+
+def _rule_schedule_text(rule):
+    days = (rule.get("days") or "all").strip().lower()
+    start = (rule.get("start_time") or "").strip()
+    end = (rule.get("end_time") or "").strip()
+    if days == "all" and not start:
+        return "always"
+    if start and end:
+        span = "%s-%s" % (start, end)
+    else:
+        span = "all day"
+    if days == "all":
+        return span
+    names = ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"]
+    try:
+        ds = [names[int(d)] for d in days.split(",") if d.strip()]
+        return "%s, %s" % (", ".join(ds), span)
+    except (ValueError, IndexError):
+        return span
+
+
+@app.route("/shield/rule/add", methods=["POST"])
+def shield_rule_add():
+    try:
+        store.create_block_rule(
+            request.form.get("name"), request.form.get("rule_type"),
+            request.form.get("key"), request.form.get("action"),
+            days=request.form.get("days") or "all",
+            start_time=request.form.get("start_time") or "",
+            end_time=request.form.get("end_time") or "")
+    except ValueError as exc:
+        return layout("Shield",
+                      "<div class='card'><p><b>Could not add rule:</b> %s"
+                      "</p><p><a href='/shield'>Back</a></p></div>"
+                      % escape(str(exc)), active="shield",
+                      help_key="shield"), 400
+    return redirect("/shield")
+
+
+@app.route("/shield/rule/toggle", methods=["POST"])
+def shield_rule_toggle():
+    try:
+        rule_id = int(request.form.get("id"))
+    except (TypeError, ValueError):
+        return redirect("/shield")
+    store.set_block_rule_enabled(
+        rule_id, request.form.get("enabled") == "1")
+    return redirect("/shield")
+
+
+@app.route("/shield/rule/delete", methods=["POST"])
+def shield_rule_delete():
+    try:
+        rule_id = int(request.form.get("id"))
+    except (TypeError, ValueError):
+        return redirect("/shield")
+    store.delete_block_rule(rule_id)
+    return redirect("/shield")
+
+
+@app.route("/shield/pass", methods=["POST"])
+def shield_pass():
+    try:
+        minutes = float(request.form.get("minutes") or 5)
+    except (TypeError, ValueError):
+        minutes = 5
+    reason = (request.form.get("reason") or "").strip()
+    if not reason:
+        return layout("Shield",
+                      "<div class='card'><p><b>A reason is required</b> -- "
+                      "that is the whole point of the pass.</p>"
+                      "<p><a href='/shield'>Back</a></p></div>",
+                      active="shield", help_key="shield"), 400
+    try:
+        store.create_pass(minutes, reason)
+    except ValueError as exc:
+        return layout("Shield",
+                      "<div class='card'><p><b>Could not start pass:</b> "
+                      "%s</p><p><a href='/shield'>Back</a></p></div>"
+                      % escape(str(exc)), active="shield",
+                      help_key="shield"), 400
+    return redirect("/shield")
+
+
+@app.route("/shield/toggle", methods=["POST"])
+def shield_toggle():
+    import os as _os
+    from focuscore import shield as shield_mod
+
+    if request.form.get("on") == "1":
+        shield_mod.shield_on()
+        if _os.name == "nt":
+            shield_mod.ensure_shield_running()
+    else:
+        shield_mod.shield_off()
+    return redirect("/shield")
+
+
+@app.route("/shield/hud", methods=["POST"])
+def shield_hud():
+    store.set_setting("hud_enabled",
+                      "1" if request.form.get("enabled") == "1" else "0")
+    return redirect("/shield")
 
 
 @app.route("/intelligence")

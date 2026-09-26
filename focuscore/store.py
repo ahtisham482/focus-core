@@ -6,6 +6,7 @@ wherever the folder is placed -- no absolute paths anywhere.
 """
 
 import sqlite3
+from datetime import date, datetime, timedelta
 
 from . import paths
 
@@ -518,6 +519,7 @@ def recent_firings(limit=20, path=None):
 # -------------------------------------------------------- focus sessions ---
 
 def _session_row(row):
+    keys = set(row.keys())
     return {
         "id": row["id"],
         "label": row["label"],
@@ -527,21 +529,29 @@ def _session_row(row):
         "ended_at": row["ended_at"],
         "status": row["status"],
         "block_level": row["block_level"],
+        # M0 migration-2 columns; default defensively for old readers.
+        "enforcement_mode": row["enforcement_mode"]
+        if "enforcement_mode" in keys else "strict",
+        "intercepted_count": row["intercepted_count"]
+        if "intercepted_count" in keys else 0,
     }
 
 
 def create_session(label, planned_minutes, started_at, planned_end_at,
-                   block_level, path=None):
+                   block_level, enforcement_mode="strict", path=None):
     """Insert a new focus session; returns its new id."""
+    if enforcement_mode not in ("strict", "hardcore"):
+        enforcement_mode = "strict"
     init_db(path)
     conn = get_db(path)
     try:
         cur = conn.execute(
             "INSERT INTO focus_sessions (label, planned_minutes, started_at, "
-            "planned_end_at, ended_at, status, block_level) "
-            "VALUES (?, ?, ?, ?, NULL, 'active', ?)",
+            "planned_end_at, ended_at, status, block_level, "
+            "enforcement_mode) "
+            "VALUES (?, ?, ?, ?, NULL, 'active', ?, ?)",
             (label, float(planned_minutes), started_at, planned_end_at,
-             block_level),
+             block_level, enforcement_mode),
         )
         conn.commit()
         return cur.lastrowid
@@ -604,18 +614,72 @@ def list_sessions(limit=20, path=None):
         conn.close()
 
 
-def record_block(session_id, ts, app, title, url, score, category, path=None):
-    """Remember one blocked distraction inside a focus session."""
+def record_block(session_id, ts, app, title, url, score, category,
+                 path=None, action_taken="blocked", process_name="",
+                 window_handle=0):
+    """Remember one blocked distraction (session or always-on shield).
+
+    action_taken / process_name / window_handle fill the M0
+    migration-2 columns; session_id 0 means "no session -- the shield".
+    """
     init_db(path)
     conn = get_db(path)
     try:
         conn.execute(
             "INSERT INTO focus_blocks "
-            "(session_id, ts, app, title, url, score, category) "
-            "VALUES (?, ?, ?, ?, ?, ?, ?)",
-            (session_id, ts, app, title, url, score, category),
+            "(session_id, ts, app, title, url, score, category, "
+            "action_taken, process_name, window_handle) "
+            "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+            (session_id, ts, app, title, url, score, category,
+             action_taken, process_name or "", window_handle or 0),
         )
         conn.commit()
+    finally:
+        conn.close()
+
+
+def increment_intercepted(session_id, path=None):
+    """Bump the M0 intercepted_count on a focus session."""
+    init_db(path)
+    conn = get_db(path)
+    try:
+        conn.execute(
+            "UPDATE focus_sessions SET intercepted_count = "
+            "COALESCE(intercepted_count, 0) + 1 WHERE id = ?",
+            (session_id,),
+        )
+        conn.commit()
+    finally:
+        conn.close()
+
+
+def count_blocks_today(path=None, day=None):
+    """How many blocks were recorded today (HUD + /shield)."""
+    init_db(path)
+    conn = get_db(path)
+    try:
+        day = day or date.today().isoformat()
+        row = conn.execute(
+            "SELECT COUNT(*) AS n FROM focus_blocks "
+            "WHERE substr(ts, 1, 10) = ?",
+            (day,),
+        ).fetchone()
+        return int(row["n"]) if row else 0
+    finally:
+        conn.close()
+
+
+def get_today_blocks(limit=50, path=None):
+    """Today's block log for /shield (newest first)."""
+    init_db(path)
+    conn = get_db(path)
+    try:
+        rows = conn.execute(
+            "SELECT * FROM focus_blocks WHERE substr(ts, 1, 10) = ? "
+            "ORDER BY ts DESC LIMIT ?",
+            (date.today().isoformat(), limit),
+        ).fetchall()
+        return [dict(r) for r in rows]
     finally:
         conn.close()
 
@@ -845,3 +909,218 @@ def day_is_locked(day, path=None):
     """True when the day has at least one entry and all are locked."""
     entries = list_entries(day=day, path=path)
     return bool(entries) and all(e["locked"] for e in entries)
+
+
+# ---------------------------------------------------------------------------
+# Settings (Phase 7) -- simple key/value store, created by migration 5.
+# ---------------------------------------------------------------------------
+
+def get_setting(key, default=None, path=None):
+    """Read a setting; returns default when missing. Never raises."""
+    try:
+        init_db(path)
+        conn = get_db(path)
+        try:
+            row = conn.execute(
+                "SELECT value FROM settings WHERE key = ?", (key,)
+            ).fetchone()
+            return row["value"] if row else default
+        finally:
+            conn.close()
+    except Exception:
+        return default
+
+
+def set_setting(key, value, path=None):
+    """Write a setting (upsert). Never raises."""
+    try:
+        init_db(path)
+        conn = get_db(path)
+        try:
+            conn.execute(
+                "INSERT INTO settings (key, value) VALUES (?, ?) "
+                "ON CONFLICT(key) DO UPDATE SET value = excluded.value",
+                (key, str(value)),
+            )
+            conn.commit()
+        finally:
+            conn.close()
+    except Exception:
+        pass
+
+
+# ---------------------------------------------------------------------------
+# Block rules (Phase 7) -- always-on scheduled shield rules.
+# ---------------------------------------------------------------------------
+
+RULE_ACTIONS = ("soft", "firm", "hardcore")
+RULE_TYPES = ("app", "category")
+
+
+def create_block_rule(name, rule_type, key, action, days="all",
+                      start_time="", end_time="", path=None):
+    """Insert a block rule; returns its new id. Raises ValueError on bad input."""
+    name = (name or "").strip()
+    rule_type = (rule_type or "").strip().lower()
+    key = (key or "").strip().lower()
+    action = (action or "").strip().lower()
+    if not name:
+        raise ValueError("Rule needs a name.")
+    if rule_type not in RULE_TYPES:
+        raise ValueError("rule_type must be one of %s." % (RULE_TYPES,))
+    if not key:
+        raise ValueError("Rule needs a key (app/process name or category).")
+    if action not in RULE_ACTIONS:
+        raise ValueError("action must be one of %s." % (RULE_ACTIONS,))
+    for label, val in (("start_time", start_time), ("end_time", end_time)):
+        val = (val or "").strip()
+        if val:
+            try:
+                h, m = int(val[0:2]), int(val[3:5])
+                assert 0 <= h < 24 and 0 <= m < 60 and len(val) == 5
+            except (ValueError, IndexError, AssertionError):
+                raise ValueError("%s must be HH:MM." % label)
+    init_db(path)
+    conn = get_db(path)
+    try:
+        cur = conn.execute(
+            "INSERT INTO block_rules (name, rule_type, key, action, days, "
+            "start_time, end_time, enabled, created_at) "
+            "VALUES (?, ?, ?, ?, ?, ?, ?, 1, ?)",
+            (name, rule_type, key, action,
+             (days or "all").strip().lower(),
+             (start_time or "").strip(), (end_time or "").strip(),
+             datetime.now().isoformat(timespec="seconds")),
+        )
+        conn.commit()
+        return cur.lastrowid
+    finally:
+        conn.close()
+
+
+def get_block_rules(path=None, only_enabled=False):
+    """All block rules (dicts), newest first."""
+    init_db(path)
+    conn = get_db(path)
+    try:
+        sql = "SELECT * FROM block_rules"
+        if only_enabled:
+            sql += " WHERE enabled = 1"
+        sql += " ORDER BY id DESC"
+        return [dict(r) for r in conn.execute(sql).fetchall()]
+    finally:
+        conn.close()
+
+
+def set_block_rule_enabled(rule_id, enabled, path=None):
+    """Enable/disable a rule; returns True when a row changed."""
+    init_db(path)
+    conn = get_db(path)
+    try:
+        cur = conn.execute(
+            "UPDATE block_rules SET enabled = ? WHERE id = ?",
+            (1 if enabled else 0, rule_id),
+        )
+        conn.commit()
+        return cur.rowcount > 0
+    finally:
+        conn.close()
+
+
+def delete_block_rule(rule_id, path=None):
+    """Delete a rule; returns True when a row was removed."""
+    init_db(path)
+    conn = get_db(path)
+    try:
+        cur = conn.execute(
+            "DELETE FROM block_rules WHERE id = ?", (rule_id,))
+        conn.commit()
+        return cur.rowcount > 0
+    finally:
+        conn.close()
+
+
+# ---------------------------------------------------------------------------
+# Emergency passes (Phase 7) -- timed, logged, never fail closed.
+# ---------------------------------------------------------------------------
+
+def create_pass(minutes, reason, now=None, path=None):
+    """Create an emergency pass; returns the pass dict.
+
+    On SQLite failure (locked/busy) falls back to a JSONL sidecar file
+    plus an in-memory copy (Qwen R7) -- a pass must NEVER fail closed.
+    """
+    now = now or datetime.now()
+    try:
+        minutes = float(minutes)
+    except (TypeError, ValueError):
+        minutes = 0
+    if not 0 < minutes <= 120:
+        raise ValueError("Pass length must be 1-120 minutes.")
+    reason = (reason or "").strip() or "no reason given"
+    started_at = now.isoformat(timespec="seconds")
+    row = {"started_at": started_at, "minutes": minutes,
+           "reason": reason}
+    try:
+        init_db(path)
+        conn = get_db(path)
+        try:
+            cur = conn.execute(
+                "INSERT INTO block_passes (started_at, minutes, reason) "
+                "VALUES (?, ?, ?)",
+                (started_at, minutes, reason),
+            )
+            conn.commit()
+            row["id"] = cur.lastrowid
+        finally:
+            conn.close()
+        return row
+    except Exception:
+        # R7: SQLite unreachable -- memory + JSONL fallback.
+        from . import shield as shield_mod
+        shield_mod.remember_memory_pass(started_at, minutes, reason)
+        try:
+            import json
+            with open(shield_mod.fallback_passes_path(), "a",
+                      encoding="utf-8") as fh:
+                fh.write(json.dumps(row) + "\n")
+        except Exception:
+            pass
+        return row
+
+
+def get_active_pass(now=None, path=None):
+    """The currently active pass, or None. Never raises."""
+    now = now or datetime.now()
+    try:
+        init_db(path)
+        conn = get_db(path)
+        try:
+            rows = conn.execute(
+                "SELECT * FROM block_passes ORDER BY id DESC LIMIT 50"
+            ).fetchall()
+        finally:
+            conn.close()
+        for r in rows:
+            try:
+                start = datetime.fromisoformat(r["started_at"])
+                if start <= now < start + timedelta(
+                        minutes=float(r["minutes"])):
+                    return dict(r)
+            except (ValueError, TypeError):
+                continue
+    except Exception:
+        pass
+    return None
+
+
+def get_recent_passes(limit=20, path=None):
+    """Recent passes (newest first) for the /shield audit list."""
+    init_db(path)
+    conn = get_db(path)
+    try:
+        return [dict(r) for r in conn.execute(
+            "SELECT * FROM block_passes ORDER BY id DESC LIMIT ?",
+            (limit,)).fetchall()]
+    finally:
+        conn.close()

@@ -172,6 +172,14 @@ def main():
         _tell_user(str(exc))
         return
     maybe_backup()
+    # Phase 7: one shield daemon covers sessions and always-on rules.
+    try:
+        import os as _os
+        if _os.name == "nt":
+            from . import shield as _shield
+            _shield.ensure_shield_running()
+    except Exception:  # noqa: BLE001 -- shield is best-effort
+        pass
     open_app_window()
 
 

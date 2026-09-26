@@ -17,7 +17,6 @@ Usage:
 
 import argparse
 import sys
-import time
 from datetime import datetime, timedelta
 
 from .focus import BLOCK_LEVELS
@@ -276,76 +275,27 @@ def show_block_overlay(label, app, session_id, db_path=None):
 
 
 def run_enforcer(poll_seconds=5, db_path=None):
-    """Loop: refresh today's data, enforce the active session, sleep.
+    """Session-only enforcement (``python -m focuscore.blocker --enforce``).
 
-    Stops when no session is active. One bad poll never kills the loop.
+    Phase 7: delegates to the shield daemon in session-only mode (one
+    daemon covers sessions AND always-on rules). The legacy loop below
+    is retired; enforce_once() stays for the old unit tests.
     """
-    from datetime import date
-
-    from . import focus as focus_mod
-    from .ingest import ActivityWatchClient, ActivityWatchError
-    from .pipeline import run_day
-    from .taxonomy import categorize as categorize_fn
-
-    print("Focus guard running: blocking distractions while a session is "
-          "active. Close this window to stop.")
-    client = ActivityWatchClient()
-    try:
-        while True:
-            try:
-                session = focus_mod.get_active_session(db_path=db_path)
-                if not session:
-                    print("No active focus session -- guard stopping.")
-                    break
-                try:
-                    run_day(date.today(), db_path=db_path)
-                except ActivityWatchError as exc:
-                    print("Warning: %s -- enforcing on stored data." % exc)
-                result = enforce_once(
-                    session, client, categorize_fn, _desktop_notify_block,
-                    show_block_overlay, db_path=db_path)
-                if result["action"] == "blocked" and result.get("notified"):
-                    print("Blocked: %s (%s)"
-                          % (result["app"], result["category"]))
-            except Exception as exc:  # one bad poll never kills enforcement
-                print("enforcer poll failed: %s" % exc, file=sys.stderr)
-            time.sleep(poll_seconds)
-    except KeyboardInterrupt:
-        print("Stopped.")
+    from .shield import run_shield
+    print("Focus guard: delegating to the shield daemon "
+          "(session-only).")
+    run_shield(db_path=db_path, session_only=True)
 
 
 def ensure_guard_running():
-    """Start the enforcement loop in the background; never raises.
+    """Start enforcement in the background; never raises.
 
-    Call this right after a session is *newly* created so blocking works
-    without a second manual step (previously the user had to double-click
-    focus-watch.bat themselves, and most never did). The loop exits on its
-    own when the session ends. Only call it for a fresh session:
-    start_session() refuses to create one while another is active, so a
-    newly created session means no guard is running for it yet.
-    Returns True when the guard process was launched.
+    Phase 7: delegates to shield.ensure_shield_running(). Kept under
+    the old name so focus-watch.bat and existing callers keep working.
+    Returns True when the launch was attempted.
     """
-    import os
-    import subprocess
-    import sys
-    try:
-        root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-        kwargs = {
-            "cwd": root,
-            "stdin": subprocess.DEVNULL,
-            "stdout": subprocess.DEVNULL,
-            "stderr": subprocess.DEVNULL,
-        }
-        if os.name == "nt":
-            # No console window when the server runs under python.exe.
-            kwargs["creationflags"] = getattr(subprocess,
-                                              "CREATE_NO_WINDOW", 0)
-        subprocess.Popen(
-            [sys.executable, "-m", "focuscore.blocker", "--enforce"],
-            **kwargs)
-        return True
-    except Exception:  # noqa: BLE001 -- guard is best-effort
-        return False
+    from .shield import ensure_shield_running
+    return ensure_shield_running()
 
 
 def main():

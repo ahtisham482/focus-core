@@ -50,12 +50,16 @@ def _to_naive(dt):
     return dt
 
 
+ENFORCEMENT_MODES = ("strict", "hardcore")
+
+
 def start_session(label, duration_minutes, block_level="strict",
-                  db_path=None, now=None):
+                  db_path=None, now=None, enforcement_mode="strict"):
     """Start a focus session; returns the session dict or {"error": ...}.
 
     Starting fails when another session is already active -- finish or
-    abort it first.
+    abort it first. enforcement_mode: "strict" (notify + overlay) or
+    "hardcore" (minimize + 30 s locked overlay; explicit opt-in).
     """
     now = now or datetime.now()
     label = (label or "").strip()
@@ -71,6 +75,9 @@ def start_session(label, duration_minutes, block_level="strict",
     if block_level not in BLOCK_LEVELS:
         return {"error": "block_level must be one of %s."
                 % sorted(BLOCK_LEVELS)}
+    if enforcement_mode not in ENFORCEMENT_MODES:
+        return {"error": "enforcement_mode must be one of %s."
+                % list(ENFORCEMENT_MODES)}
 
     active = store.get_active_session(path=db_path)
     if active:
@@ -80,7 +87,7 @@ def start_session(label, duration_minutes, block_level="strict",
     planned_end = now + timedelta(minutes=minutes)
     session_id = store.create_session(
         label, minutes, _now_iso(now), _now_iso(planned_end), block_level,
-        path=db_path)
+        enforcement_mode=enforcement_mode, path=db_path)
     return store.get_session(session_id, path=db_path)
 
 

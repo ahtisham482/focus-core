@@ -400,8 +400,8 @@ def test_legacy_9_tables_data_preservation_and_defaults(tmp_path: Path) -> None:
         assert "idx_afk_intervals_start" in idx_names
         assert "idx_timesheet_session" in idx_names
 
-        # PRAGMA user_version is 4
-        assert conn.execute("PRAGMA user_version").fetchone()[0] == 4
+        # PRAGMA user_version is 5
+        assert conn.execute("PRAGMA user_version").fetchone()[0] == 5
     finally:
         conn.close()
 

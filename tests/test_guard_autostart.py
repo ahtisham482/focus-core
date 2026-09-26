@@ -16,7 +16,8 @@ from focuscore import blocker
 from focuscore import tray as tray_mod
 
 
-def test_ensure_guard_running_spawns_blocker(monkeypatch):
+def test_ensure_guard_running_spawns_shield(monkeypatch):
+    # Phase 7: the guard delegates to the one shield daemon.
     calls = []
 
     class FakePopen:
@@ -27,7 +28,7 @@ def test_ensure_guard_running_spawns_blocker(monkeypatch):
     assert blocker.ensure_guard_running() is True
     assert len(calls) == 1
     cmd, kwargs = calls[0]
-    assert cmd == [sys.executable, "-m", "focuscore.blocker", "--enforce"]
+    assert cmd == [sys.executable, "-m", "focuscore.shield", "--run"]
     assert kwargs["stdout"] is subprocess.DEVNULL
     assert kwargs["stderr"] is subprocess.DEVNULL
     if os.name == "nt":

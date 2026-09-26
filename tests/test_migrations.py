@@ -64,7 +64,7 @@ def test_fresh_db_applies_all_migrations(tmp_path: Path) -> None:
         ).fetchall()
         assert len(rows) == migrations.LATEST_VERSION
         versions = [r["version"] for r in rows]
-        assert versions == [1, 2, 3, 4]
+        assert versions == [1, 2, 3, 4, 5]
 
         # Table & Column verifications
         # 1. afk_intervals
@@ -313,7 +313,8 @@ def test_atomic_rollback_and_restore_on_failure(
         c.execute("CREATE TABLE partial_fault_table (id INT)")
         raise RuntimeError("DISK_IO_SIMULATED_FAILURE")
 
-    bad_migration = migrations.Migration(5, "0005_faulty", failing_step)
+    bad_migration = migrations.Migration(
+            migrations.LATEST_VERSION + 1, "0006_faulty", failing_step)
     monkeypatch.setattr(
         migrations, "MIGRATIONS", migrations.MIGRATIONS + [bad_migration]
     )
@@ -362,7 +363,8 @@ def test_rollback_cleans_up_wal_and_shm(
     def failing_step(c: sqlite3.Connection) -> None:
         raise RuntimeError("FAIL_AND_CLEANUP_WAL")
 
-    bad_mig = migrations.Migration(5, "0005_fail", failing_step)
+    bad_mig = migrations.Migration(
+            migrations.LATEST_VERSION + 1, "0006_fail", failing_step)
     monkeypatch.setattr(
         migrations, "MIGRATIONS", migrations.MIGRATIONS + [bad_mig]
     )
@@ -479,7 +481,8 @@ def test_rollback_refuses_corrupted_snapshot(
     def failing_step(c: sqlite3.Connection) -> None:
         raise RuntimeError("FAIL_AND_TRIGGER_RESTORE")
 
-    bad_mig = migrations.Migration(5, "0005_fail", failing_step)
+    bad_mig = migrations.Migration(
+            migrations.LATEST_VERSION + 1, "0006_fail", failing_step)
     monkeypatch.setattr(
         migrations, "MIGRATIONS", migrations.MIGRATIONS + [bad_mig]
     )

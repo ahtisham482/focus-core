@@ -268,8 +268,43 @@ class TrayApp:
                 except Exception:  # noqa: BLE001
                     pass
 
+    def on_shield_toggle(self, icon=None, item=None):
+        from . import shield as shield_mod
+        if shield_mod.shield_daemon_running() \
+                and not shield_mod.shield_killswitch_on():
+            shield_mod.shield_off()
+            self._notify("Shield turned off.")
+        else:
+            shield_mod.shield_on()
+            shield_mod.ensure_shield_running()
+            self._notify("Shield turned on.")
+
+    def on_emergency_pass(self, icon=None, item=None):
+        import webbrowser
+        from . import launcher
+        webbrowser.open(launcher.APP_URL + "/shield")
+
+    def on_hud_toggle(self, icon=None, item=None):
+        from . import store
+        current = store.get_setting("hud_enabled", "1") == "1"
+        store.set_setting("hud_enabled", "0" if current else "1")
+        self._notify("HUD %s." % ("hidden" if current else "shown"))
+
     def build_menu(self):
         import pystray
+        from . import shield as shield_mod
+        from . import store
+
+        def shield_label(text):
+            if shield_mod.shield_daemon_running() \
+                    and not shield_mod.shield_killswitch_on():
+                return "Turn shield off"
+            return "Turn shield on"
+
+        def hud_label(text):
+            on = store.get_setting("hud_enabled", "1") == "1"
+            return "Hide HUD" if on else "Show HUD"
+
         return pystray.Menu(
             pystray.MenuItem("Open Focus Core", self.on_open,
                              default=True),
@@ -277,6 +312,10 @@ class TrayApp:
                              self.on_quick_session),
             pystray.MenuItem(lambda text: today_pulse_text(self.db_path),
                              None, enabled=False),
+            pystray.Menu.SEPARATOR,
+            pystray.MenuItem(shield_label, self.on_shield_toggle),
+            pystray.MenuItem("Emergency pass...", self.on_emergency_pass),
+            pystray.MenuItem(hud_label, self.on_hud_toggle),
             pystray.Menu.SEPARATOR,
             pystray.MenuItem("Back up now", self.on_backup),
             pystray.MenuItem("Check for updates...", self.on_check_updates),
@@ -311,6 +350,14 @@ class TrayApp:
 
         self.ensure_server()
         launcher.maybe_backup()
+        # Phase 7: one shield daemon covers sessions and always-on rules.
+        try:
+            import os as _os
+            if _os.name == "nt":
+                from . import shield as _shield
+                _shield.ensure_shield_running()
+        except Exception:  # noqa: BLE001 -- shield is best-effort
+            pass
         threading.Thread(target=self._watch_for_update, daemon=True,
                          name="focuscore-update-watch").start()
         self.icon = pystray.Icon("focus-core", make_icon_image(),

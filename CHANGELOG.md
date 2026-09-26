@@ -1,5 +1,26 @@
 # Changelog
 
+## [v1.8.0] — 2026-09-27 (Sprint 3, Phase 7 — UNRELEASED, pending PC verification)
+Hardcore Distraction Blocker: the old pop-up blocker is replaced by a
+single "Shield" background guard built only from the Python standard
+library (no new dependencies). The Shield watches which app is in
+front (event-driven on Windows, never scans your files) and enforces
+three levels: **soft** (reminds you with a note), **firm** (reminds you
+and minimizes the app), **hardcore** (minimizes it and locks a
+30-second full-screen note). Rules run all day (app / process /
+category, with days + hours schedules, e.g. "no social apps weekdays
+9 to 6"); focus sessions can start in Standard or Hardcore mode. A
+small draggable HUD badge shows the Shield's status; an emergency pass
+(1–60 minutes) pauses everything when life interrupts, with a local
+backup so it still works if the database is busy. Safety rules: Windows
+system apps (Start menu, lock screen, task manager…) and admin-level
+apps it cannot identify are never touched — when in doubt the Shield
+does nothing. New modules `focuscore/win32.py`, `focuscore/shield.py`,
+`focuscore/hud.py`; database migration 5 (`block_rules`,
+`block_passes`, `settings`). Old sessions' `strict` mode maps to
+Standard. NOTE: no apps are ever closed — "blocking" means blocking the
+window, and nothing here can delete your work.
+
 ## [v1.7.0] — 2026-09-26 (Sprint 3, Phase 6)
 Deep Time Intelligence: a new "Deep time" page with your chronotype
 (morning person / night owl / balanced, from 28 days of per-weekday

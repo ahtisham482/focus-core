@@ -19,7 +19,7 @@ from . import backup, paths, store
 
 logger = logging.getLogger(__name__)
 
-LATEST_VERSION = 4
+LATEST_VERSION = 5
 
 
 class MigrationError(Exception):
@@ -214,6 +214,64 @@ def _migration_0004_projects_budget_billable(conn: sqlite3.Connection) -> None:
     )
 
 
+def _migration_0005_shield_rules(conn: sqlite3.Connection) -> None:
+    """Migration 5: always-on block rules, emergency passes, settings.
+
+    New tables only (no ALTER of existing tables), so the migration is
+    inherently additive and idempotent. Store schedule times as HH:MM
+    wall-clock strings; the shield evaluates them in local wall-clock
+    time (Phase 6 timezone logic).
+    """
+    conn.execute(
+        """
+        CREATE TABLE IF NOT EXISTS block_rules (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            name TEXT NOT NULL,
+            rule_type TEXT NOT NULL,      -- 'app' or 'category'
+            key TEXT NOT NULL,            -- exe basename or category
+            action TEXT NOT NULL,         -- 'soft' | 'firm' | 'hardcore'
+            days TEXT NOT NULL DEFAULT 'all',  -- 'all' or CSV 0-6 (Mon=0)
+            start_time TEXT NOT NULL DEFAULT '',  -- 'HH:MM' wall clock
+            end_time TEXT NOT NULL DEFAULT '',
+            enabled INTEGER NOT NULL DEFAULT 1,
+            created_at TEXT
+        )
+        """
+    )
+    conn.execute(
+        """
+        CREATE TABLE IF NOT EXISTS block_passes (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            started_at TEXT NOT NULL,
+            minutes REAL NOT NULL,
+            reason TEXT NOT NULL DEFAULT ''
+        )
+        """
+    )
+    conn.execute(
+        """
+        CREATE TABLE IF NOT EXISTS settings (
+            key TEXT PRIMARY KEY,
+            value TEXT NOT NULL DEFAULT ''
+        )
+        """
+    )
+    conn.execute(
+        "CREATE INDEX IF NOT EXISTS idx_block_rules_enabled "
+        "ON block_rules(enabled)"
+    )
+    conn.execute(
+        "CREATE INDEX IF NOT EXISTS idx_block_passes_started "
+        "ON block_passes(started_at)"
+    )
+    # Sensible defaults (INSERT OR IGNORE: keep user values on re-run).
+    conn.execute(
+        "INSERT OR IGNORE INTO settings (key, value) VALUES "
+        "('hud_enabled', '1'), "
+        "('shield_enabled', '1')"
+    )
+
+
 MIGRATIONS: List[Migration] = [
     Migration(1, "0001_afk_intervals", _migration_0001_afk_intervals),
     Migration(2, "0002_shield_columns", _migration_0002_shield_columns),
@@ -222,6 +280,11 @@ MIGRATIONS: List[Migration] = [
         4,
         "0004_projects_budget_billable",
         _migration_0004_projects_budget_billable,
+    ),
+    Migration(
+        5,
+        "0005_shield_rules",
+        _migration_0005_shield_rules,
     ),
 ]
 
