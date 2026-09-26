@@ -182,7 +182,9 @@ def day_page(day):
             aw_note = (
                 "<div class='card'><p><b>Tracker not running.</b></p>"
                 "<p class='note'>Could not reach ActivityWatch: %s<br>"
-                "Start ActivityWatch and reload this page. "
+                "Start ActivityWatch and reload this page -- or "
+                "<a href='/setup/activitywatch'>set it up</a> if it isn't "
+                "installed yet. "
                 "Your saved data is still shown below.</p></div>"
                 % escape(str(exc)))
     summary = store.get_day_summary(day)
@@ -190,13 +192,20 @@ def day_page(day):
     total = summary["total_seconds"]
 
     if total <= 0:
-        body = (
-            aw_note +
-            "<div class='card'><p>No tracked data for this day yet.</p>"
-            "<p class='note'>Run <code>python -m focuscore.pipeline --day %s</code> "
-            "(add <code>--demo</code> to try it without ActivityWatch).</p></div>" % day
-        )
-        return layout("Day " + day, body, day)
+        if aw_note:
+            # A stranger with no data and no tracker: plain words, not CLI.
+            empty = (
+                "<div class='card'><p>No tracked data for this day yet.</p>"
+                "<p class='note'>ActivityWatch isn't running, so nothing "
+                "was recorded. <a href='/setup/activitywatch'>Set up "
+                "ActivityWatch</a> to start tracking.</p></div>")
+        else:
+            empty = (
+                "<div class='card'><p>No tracked data for this day yet.</p>"
+                "<p class='note'>Run <code>python -m focuscore.pipeline "
+                "--day %s</code> (add <code>--demo</code> to try it without "
+                "ActivityWatch).</p></div>" % day)
+        return layout("Day " + day, aw_note + empty, day)
 
     cat_rows = "".join(
         "<tr><td>%s</td><td>%s (%+d)</td><td>%.2fh</td><td>%.1f%%</td></tr>"
@@ -354,12 +363,16 @@ def home_page():
     """Command center: today's Pulse, key stats, and one attention card
     per thing that needs the user -- each with exactly one button."""
     from focuscore import home as home_mod
+    from focuscore import activitywatch as aw_mod
 
     today = date.today().isoformat()
     try:
         run_day(date.today())
     except ActivityWatchError:
-        pass  # the "tracker isn't sending data" card covers this
+        pass  # the "ActivityWatch isn't running" card covers this
+
+    aw_status = aw_mod.server_status()
+    aw_state = aw_mod.detection_state(status=aw_status)
 
     summary = store.get_day_summary(today)
     pulse = productivity_pulse(summary["seconds_by_level"])
@@ -388,7 +401,7 @@ def home_page():
         "<div class='lbl'>focused hours</div></div>"
         "</div>" % (_hours(total), focus_hours))
 
-    cards = home_mod.attention_cards()
+    cards = home_mod.attention_cards(aw_state=aw_state)
     if cards:
         card_html = "".join(
             "<div class='card attention'><h3>%s</h3><p>%s</p>"
@@ -485,12 +498,35 @@ def welcome():
 
     check_html = ("<p class='note'><b>Check:</b> %s</p>" % escape(info["check"])
                   if info["check"] else "")
+    extra_html = ""
+    if step == 2:
+        # The ActivityWatch step adapts to reality: a green confirmation
+        # when it's running, a pointer to the setup page when it's not.
+        from focuscore import activitywatch as aw_mod
+        from focuscore import onboarding as ob_mod
+        aw_status = aw_mod.server_status()
+        aw_state = aw_mod.detection_state(status=aw_status)
+        extra_html = ob_mod.welcome_step_html(
+            aw_state, version=aw_status.get("version"))
     body = (
         "<div class='card'><div class='steps'>%s</div>"
-        "<div class='big-emoji'>%s</div><h2>%s</h2><p>%s</p>%s%s</div>"
+        "<div class='big-emoji'>%s</div><h2>%s</h2><p>%s</p>%s%s%s</div>"
         % (dots, info["emoji"], escape(info["title"]),
-           escape(info["text"]), check_html, action))
+           escape(info["text"]), check_html, extra_html, action))
     return layout("Welcome", body, refresh=3600)
+
+
+@app.route("/setup/activitywatch")
+def setup_activitywatch():
+    """Stranger onboarding: detect ActivityWatch and walk the user through
+    installing/starting it. The page re-probes on every load, so the
+    'Check again' button is just a link back here."""
+    from focuscore import activitywatch as aw_mod
+    from focuscore import onboarding as ob_mod
+    aw_status = aw_mod.server_status()
+    aw_state = aw_mod.detection_state(status=aw_status)
+    body = ob_mod.setup_page_html(aw_state, version=aw_status.get("version"))
+    return layout("Set up ActivityWatch", body, active="home")
 
 
 @app.route("/welcome/finish", methods=["POST"])

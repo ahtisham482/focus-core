@@ -13,6 +13,7 @@ from datetime import datetime, timedelta
 
 import pytest
 
+from focuscore import activitywatch as aw_mod
 from focuscore import backup, home, launcher, store, tray
 from focuscore import focus as focus_mod
 from focuscore import goals as goals_mod
@@ -33,9 +34,12 @@ def _seed_day(db, day, events):
 
 
 def _cards(db, now, backup_dir):
+    # Pin ActivityWatch as "running": these card tests predate the
+    # aw_setup card and must not depend on a live localhost probe.
     return {c["code"]: c
             for c in home.attention_cards(db_path=db, now=now,
-                                          backup_dest_dir=backup_dir)}
+                                          backup_dest_dir=backup_dir,
+                                          aw_state=aw_mod.RUNNING)}
 
 
 @pytest.fixture()

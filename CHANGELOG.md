@@ -2,8 +2,38 @@
 
 All notable changes, newest first. Dates are PKT.
 
-## [v1.4.0] — 2026-09-26 (in progress)
-Sprint 2, Phase 3: one-click updates for installed copies.
+## [v1.5.0] — 2026-09-26 (in progress)
+Sprint 2, Phase 4: stranger onboarding — ActivityWatch detection + setup guide.
+- New `focuscore/activitywatch.py`: probes ActivityWatch's local API
+  (`/api/0/info`, 2s timeout, never raises) and reports one of three
+  plain states — `running`, `installed_not_running`, `not_installed`
+  (best-effort `aw-qt.exe` / Start Menu shortcut search on Windows).
+- New `focuscore/onboarding.py`: pure-HTML builders (no Flask) for the
+  setup page and the welcome-tour card; AW version strings are escaped.
+- New `/setup/activitywatch` dashboard page: shows the live state and a
+  3-step guide (download from the official releases page, run the
+  installer, start it from the Start menu) with a "Check again" button;
+  plus an optional browser-extension note. No JavaScript needed.
+- Welcome tour step 2 now adapts: green "all good" when ActivityWatch is
+  running, otherwise a pointer to the setup page (the tour's Next button
+  stays, so nobody is trapped).
+- Home page: a new "ActivityWatch isn't running" attention card (with the
+  right words for each state and one button to the setup page) replaces
+  the technical "Tracker isn't sending data" card when the server is
+  unreachable; the old card still covers stale-data-while-running.
+- Day page: the "Tracker not running" note links to the setup page, and
+  the empty-day message uses plain words instead of CLI commands when
+  the tracker is down.
+- 21 new tests in `tests/test_onboarding.py` (fake local HTTP server,
+  injected states, HTML assertions).
+
+## [v1.4.0] — 2026-09-26 (DEPLOYED)
+Sprint 2, Phase 3: one-click updates for installed copies. Verified on
+the PC via the operator loop 2026-09-26: 235/235 tests green, committed
+d058fd0, tag v1.4.0, CI built FocusCore-Setup-1.4.0.exe; installed copy
+verified (update-info.json, /update page graceful "couldn't check" while
+the repo is private, tray "Check for updates..."); test copy uninstalled
+and dev setup restored afterwards.
 - New `focuscore/updater.py`: checks the GitHub Releases API for a newer
   version (result cached a day, checked in a background thread at startup
   so launch never blocks), downloads the new `FocusCore-Setup-<ver>.exe`

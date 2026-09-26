@@ -11,6 +11,7 @@ with exactly one button, so the user always knows the single next step.
 
 from datetime import datetime, timedelta
 
+from . import activitywatch as aw_mod
 from . import backup, focus, goals as goals_mod, store, updater
 
 # Pulse color bands shown on the home page (0-100 scale).
@@ -53,12 +54,39 @@ def _latest_activity_ts(day, db_path):
     return latest
 
 
-def attention_cards(db_path=None, now=None, backup_dest_dir=None):
-    """Compute today's attention cards. Pure logic -- easy to unit test."""
+def attention_cards(db_path=None, now=None, backup_dest_dir=None,
+                    aw_state=None):
+    """Compute today's attention cards. Pure logic -- easy to unit test.
+
+    ``aw_state`` is one of activitywatch.RUNNING /
+    INSTALLED_NOT_RUNNING / NOT_INSTALLED; when omitted it is probed live.
+    """
     now = now or datetime.now()
     today = now.date().isoformat()
     yesterday = (now.date() - timedelta(days=1)).isoformat()
     cards = []
+
+    if aw_state is None:
+        aw_state = aw_mod.detection_state()
+
+    # 0. ActivityWatch isn't running -- nothing can be tracked. This beats
+    # every other card: without the tracker, the rest is noise.
+    if aw_state != aw_mod.RUNNING:
+        if aw_state == aw_mod.INSTALLED_NOT_RUNNING:
+            detail = ("It's installed but not running right now. Open "
+                      "ActivityWatch from the Start menu and tracking "
+                      "resumes by itself.")
+        else:
+            detail = ("Focus Core reads your activity from ActivityWatch, "
+                      "a free tracker that isn't installed yet. Setup takes "
+                      "about a minute.")
+        cards.append({
+            "code": "aw_setup",
+            "title": "ActivityWatch isn't running",
+            "detail": detail,
+            "button_text": "Set up ActivityWatch",
+            "button_href": "/setup/activitywatch",
+        })
 
     summary = store.get_day_summary(today, path=db_path)
 
@@ -122,11 +150,14 @@ def attention_cards(db_path=None, now=None, backup_dest_dir=None):
                 "button_href": "/goals",
             })
 
-    # 5. Tracker stopped sending data (daytime only).
+    # 5. Tracker stopped sending data (daytime only). Skipped when the
+    # "ActivityWatch isn't running" card is already shown -- one card per
+    # problem, and that one already links to the setup page.
+    aw_setup_shown = any(c["code"] == "aw_setup" for c in cards)
     latest = _latest_activity_ts(today, db_path)
     stale = latest is None or (
         now - latest).total_seconds() > TRACKER_STALE_MINUTES * 60
-    if stale and DAY_START_HOUR <= now.hour < DAY_END_HOUR:
+    if stale and DAY_START_HOUR <= now.hour < DAY_END_HOUR and not aw_setup_shown:
         cards.append({
             "code": "tracker",
             "title": "Tracker isn't sending data",
