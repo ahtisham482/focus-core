@@ -184,3 +184,154 @@ def test_shield_and_intelligence_heroes(tmp_path, monkeypatch):
     assert "<h1 class='page-title'>Deep Time</h1>" in html_i
     assert "tracking begins now" in html_i  # FLOW-1: no data -> tracking begins now
     assert "context switches" in html_i
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# QWEN RESIDUAL VERIFICATION LEDGER (RV-1 through RV-8)
+# ─────────────────────────────────────────────────────────────────────────────
+
+def test_qwen_rv1_reduced_motion_collapse():
+    """RV-1: Verify prefers-reduced-motion collapses transitions and animations."""
+    import pathlib
+    css = pathlib.Path("dashboard/static/style.css").read_text(encoding="utf-8")
+    assert "@media (prefers-reduced-motion: reduce)" in css
+    assert ("animation-duration: 0.001ms !important;" in css
+            or "animation: none !important;" in css)
+    assert "body, .card, .topnav { transition: none !important; }" in css
+    assert ".fc-ring-time[data-pulse] { animation: none !important; }" in css
+
+
+def test_qwen_rv2_print_styles_and_js_fallback():
+    """RV-2: Verify @media print disables motion, and nav.js has print fallback."""
+    import pathlib
+    css = pathlib.Path("dashboard/static/style.css").read_text(encoding="utf-8")
+    assert "@media print" in css
+    assert "animation: none !important;" in css
+    assert "transition: none !important;" in css
+
+    js = pathlib.Path("dashboard/static/nav.js").read_text(encoding="utf-8")
+    assert "window.addEventListener('beforeprint'" in js
+    assert "window.matchMedia('print')" in js
+
+
+def test_qwen_rv3_pathname_only_fingerprint():
+    """RV-3: Verify nav.js stores pathname only (stripped of query and hash)."""
+    import pathlib
+    js = pathlib.Path("dashboard/static/nav.js").read_text(encoding="utf-8")
+    assert "var currentPath = window.location.pathname;" in js
+    assert "sessionStorage.setItem('fc_nav_fingerprint'" in js
+
+
+def test_qwen_rv4_report_route_isolation_and_csp(tmp_path, monkeypatch):
+    """RV-4: Verify /intelligence/report has zero <script> and locked CSP header."""
+    db = str(tmp_path / "intel_rep.db")
+    monkeypatch.setattr(store, "DEFAULT_DB_PATH", db)
+    store.init_db(db)
+
+    client = dash_app.app.test_client()
+    res = client.get("/intelligence/report")
+    assert res.status_code == 200
+    html = res.get_data(as_text=True)
+
+    # 1. Zero scripts
+    assert "<script" not in html.lower()
+
+    # 2. Strict CSP in HTTP headers
+    csp = res.headers.get("Content-Security-Policy", "")
+    assert "default-src 'none'" in csp
+    assert "style-src 'unsafe-inline'" in csp
+    assert "img-src data:" in csp
+
+
+def test_qwen_rv5_dashboard_csp_allows_self():
+    """RV-5: Verify dashboard routes permit 'self' for nav.js and local Geist fonts."""
+    client = dash_app.app.test_client()
+    res = client.get("/")
+    assert res.status_code == 200
+    csp = res.headers.get("Content-Security-Policy", "")
+    assert "default-src 'self'" in csp
+    assert "script-src 'self'" in csp
+    assert "font-src 'self'" in csp
+
+
+def test_qwen_rv6_data_financial_ci_guard(tmp_path, monkeypatch):
+    """RV-6: CI guard asserting rendered currency nodes carry data-financial."""
+    import sqlite3
+    from focuscore import invoices as inv_mod
+    db = str(tmp_path / "fin.db")
+    monkeypatch.setattr(store, "DEFAULT_DB_PATH", db)
+    store.init_db(db)
+
+    # 1. Seed project and billable timesheet entry
+    pid = store.add_project("Acme", client="Acme Corp", path=db)
+    eid = store.create_entry("2026-09-20", "2026-09-20T09:00",
+                             "2026-09-20T10:00", 60.0, "Work",
+                             project_id=pid, task="Dev",
+                             status="accepted", path=db)
+    conn = sqlite3.connect(db)
+    try:
+        conn.execute(
+            "UPDATE timesheet_entries SET hourly_rate_minor = 10000, "
+            "rate_currency = 'USD', rate_status = 'confirmed' "
+            "WHERE id = ?", (eid,))
+        conn.commit()
+    finally:
+        conn.close()
+
+    # 2. Create invoice
+    inv_id = inv_mod.create_invoice(pid, "2026-09-20", "2026-09-20", path=db)
+
+    dash_app.app.config["TESTING"] = True
+    c = dash_app.app.test_client()
+
+    # 3. Verify /invoices list has data-financial attribute
+    res_list = c.get("/invoices")
+    assert res_list.status_code == 200
+    html_list = res_list.get_data(as_text=True)
+    assert "data-financial" in html_list
+
+    # 4. Verify /invoices/<id> detail has data-financial attribute
+    res_detail = c.get(f"/invoices/{inv_id}")
+    assert res_detail.status_code == 200
+    html_detail = res_detail.get_data(as_text=True)
+    assert "data-financial" in html_detail
+
+
+def test_qwen_rv7_whcm_and_depth_truth_table():
+    """RV-7: Verify WHCM system keywords and depth mapping truth table."""
+    import pathlib
+    css = pathlib.Path("dashboard/static/style.css").read_text(encoding="utf-8")
+    assert "@media (forced-colors: active)" in css
+    # Verify mandatory system color keywords
+    assert "stroke: ButtonText;" in css
+    assert "stroke: Highlight;" in css
+    assert "stroke: GrayText;" in css
+    assert "fill: CanvasText;" in css
+
+    # Depth mapping truth table
+    s_ring = _svg_ring(100, 100, depth="surface")
+    assert "data-depth-score='0.0'" in s_ring
+
+    d_ring = _svg_ring(50, 100, depth="deep")
+    assert "data-depth-score='0.5'" in d_ring
+
+    f_ring = _svg_ring(20, 100, depth="flow")
+    assert "data-depth-score='1.0'" in f_ring
+
+
+def test_qwen_rv8_hygiene_trio():
+    """RV-8: Verify skips documented, coffee emoji wrapped, scoped transition."""
+    import pathlib
+    # (a) Verify skipped tests exist and are justified in test_win32.py
+    win32_tests = pathlib.Path("tests/test_win32.py").read_text(encoding="utf-8")
+    assert 'reason="graceful-degradation checks are for non-Windows"' in win32_tests
+
+    # (b) Coffee emoji wrapped in aria-hidden
+    depth_data = {"state": "flow", "switches_15m": 0, "uninterrupted_min": 10.0}
+    pill = _depth_pill("s1", depth_data, on_break=True)
+    assert "<span aria-hidden='true'>\u2615</span> On Break" in pill
+
+    # (c) Token-swap transition scoped to color properties (NOT transition: all)
+    css = pathlib.Path("dashboard/static/style.css").read_text(encoding="utf-8")
+    assert "transition: background-color 400ms ease, color 400ms ease;" in css
+

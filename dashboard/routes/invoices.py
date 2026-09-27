@@ -39,8 +39,8 @@ def invoices_page():
         rows.append(
             "<tr><td><a href='/invoices/%d'>%s</a></td>"
             "<td>%s</td><td>%s</td><td>%s</td>"
-            "<td style='text-align:right'>%s</td>"
-            "<td style='text-align:right'>%s</td><td>%s</td></tr>"
+            "<td style='text-align:right' data-financial>%s</td>"
+            "<td style='text-align:right' data-financial>%s</td><td>%s</td></tr>"
             % (inv["id"], escape(title),
                escape(inv.get("project_name") or ""),
                escape(inv.get("client") or ""),
@@ -57,7 +57,8 @@ def invoices_page():
         " &middot; <a href='/invoices?status=sent'>Sent</a>"
         " &middot; <a href='/invoices?status=paid'>Paid</a>"
         " &middot; <a href='/invoices?status=void'>Void</a></p>"
-        "<p class='fine'>Outstanding on sent invoices: <strong>%s</strong>. "
+        "<p class='fine'>Outstanding on sent invoices: "
+        "<strong data-financial>%s</strong>. "
         "Invoices are numbered when sent; sent invoices are frozen and "
         "can only be voided, never edited.</p>"
         "<table class='tbl'><tr><th>Invoice</th><th>Project</th>"

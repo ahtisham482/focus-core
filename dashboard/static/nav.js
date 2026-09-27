@@ -156,10 +156,25 @@
     });
   }
 
-  // Qwen M-A1: beforeprint event finalizes all counters immediately
-  window.addEventListener('beforeprint', function () {
+  // Qwen M-A1 / RV-2: beforeprint event and matchMedia('print') fallback for headless PDF paths
+  function finalizeAllCounters() {
     activeCounters.forEach(function (finalize) { finalize(); });
-  });
+  }
+  window.addEventListener('beforeprint', finalizeAllCounters);
+  if (window.matchMedia) {
+    try {
+      var printMedia = window.matchMedia('print');
+      if (printMedia.addListener) {
+        printMedia.addListener(function (mql) {
+          if (mql.matches) finalizeAllCounters();
+        });
+      } else if (printMedia.addEventListener) {
+        printMedia.addEventListener('change', function (e) {
+          if (e.matches) finalizeAllCounters();
+        });
+      }
+    } catch (e) {}
+  }
 
   // ─────────────────────────────────────────────────────────────────────
   // NAVIGATION: Sliding active indicator pill

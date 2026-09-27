@@ -415,10 +415,19 @@ def _add_security_headers(response):
     # forms and inline style="" attributes on the home-page bar charts.
     # No external content is ever loaded and the server binds 127.0.0.1
     # only, so allowing inline does not widen the trust boundary.
-    response.headers["Content-Security-Policy"] = (
-        "default-src 'self'; script-src 'self' 'unsafe-inline'; "
-        "style-src 'self' 'unsafe-inline'"
-    )
+    # Qwen RV-4: /intelligence/report route isolation (zero script, strict locked CSP)
+    if request.path == "/intelligence/report":
+        response.headers["Content-Security-Policy"] = (
+            "default-src 'none'; style-src 'unsafe-inline'; img-src data:; "
+            "font-src data:"
+        )
+    else:
+        # Qwen RV-5: CSP permits 'self' for nav.js and local Geist fonts
+        response.headers["Content-Security-Policy"] = (
+            "default-src 'self'; script-src 'self' 'unsafe-inline'; "
+            "style-src 'self' 'unsafe-inline'; font-src 'self' data:; "
+            "img-src 'self' data:"
+        )
     return response
 
 
@@ -805,7 +814,7 @@ def _budget_hbar(label, consumed_text, cap_text, pct, band):
         "<div class='hbar'><span class='lbl'>%s</span>"
         "<span class='track'><span class='fill %s' style='width:%d%%'>"
         "</span></span>"
-        "<span class='val'>%s of %s</span> "
+        "<span class='val' data-financial>%s of %s</span> "
         "<span class='budget-band %s'>%s</span></div>"
         % (escape(label), escape(band), width, escape(consumed_text),
            escape(cap_text), escape(band), escape(band_label)))
@@ -1101,8 +1110,8 @@ def _invoice_detail_body(detail):
         line_rows.append(
             "<tr><td>%s</td><td>%s%s</td>"
             "<td style='text-align:right'>%s</td>"
-            "<td style='text-align:right'>%s</td>"
-            "<td style='text-align:right'>%s</td><td>%s</td></tr>"
+            "<td style='text-align:right' data-financial>%s</td>"
+            "<td style='text-align:right' data-financial>%s</td><td>%s</td></tr>"
             % (escape(line["entry_date"] or ""),
                escape(line["description"] or ""),
                locked,
@@ -1114,12 +1123,17 @@ def _invoice_detail_body(detail):
 
     totals_html = (
         "<table class='tbl'><tr><td>Subtotal</td>"
-        "<td style='text-align:right'>%s</td></tr>"
-        "<tr><td>Discount (%d%%)</td><td style='text-align:right'>%s</td></tr>"
-        "<tr><td>Tax (%d%%)</td><td style='text-align:right'>%s</td></tr>"
-        "<tr><th>Total (%s)</th><th style='text-align:right'>%s</th></tr>"
-        "<tr><td>Payments received</td><td style='text-align:right'>%s</td></tr>"
-        "<tr><th>Balance due</th><th style='text-align:right'>%s</th></tr>"
+        "<td style='text-align:right' data-financial>%s</td></tr>"
+        "<tr><td>Discount (%d%%)</td>"
+        "<td style='text-align:right' data-financial>%s</td></tr>"
+        "<tr><td>Tax (%d%%)</td>"
+        "<td style='text-align:right' data-financial>%s</td></tr>"
+        "<tr><th>Total (%s)</th>"
+        "<th style='text-align:right' data-financial>%s</th></tr>"
+        "<tr><td>Payments received</td>"
+        "<td style='text-align:right' data-financial>%s</td></tr>"
+        "<tr><th>Balance due</th>"
+        "<th style='text-align:right' data-financial>%s</th></tr>"
         "</table>"
         % (money_mod.format_minor(t["subtotal_minor"], currency),
            inv["discount_pct"],
@@ -1132,7 +1146,8 @@ def _invoice_detail_body(detail):
            money_mod.format_minor(inv["balance_minor"], currency)))
     if inv["overpaid_minor"]:
         totals_html += (
-            "<p class='msg'>Payments exceed the invoice total by %s. "
+            "<p class='msg'>Payments exceed the invoice total by "
+            "<span data-financial>%s</span>. "
             "Consider issuing a credit note or refund. (Informational only.)"
             "</p>"
             % money_mod.format_minor(inv["overpaid_minor"], currency))
@@ -1141,7 +1156,9 @@ def _invoice_detail_body(detail):
                           % escape(inv["due_date"] or ""))
 
     pay_rows = "".join(
-        "<tr><td>%s</td><td style='text-align:right'>%s</td><td>%s</td></tr>"
+        "<tr><td>%s</td>"
+        "<td style='text-align:right' data-financial>%s</td>"
+        "<td>%s</td></tr>"
         % (escape(p["paid_date"] or ""),
            money_mod.format_minor(p["amount_minor"] or 0, currency),
            escape(p["note"] or ""))

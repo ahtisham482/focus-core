@@ -157,7 +157,7 @@ def _depth_pill(session_id, depth, on_break=False):
             "<span id='fc-depth-pill' class='is-break' data-session-id='%s' "
             "style='border-color:var(--warn);color:var(--warn);"
             "background:var(--warn-soft)'>"
-            "\u2615 On Break</span>"
+            "<span aria-hidden='true'>\u2615</span> On Break</span>"
             "<div class='fc-depth-meter-track'>"
             "<div id='fc-depth-meter' style='width:100%%;background:var(--warn)'></div>"
             "</div>"

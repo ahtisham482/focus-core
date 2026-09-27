@@ -200,6 +200,8 @@ body {
   -webkit-font-smoothing: antialiased;
   -moz-osx-font-smoothing: grayscale;
   min-height: 100vh;
+  /* Qwen RV-8(c): token-swap transition scoped to color properties, NOT transition: all */
+  transition: background-color 400ms ease, color 400ms ease;
 }
 
 /* ════════════════════════════ LAYOUT ════════════════════════════════ */
@@ -836,17 +838,20 @@ footer a { color: var(--accent); }
 }
 
 /* ═══════════════════════ REDUCED MOTION ═════════════════════════════ */
-/* UI-9: gate decorative animations, NOT informational ones (ring color stays) */
+/* Qwen RV-1: collapse T-entrance stagger, count-up, ring pulse, and the 400ms token-swap transition */
 @media (prefers-reduced-motion: reduce) {
-  /* Stop all decorative motion */
+  *, *::before, *::after {
+    animation-duration: 0.001ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.001ms !important;
+  }
+  body, .card, .topnav { transition: none !important; }
   .card { animation: none !important; }
   .nav-indicator { transition: none !important; }
   .badge-toast { animation: none !important; }
-  /* Stop pulse — gated by JS too (nav.js sets animation:none on timeEl) */
   .fc-ring-time[data-pulse] { animation: none !important; }
-  /* Keep ring progress transition — it's informational state change */
-  /* Keep button transform — tactile feedback */
-  /* Keep .tl-block hover transform — interactive feedback */
+  .fc-ring { transition: none !important; }
+  .fc-ring-time { transition: none !important; }
 }
 
 /* ══════════════════════ REDUCED TRANSPARENCY (UI-8) ═══════════════════ */
@@ -924,8 +929,13 @@ footer a { color: var(--accent); }
 
 
 /* ════════════════════════ PRINT (reports) ════════════════════════════ */
-/* UI-14: always re-token to ink theme regardless of active Light/Dark/Break/Zen */
+/* UI-14 / Qwen RV-2: always re-token to ink theme regardless of active Light/Dark/Break/Zen
+   and force zero motion/transitions in print media. */
 @media print {
+  *, *::before, *::after {
+    animation: none !important;
+    transition: none !important;
+  }
   .topnav, .theme-toggle, .page-footer, nav, footer,
   .fc-sounds, .session-actions, .btn, button { display: none !important; }
 
