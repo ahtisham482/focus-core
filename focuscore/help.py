@@ -341,12 +341,44 @@ ARTICLES = {
         ],
         "trouble": [],
     },
+    "invoices": {
+        "title": "Invoices",
+        "href": "/invoices",
+        "what": ("Turns your timesheet entries into client invoices. "
+                 "Pick uninvoiced entries for a project and a date range, "
+                 "get a draft you can still edit, then send it -- sending "
+                 "numbers it (INV-2026-0001) and freezes it forever. "
+                 "Sent invoices can only be paid or voided, never edited."),
+        "do": [
+            "Click New invoice, pick a project and date range, tick the "
+            "entries, and create the draft.",
+            "Check the draft lines, tax and discount, then Send invoice. "
+            "It gets its number only at this moment.",
+            "Record payments on a sent invoice. A full payment marks it "
+            "paid automatically.",
+            "Print / save PDF for a clean invoice to send to your client.",
+            "Made a mistake on a sent invoice? Void it (with a reason) and "
+            "reissue a corrected draft in one step.",
+        ],
+        "trouble": [
+            "An entry says it has no rate? Set an hourly rate on the "
+            "project first (Timesheet page), then try again.",
+            "Entries in different currencies can't share one invoice -- "
+            "make one invoice per currency.",
+            "A sent invoice can't be edited, by design. Void and reissue "
+            "instead; the old invoice stays in history.",
+            "Overpaid? The balance shows 0 and the extra is flagged as an "
+            "informational warning -- the full payment amount is still "
+            "recorded.",
+        ],
+    },
 }
 
 # Dashboard nav key -> help article key (most are identical).
 NAV_HELP = {
     "home": "home",
     "timesheet": "timesheet",
+    "invoices": "invoices",
     "report": "report",
     "coaching": "coaching",
     "intelligence": "intelligence",

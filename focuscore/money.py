@@ -38,6 +38,17 @@ def amount_minor_for(duration_seconds, rate_minor):
     )
 
 
+def pct_of_minor(amount_minor, pct):
+    """Integer percent of integer minor units, truncated (Qwen Q12).
+
+    pct is an integer percentage (20 = 20%). Pure integer arithmetic,
+    no floats: 750 * 20 // 100 = 150. Used for invoice tax/discount.
+    """
+    if amount_minor is None:
+        return 0
+    return int(amount_minor) * int(pct) // 100
+
+
 def parse_rate_to_minor(text):
     """Parse '95.50' -> 9550. Returns None for blank/invalid."""
     if text is None:

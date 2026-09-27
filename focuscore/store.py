@@ -990,14 +990,20 @@ def _entry_row(row):
         "status": row["status"],
         "locked": bool(row["locked"]),
         "created_at": row["created_at"],
+        # Phase 10 (Q11): invoicing link; entry edits never change the
+        # invoice line snapshot, so this is a display flag only.
+        "invoice_id": row["invoice_id"],
+        "invoice_number": row["invoice_number"] or "",
     }
 
 
 _ENTRY_SELECT = (
     "SELECT e.id, e.day, e.start_ts, e.end_ts, e.minutes, e.category, "
     "e.app, e.title, e.project_id, p.name AS project_name, "
-    "p.client AS client, e.task, e.note, e.status, e.locked, e.created_at "
+    "p.client AS client, e.task, e.note, e.status, e.locked, e.created_at, "
+    "e.invoice_id, i.number AS invoice_number "
     "FROM timesheet_entries e LEFT JOIN projects p ON p.id = e.project_id "
+    "LEFT JOIN invoices i ON i.id = e.invoice_id "
 )
 
 

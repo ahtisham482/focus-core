@@ -1,5 +1,23 @@
 # Changelog
 
+## [v1.11.0] — 2026-09-27 (Sprint 3, Phase 10 — UNRELEASED, pending PC verification)
+Client invoicing and budget rollover/forecasting. Create draft invoices
+from accepted timesheet entries — entries are claimed atomically so the
+same hours can never be billed twice. Drafts are fully editable; sending
+assigns a sequential number (INV-2026-0001…) and freezes the invoice
+permanently — sent/paid/void invoices cannot be edited, only voided and
+reissued as a corrected draft. Record payments (partial or full);
+overpayments are shown as a warning, never a negative balance. Every
+line is a frozen snapshot (date, description, hours, rate, amount) that
+never changes even if you edit the source entry. Integer tax/discount
+percentages, one currency per invoice, printable invoice HTML with
+strict CSP. Budget rollover: unused hours from last period roll into
+this period's effective cap (one period only, use-it-or-lose-it, capped
+by a global percentage), shown separately as Base / Rolled In /
+Effective on project cards. Hours-only advisory forecast with
+working-day-aware pacing that matches the budget page. Database
+migration 8 (invoice tables, counters, immutability triggers).
+
 ## [v1.10.0] — 2026-09-27 (Sprint 3, Phase 9 — UNRELEASED, pending PC verification)
 Project tagging with hourly rates, advisory budget tracking, and client
 timesheet exports. Set an hourly rate per project — new time entries

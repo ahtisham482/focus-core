@@ -19,7 +19,7 @@ from . import backup, paths, store
 
 logger = logging.getLogger(__name__)
 
-LATEST_VERSION = 7
+LATEST_VERSION = 8
 
 
 class MigrationError(Exception):
@@ -502,6 +502,264 @@ def _migration_0007_seed_legacy(conn: sqlite3.Connection) -> None:
         pass
 
 
+def _migration_0008_invoicing(conn: sqlite3.Connection) -> None:
+    """Migration 8: Phase 10 invoicing + rollover (Qwen audit Q1-Q15).
+
+    Binding rules from the audit:
+    - Q1: sent/paid invoices are immutable at the DB layer (triggers);
+      only sent->void and sent->paid transitions are permitted, and the
+      frozen financial columns must be unchanged by them.
+    - Q2: invoice_counters(year INTEGER PK, next_number from 1);
+      numbers are issued inside BEGIN IMMEDIATE with an optimistic guard.
+    - Q3: timesheet_entries.invoice_id REFERENCES invoices(id)
+      ON DELETE RESTRICT; a trigger forbids moving the link from one
+      non-NULL invoice to another.
+    - Q5: invoices.superseded_by_invoice_id + void_reason.
+    - Q11: invoice_lines carries a denormalized snapshot; entry FK is
+      ON DELETE RESTRICT; lines survive voiding as an audit record.
+    - Q12: tax/discount are integer percentages (snapshots per invoice).
+    - Q13: single currency per invoice (enforced in application code).
+    - Q14: rollover is hours-only -> projects.rollover_enabled toggle.
+    - Q15: status CHECK is exactly draft|sent|paid|void; number is
+      UNIQUE but nullable so drafts (pre-numbering) coexist.
+    """
+    # -- 1. invoices (Qwen mandatory schema + client/due_date/notes +
+    #    supersedes back-pointer snapshots) ---------------------------
+    conn.execute(
+        """
+        CREATE TABLE IF NOT EXISTS invoices (
+            id INTEGER PRIMARY KEY,
+            number TEXT UNIQUE,
+            project_id INTEGER NOT NULL REFERENCES projects(id),
+            status TEXT NOT NULL DEFAULT 'draft'
+                CHECK (status IN ('draft','sent','paid','void')),
+            currency TEXT NOT NULL,
+            client TEXT NOT NULL DEFAULT '',
+            notes TEXT NOT NULL DEFAULT '',
+            due_date TEXT,
+            subtotal_minor INTEGER NOT NULL DEFAULT 0,
+            discount_pct INTEGER NOT NULL DEFAULT 0,
+            discount_amount_minor INTEGER NOT NULL DEFAULT 0,
+            tax_pct INTEGER NOT NULL DEFAULT 0,
+            tax_amount_minor INTEGER NOT NULL DEFAULT 0,
+            total_minor INTEGER NOT NULL DEFAULT 0,
+            void_reason TEXT,
+            superseded_by_invoice_id INTEGER REFERENCES invoices(id),
+            supersedes_invoice_id INTEGER REFERENCES invoices(id),
+            issued_at TEXT,
+            created_at TEXT NOT NULL,
+            updated_at TEXT NOT NULL
+        )
+        """
+    )
+    conn.execute(
+        "CREATE INDEX IF NOT EXISTS idx_invoices_project "
+        "ON invoices(project_id)"
+    )
+    conn.execute(
+        "CREATE INDEX IF NOT EXISTS idx_invoices_status ON invoices(status)"
+    )
+    conn.execute(
+        "CREATE INDEX IF NOT EXISTS idx_invoices_number ON invoices(number)"
+    )
+
+    # -- 2. invoice_lines (Q11) ----------------------------------------
+    conn.execute(
+        """
+        CREATE TABLE IF NOT EXISTS invoice_lines (
+            id INTEGER PRIMARY KEY,
+            invoice_id INTEGER NOT NULL
+                REFERENCES invoices(id) ON DELETE CASCADE,
+            timesheet_entry_id INTEGER
+                REFERENCES timesheet_entries(id) ON DELETE RESTRICT,
+            entry_date TEXT NOT NULL DEFAULT '',
+            description TEXT NOT NULL DEFAULT '',
+            hours_minor_units INTEGER NOT NULL DEFAULT 0,
+            rate_minor_units INTEGER,
+            amount_minor_units INTEGER NOT NULL DEFAULT 0,
+            currency TEXT NOT NULL DEFAULT 'USD',
+            sort_order INTEGER NOT NULL DEFAULT 0
+        )
+        """
+    )
+    conn.execute(
+        "CREATE INDEX IF NOT EXISTS idx_invoice_lines_invoice "
+        "ON invoice_lines(invoice_id)"
+    )
+
+    # -- 3. invoice_counters (Q2) --------------------------------------
+    conn.execute(
+        """
+        CREATE TABLE IF NOT EXISTS invoice_counters (
+            year INTEGER NOT NULL PRIMARY KEY,
+            next_number INTEGER NOT NULL DEFAULT 1
+        )
+        """
+    )
+
+    # -- 4. invoice_payments (append-only) ------------------------------
+    conn.execute(
+        """
+        CREATE TABLE IF NOT EXISTS invoice_payments (
+            id INTEGER PRIMARY KEY,
+            invoice_id INTEGER NOT NULL
+                REFERENCES invoices(id) ON DELETE CASCADE,
+            paid_date TEXT NOT NULL,
+            amount_minor INTEGER NOT NULL,
+            note TEXT NOT NULL DEFAULT '',
+            created_at_utc TEXT NOT NULL
+        )
+        """
+    )
+    conn.execute(
+        "CREATE INDEX IF NOT EXISTS idx_invoice_payments_invoice "
+        "ON invoice_payments(invoice_id)"
+    )
+
+    # -- 5. entry -> invoice link (Q3) ---------------------------------
+    add_column_if_missing(
+        conn,
+        "timesheet_entries",
+        "invoice_id",
+        "INTEGER REFERENCES invoices(id) ON DELETE RESTRICT",
+    )
+    conn.execute(
+        "CREATE INDEX IF NOT EXISTS idx_timesheet_invoice_id "
+        "ON timesheet_entries(invoice_id)"
+    )
+
+    # -- 6. rollover toggle (Q14: hours only) ---------------------------
+    add_column_if_missing(
+        conn, "projects", "rollover_enabled", "INTEGER NOT NULL DEFAULT 1"
+    )
+
+    # -- 7. immutability triggers (Q1) ----------------------------------
+    # A sent/paid invoice row may only change via sent->void or
+    # sent->paid, and the frozen financial columns must be identical.
+    # (void_reason / superseded_by_invoice_id / updated_at may change on
+    # void; updated_at may change on the paid flip.)
+    conn.execute(
+        """
+        CREATE TRIGGER IF NOT EXISTS trg_invoices_immutable
+        BEFORE UPDATE ON invoices
+        FOR EACH ROW
+        WHEN OLD.status IN ('sent', 'paid')
+        BEGIN
+            SELECT CASE
+                WHEN OLD.status = 'paid' THEN
+                    RAISE(ABORT,
+                        'paid invoices are immutable')
+                WHEN NEW.status NOT IN ('void', 'paid') THEN
+                    RAISE(ABORT,
+                        'sent invoices are immutable: only void or paid')
+                WHEN NEW.number IS NOT OLD.number
+                  OR NEW.project_id IS NOT OLD.project_id
+                  OR NEW.currency IS NOT OLD.currency
+                  OR NEW.client IS NOT OLD.client
+                  OR NEW.notes IS NOT OLD.notes
+                  OR NEW.due_date IS NOT OLD.due_date
+                  OR NEW.subtotal_minor IS NOT OLD.subtotal_minor
+                  OR NEW.discount_pct IS NOT OLD.discount_pct
+                  OR NEW.discount_amount_minor
+                        IS NOT OLD.discount_amount_minor
+                  OR NEW.tax_pct IS NOT OLD.tax_pct
+                  OR NEW.tax_amount_minor IS NOT OLD.tax_amount_minor
+                  OR NEW.total_minor IS NOT OLD.total_minor
+                  OR NEW.issued_at IS NOT OLD.issued_at
+                  OR NEW.supersedes_invoice_id
+                        IS NOT OLD.supersedes_invoice_id
+                THEN RAISE(ABORT,
+                    'sent invoice financial fields are immutable')
+            END;
+        END
+        """
+    )
+    # Lines of a sent/paid invoice can never be updated or deleted.
+    # (SQLite does not allow BEFORE UPDATE OR DELETE in one trigger;
+    #  separate triggers are required.)
+    conn.execute(
+        """
+        CREATE TRIGGER IF NOT EXISTS trg_invoice_lines_immutable_upd
+        BEFORE UPDATE ON invoice_lines
+        FOR EACH ROW
+        WHEN (SELECT status FROM invoices
+              WHERE id = OLD.invoice_id) IN ('sent', 'paid')
+        BEGIN
+            SELECT RAISE(ABORT,
+                'invoice lines are immutable once the invoice is sent');
+        END
+        """
+    )
+    conn.execute(
+        """
+        CREATE TRIGGER IF NOT EXISTS trg_invoice_lines_immutable_del
+        BEFORE DELETE ON invoice_lines
+        FOR EACH ROW
+        WHEN (SELECT status FROM invoices
+              WHERE id = OLD.invoice_id) IN ('sent', 'paid')
+        BEGIN
+            SELECT RAISE(ABORT,
+                'invoice lines are immutable once the invoice is sent');
+        END
+        """
+    )
+    # Lines can never be added to a sent/paid invoice.
+    conn.execute(
+        """
+        CREATE TRIGGER IF NOT EXISTS trg_invoice_lines_no_add_sent
+        BEFORE INSERT ON invoice_lines
+        FOR EACH ROW
+        WHEN (SELECT status FROM invoices
+              WHERE id = NEW.invoice_id) IN ('sent', 'paid')
+        BEGIN
+            SELECT RAISE(ABORT,
+                'cannot add lines to a sent invoice');
+        END
+        """
+    )
+    # Q3 (SHOULD, enforced at DB layer): an entry's invoice link may go
+    # NULL -> id (claim) or id -> NULL (void release), but never directly
+    # from one non-NULL invoice to a different one.
+    conn.execute(
+        """
+        CREATE TRIGGER IF NOT EXISTS trg_timesheet_invoice_link_guard
+        BEFORE UPDATE OF invoice_id ON timesheet_entries
+        FOR EACH ROW
+        WHEN OLD.invoice_id IS NOT NULL
+         AND NEW.invoice_id IS NOT NULL
+         AND OLD.invoice_id IS NOT NEW.invoice_id
+        BEGIN
+            SELECT RAISE(ABORT,
+                'timesheet entry is already linked to an invoice');
+        END
+        """
+    )
+    # Payments may only be recorded on sent/paid invoices (Q4 allows
+    # overpayment on paid invoices; drafts and voids reject payments).
+    conn.execute(
+        """
+        CREATE TRIGGER IF NOT EXISTS trg_invoice_payments_guard
+        BEFORE INSERT ON invoice_payments
+        FOR EACH ROW
+        WHEN (SELECT status FROM invoices
+              WHERE id = NEW.invoice_id) NOT IN ('sent', 'paid')
+        BEGIN
+            SELECT RAISE(ABORT,
+                'payments can only be recorded on sent invoices');
+        END
+        """
+    )
+
+    # -- 8. settings (Q7/Q12/Q15) ---------------------------------------
+    conn.execute(
+        "INSERT OR IGNORE INTO settings (key, value) VALUES "
+        "('rollover_cap_pct', '50'), "
+        "('invoice_due_days', '14'), "
+        "('default_tax_pct', '0'), "
+        "('default_discount_pct', '0')"
+    )
+
+
 MIGRATIONS: List[Migration] = [
     Migration(1, "0001_afk_intervals", _migration_0001_afk_intervals),
     Migration(2, "0002_shield_columns", _migration_0002_shield_columns),
@@ -525,6 +783,11 @@ MIGRATIONS: List[Migration] = [
         7,
         "0007_finance",
         _migration_0007_finance,
+    ),
+    Migration(
+        8,
+        "0008_invoicing",
+        _migration_0008_invoicing,
     ),
 ]
 

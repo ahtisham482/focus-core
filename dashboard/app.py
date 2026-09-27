@@ -45,6 +45,7 @@ ONBOARDED_FLAG = paths.onboarded_flag()
 NAV_LINKS = [
     ("home", "Home", "/"),
     ("timesheet", "Timesheet", "/timesheet"),
+    ("invoices", "Invoices", "/invoices"),
     ("report", "Report", "/report"),
     ("coaching", "Coaching", "/coaching"),
     ("intelligence", "Deep time", "/intelligence"),
@@ -103,6 +104,7 @@ def layout(title, body, day=None, refresh=300, active="home", help_key=None):
     nav = "<nav class='topnav'>" + "".join(links) + "</nav>"
     if help_key is None:
         help_key = {"home": "home", "timesheet": "timesheet",
+                    "invoices": "invoices",
                     "report": "report", "coaching": "coaching",
                     "intelligence": "intelligence",
                     "focus": "focus", "shield": "shield",
@@ -1410,20 +1412,31 @@ def timesheet_page():
     # --- my entries ---
     entry_rows = []
     for entry in entries:
+        # Phase 10 (Q11): invoiced entries show which invoice claimed them.
+        # Editing the entry never changes the invoice line snapshot.
+        inv_badge = ""
+        if entry.get("invoice_id"):
+            inv_label = entry.get("invoice_number") or (
+                "draft #%d" % entry["invoice_id"])
+            inv_badge = (
+                " <span class='pill' title='This entry is invoiced. Editing "
+                "it will not change the invoice -- the invoice keeps its "
+                "own snapshot of the line.'>Invoiced on %s -- locked</span>"
+                % escape(inv_label))
         if entry["locked"]:
             actions = "<span class='note'>locked</span>"
             row_form = (
                 "<td>%s - %s<br><span class='note'>%.1f min</span></td>"
                 "<td>%s</td><td>%s</td><td>%s</td><td>%s</td>"
                 "<td class='title-cell' title='%s'>%s</td>"
-                "<td>%s</td><td>%s</td>"
+                "<td>%s%s</td><td>%s</td>"
                 % (escape(entry["start_ts"][11:]),
                    escape(entry["end_ts"][11:]), entry["minutes"],
                    escape(entry["category"]), escape(entry["app"]),
                    escape(entry["project_name"] or "-"),
                    escape(entry["task"] or "-"),
                    escape(entry["note"]), escape(entry["note"][:40]),
-                   escape(entry["status"]), actions))
+                   escape(entry["status"]), inv_badge, actions))
         else:
             # Inputs use form="edit-<id>" so the row stays valid HTML
             # (a <form> directly inside <tr> would be moved by browsers).
@@ -1451,7 +1464,7 @@ def timesheet_page():
                 "value='%s' size='10'></td>"
                 "<td><input type='text' name='note' form='edit-%d' "
                 "value='%s' size='14'></td>"
-                "<td>%s</td><td>%s</td>"
+                "<td>%s%s</td><td>%s</td>"
                 % (entry["id"], escape(entry["start_ts"]),
                    entry["id"], escape(entry["end_ts"]),
                    entry["id"], _category_options(entry["category"]),
@@ -1459,7 +1472,7 @@ def timesheet_page():
                    entry["id"], _project_options(entry["project_id"]),
                    entry["id"], escape(entry["task"]),
                    entry["id"], escape(entry["note"]),
-                   escape(entry["status"]), actions))
+                   escape(entry["status"]), inv_badge, actions))
         entry_rows.append("<tr>" + row_form + "</tr>")
     entries_table = (
         "<table><tr><th>Time</th><th>Category</th><th>App</th>"
@@ -1726,7 +1739,58 @@ def _project_cards_html(day):
                 pace_notes.append(escape(pacing.get("explain", "")))
         pace_html = ("<p class='fine'>%s</p>" % " ".join(pace_notes)
                      if pace_notes else "")
-
+        # Rollover + forecast (Phase 10): computed only, hours only,
+        # use-it-or-lose-it. Advisory, never blocking.
+        from focuscore import forecast as forecast_mod
+        roll_notes = []
+        fc_notes = []
+        roll_enabled = forecast_mod.project_rollover_enabled(pid)
+        for status, ptype in (("This week", "week"),
+                               ("This month", "month")):
+            roll = forecast_mod.compute_rollover(pid, ptype, date.today())
+            if roll["rolled_in_seconds"]:
+                roll_notes.append(
+                    "%s: base %s + rolled in %s (%d%% cap) = effective %s%s"
+                    % (status,
+                       money_mod.format_duration(
+                           roll["base_cap_seconds"]),
+                       money_mod.format_duration(
+                           roll["rolled_in_seconds"]),
+                       roll["cap_pct"],
+                       money_mod.format_duration(
+                           roll["effective_cap_seconds"]),
+                       " (cap-limited)" if roll["capped"] else ""))
+            elif roll["base_cap_seconds"]:
+                roll_notes.append(
+                    "%s: base %s, no rollover (%s)"
+                    % (status, money_mod.format_duration(
+                        roll["base_cap_seconds"]),
+                       escape(roll["reason"]) if roll["reason"]
+                       else "rollover off"))
+            fc = forecast_mod.forecast_period(pid, ptype)
+            if fc["has_cap"] and fc["verdict"] not in ("no_cap",):
+                verdict_colors = {"on_track": "#2e7d32",
+                                  "likely_over": "#f9a825",
+                                  "over": "#e53935",
+                                  "unknown": "#616161"}
+                fc_notes.append(
+                    "%s forecast: %s <span style='color:%s'>%s</span>"
+                    % (ptype, escape(fc["explain"]),
+                       verdict_colors.get(fc["verdict"], "#616161"),
+                       escape(fc["verdict"].replace("_", " "))))
+        roll_html = ("<p class='fine'>Rollover (hours only, computed): %s</p>"
+                     % "; ".join(roll_notes) if roll_notes else "")
+        fc_html = ("<p class='fine'>%s</p>" % "<br>".join(fc_notes)
+                   if fc_notes else "")
+        roll_toggle = (
+            "<form class='inline' method='post' "
+            "action='/timesheet/project/rollover'>"
+            "<input type='hidden' name='id' value='%d'>"
+            "<input type='hidden' name='day' value='%s'>"
+            "<label><input type='checkbox' name='enabled' value='1'%s "
+            "onchange='this.form.submit()'> Rollover unused hours into "
+            "this project</label></form>"
+            % (pid, day, " checked" if roll_enabled else ""))
         rate_minor = p.get("hourly_rate_minor")
         rate_text = (money_mod.format_minor(rate_minor, p.get("rate_currency"))
                      + "/hr" if rate_minor else "no rate set")
@@ -1785,7 +1849,8 @@ def _project_cards_html(day):
                " (%s)" % escape(p["client"]) if p["client"] else "",
                escape(p["client"] or "-"), escape(rate_text),
                escape(week["summary"]),
-               bars_html, pace_html, pid, day, pid, day,
+               bars_html, pace_html + roll_html + fc_html + roll_toggle,
+               pid, day, pid, day,
                escape(money_mod.CURRENCY_SYMBOLS.get(
                    (store.get_setting("currency", "USD") or "USD").upper(),
                    "$")),
@@ -1801,7 +1866,21 @@ def _project_cards_html(day):
         "size='20'></label> "
         "<label>Client <input type='text' name='client' size='20'></label> "
         "<button type='submit'>Add project</button></form>" % day)
-    return "".join(cards) + add_form
+    from focuscore import forecast as _fc
+    cap_pct = _fc.get_rollover_cap_pct()
+    settings_form = (
+        "<form class='inline' method='post' "
+        "action='/timesheet/rollover-settings'>"
+        "<input type='hidden' name='day' value='%s'>"
+        "<label>Rollover cap %% <input type='text' name='rollover_cap_pct' "
+        "size='4' value='%d'></label> "
+        "<button type='submit'>Save</button> "
+        "<span class='fine'>Max unused hours that roll into a project's "
+        "next period, as %% of its base hour cap. Hours only -- money never "
+        "rolls over. Changing this re-computes every rollover display "
+        "because rollover is computed, not stored.</span></form>"
+        % (day, cap_pct))
+    return "".join(cards) + add_form + settings_form
 
 
 def _export_panel_html(day, projects):
@@ -1913,6 +1992,38 @@ def timesheet_project_backfill_rate():
             msg = "%d entries marked as confirmed at the current rate." % n
     except (TypeError, ValueError):
         msg = "Could not apply the rate."
+    return redirect("/timesheet?day=" + day + "&msg=" + msg.replace(" ", "+"))
+
+
+@app.route("/timesheet/project/rollover", methods=["POST"])
+def timesheet_project_rollover():
+    """Per-project rollover toggle (Phase 10, Q6: hours only)."""
+    from focuscore import forecast as forecast_mod
+
+    day = _parse_day(request.form.get("day")) or date.today().isoformat()
+    try:
+        pid = int(request.form.get("id"))
+        forecast_mod.set_rollover_enabled(
+            pid, request.form.get("enabled") == "1")
+        msg = "Rollover preference saved."
+    except (TypeError, ValueError):
+        msg = "Could not save the rollover preference."
+    return redirect("/timesheet?day=" + day + "&msg=" + msg.replace(" ", "+"))
+
+
+@app.route("/timesheet/rollover-settings", methods=["POST"])
+def timesheet_rollover_settings():
+    """Global rollover cap percentage (Phase 10, Q7: integer 0-100)."""
+    day = _parse_day(request.form.get("day")) or date.today().isoformat()
+    try:
+        pct = int((request.form.get("rollover_cap_pct") or "").strip())
+        if 0 <= pct <= 100:
+            store.set_setting("rollover_cap_pct", str(pct))
+            msg = "Rollover cap set to %d%%." % pct
+        else:
+            msg = "Use a whole number from 0 to 100."
+    except (TypeError, ValueError):
+        msg = "Use a whole number from 0 to 100."
     return redirect("/timesheet?day=" + day + "&msg=" + msg.replace(" ", "+"))
 
 
@@ -2054,6 +2165,514 @@ def timesheet_statement():
         {"from": day_from, "to": day_to, "project_id": project_id,
          "client": client, "billable_only": billable_only},
         manifest, len(rows))
+    return Response(page_html, mimetype="text/html")
+
+
+# ------------------------------------------------ Phase 10: invoicing ---
+
+def _invoice_status_badge(status):
+    colors = {"draft": "#616161", "sent": "#1565c0", "paid": "#2e7d32",
+              "void": "#c62828"}
+    return ("<span class='pill' style='background:%s'>%s</span>"
+            % (colors.get(status, "#616161"), escape(status.upper())))
+
+
+@app.route("/invoices")
+def invoices_page():
+    """List invoices with derived balance/overdue info (Q4/Q15)."""
+    from focuscore import invoices as inv_mod
+    from focuscore import money as money_mod
+
+    status = request.args.get("status") or ""
+    msg = request.args.get("msg") or ""
+    invoices = inv_mod.list_invoices(
+        status=status if status in inv_mod.STATUSES else None)
+    rows = []
+    outstanding = 0
+    for inv in invoices:
+        currency = (inv.get("currency") or "USD").upper()
+        if inv["status"] == "sent":
+            outstanding += inv["balance_minor"]
+        title = inv["number"] or "DRAFT #%d" % inv["id"]
+        overdue = " <strong>OVERDUE</strong>" if inv["overdue"] else ""
+        rows.append(
+            "<tr><td><a href='/invoices/%d'>%s</a></td>"
+            "<td>%s</td><td>%s</td><td>%s</td>"
+            "<td style='text-align:right'>%s</td>"
+            "<td style='text-align:right'>%s</td><td>%s</td></tr>"
+            % (inv["id"], escape(title),
+               escape(inv.get("project_name") or ""),
+               escape(inv.get("client") or ""),
+               _invoice_status_badge(inv["status"]),
+               money_mod.format_minor(inv.get("total_minor") or 0, currency),
+               money_mod.format_minor(inv["balance_minor"], currency),
+               overdue))
+    body = (
+        "<div class='card'><h3>Invoices</h3>"
+        "%s"
+        "<p><a class='btn' href='/invoices/new'>New invoice</a> "
+        "&nbsp;<a href='/invoices'>All</a>"
+        " &middot; <a href='/invoices?status=draft'>Drafts</a>"
+        " &middot; <a href='/invoices?status=sent'>Sent</a>"
+        " &middot; <a href='/invoices?status=paid'>Paid</a>"
+        " &middot; <a href='/invoices?status=void'>Void</a></p>"
+        "<p class='fine'>Outstanding on sent invoices: <strong>%s</strong>. "
+        "Invoices are numbered when sent; sent invoices are frozen and "
+        "can only be voided, never edited.</p>"
+        "<table class='tbl'><tr><th>Invoice</th><th>Project</th>"
+        "<th>Client</th><th>Status</th><th style='text-align:right'>Total</th>"
+        "<th style='text-align:right'>Balance</th><th></th></tr>%s</table>"
+        "</div>"
+        % ("<p class='msg'>%s</p>" % escape(msg) if msg else "",
+           money_mod.format_minor(outstanding),
+           "".join(rows) or "<tr><td colspan='7'>No invoices yet.</td></tr>"))
+    return layout("Invoices", body, active="invoices")
+
+
+@app.route("/invoices/new")
+def invoice_new_page():
+    """Pick uninvoiced entries for a new draft invoice."""
+    from focuscore import invoices as inv_mod
+    from focuscore import money as money_mod
+
+    try:
+        project_id = int(request.args.get("project_id") or 0) or None
+    except (TypeError, ValueError):
+        project_id = None
+    day_from = _parse_day(request.args.get("from")) or (
+        date.today().replace(day=1).isoformat())
+    day_to = _parse_day(request.args.get("to")) or date.today().isoformat()
+    projects = store.list_projects()
+
+    filter_form = (
+        "<form method='get' action='/invoices/new' class='inline'>"
+        "<label>Project <select name='project_id'>"
+        "<option value=''>-- choose --</option>%s</select></label> "
+        "<label>From <input type='date' name='from' value='%s'></label> "
+        "<label>To <input type='date' name='to' value='%s'></label> "
+        "<button type='submit'>Show entries</button></form>"
+        % ("".join(
+            "<option value='%d'%s>%s</option>"
+            % (p["id"], " selected" if p["id"] == project_id else "",
+               escape(p["name"]))
+            for p in projects),
+           escape(day_from), escape(day_to)))
+
+    entries_html = ""
+    if project_id:
+        entries, unrated = inv_mod.uninvoiced_entries(
+            project_id, day_from, day_to)
+        if unrated:
+            entries_html += (
+                "<p class='fine'>%d billable entr%s ha%s no rate yet and "
+                "cannot be invoiced. Set a project rate first (Timesheet "
+                "page), then come back.</p>"
+                % (unrated, "y" if unrated == 1 else "ies",
+                   "s" if unrated == 1 else "ve"))
+        if entries:
+            rows = []
+            for e in entries:
+                seconds = int(round((e["minutes"] or 0) * 60))
+                amount = money_mod.amount_minor_for(
+                    seconds, e["hourly_rate_minor"]) or 0
+                currency = (e["rate_currency"] or "USD").upper()
+                label = (e["task"] or e["category"] or "Work")
+                badge = (" <span class='pill'>%s</span>"
+                         % escape(e["rate_status"] or ""))
+                rows.append(
+                    "<tr><td><input type='checkbox' name='entry_id' "
+                    "value='%d' checked></td><td>%s</td><td>%s%s</td>"
+                    "<td style='text-align:right'>%s</td>"
+                    "<td style='text-align:right'>%s</td></tr>"
+                    % (e["id"], escape(e["day"]), escape(label), badge,
+                       money_mod.format_duration(seconds),
+                       money_mod.format_minor(amount, currency)))
+            entries_html += (
+                "<form method='post' action='/invoices/create'>"
+                "<input type='hidden' name='project_id' value='%d'>"
+                "<input type='hidden' name='from' value='%s'>"
+                "<input type='hidden' name='to' value='%s'>"
+                "<table class='tbl'><tr><th></th><th>Day</th><th>Entry</th>"
+                "<th style='text-align:right'>Time</th>"
+                "<th style='text-align:right'>Amount</th></tr>%s</table>"
+                "<p><label>Notes<br><textarea name='notes' rows='2' "
+                "cols='60'></textarea></label></p>"
+                "<p><label>Tax %% <input type='text' name='tax_pct' size='4' "
+                "placeholder='0'></label> "
+                "<label>Discount %% <input type='text' name='discount_pct' "
+                "size='4' placeholder='0'></label> "
+                "<span class='fine'>Blank = project defaults.</span></p>"
+                "<button type='submit'>Create draft invoice</button></form>"
+                % (project_id, escape(day_from), escape(day_to),
+                   "".join(rows)))
+        else:
+            entries_html = ("<p class='fine'>No uninvoiced billable entries "
+                            "with a rate in that range.</p>")
+
+    body = ("<div class='card'><h3>New invoice</h3>"
+            "<p class='fine'>A draft is created first: no invoice number "
+            "until you send it, and drafts can be edited freely. One "
+            "currency per invoice.</p>"
+            "%s%s</div>" % (filter_form, entries_html))
+    return layout("New invoice", body, active="invoices")
+
+
+@app.route("/invoices/create", methods=["POST"])
+def invoice_create():
+    from focuscore import invoices as inv_mod
+
+    try:
+        pid = int(request.form.get("project_id"))
+        day_from = _parse_day(request.form.get("from")) or ""
+        day_to = _parse_day(request.form.get("to")) or ""
+        entry_ids = [int(v) for v in request.form.getlist("entry_id")]
+        notes = request.form.get("notes") or ""
+        tax_raw = (request.form.get("tax_pct") or "").strip()
+        disc_raw = (request.form.get("discount_pct") or "").strip()
+        tax_pct = int(tax_raw) if tax_raw else None
+        disc_pct = int(disc_raw) if disc_raw else None
+        invoice_id = inv_mod.create_invoice(
+            pid, day_from, day_to, entry_ids or None, notes=notes,
+            tax_pct=tax_pct, discount_pct=disc_pct)
+        return redirect("/invoices/%d" % invoice_id)
+    except inv_mod.InvoiceError as exc:
+        msg = str(exc)
+    except (TypeError, ValueError):
+        msg = "Could not create the invoice."
+    return redirect("/invoices?msg=" + msg.replace(" ", "+"))
+
+
+def _invoice_detail_body(detail):
+    """HTML for one invoice (shared by the detail page)."""
+    from focuscore import money as money_mod
+
+    inv = detail["invoice"]
+    lines = detail["lines"]
+    payments = detail["payments"]
+    t = inv["totals"]
+    currency = (inv["currency"] or "USD").upper()
+    title = inv["number"] or "DRAFT #%d" % inv["id"]
+
+    line_rows = []
+    for line in lines:
+        rate_text = (money_mod.format_minor(line["rate_minor_units"], currency)
+                     + "/hr" if line["rate_minor_units"] else "--")
+        remove = ""
+        if inv["status"] == "draft":
+            remove = (
+                "<form class='inline' method='post' "
+                "action='/invoices/%d/remove-line' "
+                "onsubmit=\"return confirm('Remove this line?');\">"
+                "<input type='hidden' name='line_id' value='%d'>"
+                "<button type='submit'>Remove</button></form>"
+                % (inv["id"], line["id"]))
+        locked = ""
+        if line["timesheet_entry_id"]:
+            locked = (" <span class='pill' title='Editing this timesheet "
+                      "entry will not change this invoice line.'>"
+                      "locked</span>")
+        line_rows.append(
+            "<tr><td>%s</td><td>%s%s</td>"
+            "<td style='text-align:right'>%s</td>"
+            "<td style='text-align:right'>%s</td>"
+            "<td style='text-align:right'>%s</td><td>%s</td></tr>"
+            % (escape(line["entry_date"] or ""),
+               escape(line["description"] or ""),
+               locked,
+               money_mod.format_hours(line["hours_minor_units"] or 0),
+               rate_text,
+               money_mod.format_minor(line["amount_minor_units"] or 0,
+                                      currency),
+               remove))
+
+    totals_html = (
+        "<table class='tbl'><tr><td>Subtotal</td>"
+        "<td style='text-align:right'>%s</td></tr>"
+        "<tr><td>Discount (%d%%)</td><td style='text-align:right'>%s</td></tr>"
+        "<tr><td>Tax (%d%%)</td><td style='text-align:right'>%s</td></tr>"
+        "<tr><th>Total (%s)</th><th style='text-align:right'>%s</th></tr>"
+        "<tr><td>Payments received</td><td style='text-align:right'>%s</td></tr>"
+        "<tr><th>Balance due</th><th style='text-align:right'>%s</th></tr>"
+        "</table>"
+        % (money_mod.format_minor(t["subtotal_minor"], currency),
+           inv["discount_pct"],
+           money_mod.format_minor(t["discount_minor"], currency),
+           inv["tax_pct"],
+           money_mod.format_minor(t["tax_minor"], currency),
+           escape(currency),
+           money_mod.format_minor(t["total_minor"], currency),
+           money_mod.format_minor(inv["paid_minor"], currency),
+           money_mod.format_minor(inv["balance_minor"], currency)))
+    if inv["overpaid_minor"]:
+        totals_html += (
+            "<p class='msg'>Payments exceed the invoice total by %s. "
+            "Consider issuing a credit note or refund. (Informational only.)"
+            "</p>"
+            % money_mod.format_minor(inv["overpaid_minor"], currency))
+    if inv["overdue"]:
+        totals_html += ("<p class='msg'><strong>Overdue</strong> since %s.</p>"
+                          % escape(inv["due_date"] or ""))
+
+    pay_rows = "".join(
+        "<tr><td>%s</td><td style='text-align:right'>%s</td><td>%s</td></tr>"
+        % (escape(p["paid_date"] or ""),
+           money_mod.format_minor(p["amount_minor"] or 0, currency),
+           escape(p["note"] or ""))
+        for p in payments)
+
+    actions = ""
+    if inv["status"] == "draft":
+        actions = (
+            "<h4>Edit draft</h4>"
+            "<form class='inline' method='post' "
+            "action='/invoices/%d/tax-discount'>"
+            "<label>Tax %% <input type='text' name='tax_pct' size='4' "
+            "value='%d'></label> "
+            "<label>Discount %% <input type='text' name='discount_pct' "
+            "size='4' value='%d'></label> "
+            "<button type='submit'>Save</button></form> "
+            "<form class='inline' method='post' "
+            "action='/invoices/%d/add-line'>"
+            "<label>Description <input type='text' name='description' "
+            "size='24'></label> "
+            "<label>Hours <input type='text' name='hours' size='6'></label> "
+            "<label>Rate <input type='text' name='rate' size='8'></label> "
+            "<button type='submit'>Add manual line</button></form>"
+            "<form class='inline' method='post' "
+            "action='/invoices/%d/send' "
+            "onsubmit=\"return confirm('Send this invoice? "
+            "It will be numbered and frozen.');\">"
+            "<button type='submit'>Send invoice</button></form>"
+            % (inv["id"], inv["discount_pct"], inv["tax_pct"],
+               inv["id"], inv["id"]))
+    if inv["status"] == "sent":
+        actions = (
+            "<h4>Record payment</h4>"
+            "<form class='inline' method='post' "
+            "action='/invoices/%d/pay'>"
+            "<label>Date <input type='date' name='paid_date' value='%s'></label> "
+            "<label>Amount <input type='text' name='amount' size='10'></label> "
+            "<label>Note <input type='text' name='note' size='20'></label> "
+            "<button type='submit'>Record</button></form> "
+            % (inv["id"], date.today().isoformat()))
+        if inv["balance_minor"] == 0 and t["total_minor"] == 0:
+            actions += (
+                "<form class='inline' method='post' "
+                "action='/invoices/%d/mark-paid'>"
+                "<button type='submit'>Mark paid (zero total)</button></form> "
+                % inv["id"])
+        actions += (
+            "<form class='inline' method='post' "
+            "action='/invoices/%d/reissue' "
+            "onsubmit=\"return confirm('Void this invoice and create "
+            "a corrected draft?');\">"
+            "<label>Reason <select name='reason'>"
+            "<option>Reissued with corrections</option>"
+            "<option>Client dispute</option><option>Duplicate</option>"
+            "<option>Other</option></select></label> "
+            "<button type='submit'>Void &amp; reissue</button></form>"
+            % inv["id"])
+    if inv["status"] in ("draft", "sent"):
+        actions += (
+            "<form class='inline' method='post' "
+            "action='/invoices/%d/void' "
+            "onsubmit=\"return confirm('Void this invoice? This cannot be undone.');\">"
+            "<label>Reason <select name='reason'>"
+            "<option>Reissued with corrections</option>"
+            "<option>Client dispute</option><option>Duplicate</option>"
+            "<option>Other</option></select></label> "
+            "<button type='submit'>Void invoice</button></form>"
+            % inv["id"])
+    if inv["status"] == "void":
+        note = "Reason: %s." % escape(inv["void_reason"] or "")
+        if inv["superseded_by_invoice_id"]:
+            note += (" Reissued as <a href='/invoices/%d'>invoice #%d</a>."
+                     % (inv["superseded_by_invoice_id"],
+                        inv["superseded_by_invoice_id"]))
+        actions = "<p class='fine'>%s</p>" % note
+    if inv.get("supersedes_invoice_id"):
+        actions += ("<p class='fine'>Reissue of "
+                    "<a href='/invoices/%d'>invoice #%d</a>.</p>"
+                    % (inv["supersedes_invoice_id"],
+                       inv["supersedes_invoice_id"]))
+
+    frozen_note = ("<p class='fine'>Sent invoices are frozen: totals, lines, "
+                   "tax and discount cannot be changed. Void and reissue to "
+                   "correct.</p>" if inv["is_frozen"] and inv["status"] != "void"
+                   else "")
+    return (
+        "<div class='card'><h3>%s %s</h3>"
+        "<p class='fine'>Project: %s &middot; Client: %s &middot; "
+        "Issued: %s &middot; Due: %s</p>"
+        "%s"
+        "<table class='tbl'><tr><th>Date</th><th>Description</th>"
+        "<th style='text-align:right'>Hours</th>"
+        "<th style='text-align:right'>Rate</th>"
+        "<th style='text-align:right'>Amount</th><th></th></tr>%s</table>"
+        "%s"
+        "<h4>Payments</h4>%s"
+        "<p><a class='btn' href='/invoices/%d/print' target='_blank'>"
+        "Print / save PDF</a></p>"
+        "%s%s</div>"
+        % (escape(title), _invoice_status_badge(inv["status"]),
+           escape(inv.get("project_name") or ""),
+           escape(inv.get("client") or ""),
+           escape(inv.get("issued_at") or "--"),
+           escape(inv.get("due_date") or "--"),
+           frozen_note,
+           "".join(line_rows) or "<tr><td colspan='6'>No lines yet.</td></tr>",
+           totals_html,
+           ("<table class='tbl'><tr><th>Date</th>"
+            "<th style='text-align:right'>Amount</th><th>Note</th></tr>%s</table>"
+            % pay_rows) if pay_rows else "<p class='fine'>No payments yet.</p>",
+           inv["id"], actions,
+           ("<p class='fine'>Notes: %s</p>" % escape(inv["notes"])
+            if inv.get("notes") else "")))
+
+
+@app.route("/invoices/<int:invoice_id>")
+def invoice_detail_page(invoice_id):
+    from focuscore import invoices as inv_mod
+
+    msg = request.args.get("msg") or ""
+    try:
+        detail = inv_mod.get_invoice(invoice_id)
+    except inv_mod.InvoiceError:
+        abort(404)
+    body = ("<p><a href='/invoices'>&larr; All invoices</a></p>"
+            + ("<p class='msg'>%s</p>" % escape(msg) if msg else "")
+            + _invoice_detail_body(detail))
+    return layout("Invoice", body, active="invoices")
+
+
+def _invoice_action_redirect(invoice_id, fn, *args):
+    """Run an invoice action; on error redirect back with the message."""
+    from focuscore import invoices as inv_mod
+
+    try:
+        fn(*args)
+        msg = "Done."
+    except inv_mod.InvoiceError as exc:
+        msg = str(exc)
+    except (TypeError, ValueError):
+        msg = "Could not complete the action."
+    return redirect("/invoices/%d?msg=%s"
+                    % (invoice_id, msg.replace(" ", "+")))
+
+
+@app.route("/invoices/<int:invoice_id>/add-line", methods=["POST"])
+def invoice_add_line(invoice_id):
+    from focuscore import invoices as inv_mod
+
+    return _invoice_action_redirect(
+        invoice_id, inv_mod.add_manual_line, invoice_id,
+        request.form.get("description"), request.form.get("hours"),
+        request.form.get("rate"))
+
+
+@app.route("/invoices/<int:invoice_id>/remove-line", methods=["POST"])
+def invoice_remove_line(invoice_id):
+    from focuscore import invoices as inv_mod
+
+    try:
+        line_id = int(request.form.get("line_id"))
+    except (TypeError, ValueError):
+        return redirect("/invoices/%d?msg=%s"
+                        % (invoice_id, "Bad+line+id."))
+    return _invoice_action_redirect(
+        invoice_id, inv_mod.remove_line, invoice_id, line_id)
+
+
+@app.route("/invoices/<int:invoice_id>/tax-discount", methods=["POST"])
+def invoice_tax_discount(invoice_id):
+    from focuscore import invoices as inv_mod
+
+    return _invoice_action_redirect(
+        invoice_id, inv_mod.set_tax_discount, invoice_id,
+        request.form.get("tax_pct"), request.form.get("discount_pct"))
+
+
+@app.route("/invoices/<int:invoice_id>/send", methods=["POST"])
+def invoice_send(invoice_id):
+    from focuscore import invoices as inv_mod
+
+    try:
+        number = inv_mod.send_invoice(invoice_id)
+        msg = "Sent as %s." % number
+    except inv_mod.InvoiceError as exc:
+        msg = str(exc)
+    return redirect("/invoices/%d?msg=%s"
+                    % (invoice_id, msg.replace(" ", "+")))
+
+
+@app.route("/invoices/<int:invoice_id>/pay", methods=["POST"])
+def invoice_pay(invoice_id):
+    from focuscore import invoices as inv_mod
+    from focuscore import money as money_mod
+
+    try:
+        amount_minor = money_mod.parse_rate_to_minor(
+            request.form.get("amount"))
+        if amount_minor is None:
+            raise inv_mod.InvoiceError("Amount was not understood.")
+        became_paid, balance, overpaid = inv_mod.record_payment(
+            invoice_id, request.form.get("paid_date"), amount_minor,
+            request.form.get("note") or "")
+        if became_paid:
+            msg = "Payment recorded. Invoice is now paid."
+        elif overpaid:
+            msg = ("Payment recorded. Overpaid by %s; consider a credit "
+                   "note or refund."
+                   % money_mod.format_minor(overpaid))
+        else:
+            msg = "Payment recorded."
+    except inv_mod.InvoiceError as exc:
+        msg = str(exc)
+    return redirect("/invoices/%d?msg=%s"
+                    % (invoice_id, msg.replace(" ", "+")))
+
+
+@app.route("/invoices/<int:invoice_id>/mark-paid", methods=["POST"])
+def invoice_mark_paid(invoice_id):
+    from focuscore import invoices as inv_mod
+
+    return _invoice_action_redirect(
+        invoice_id, inv_mod.mark_paid, invoice_id)
+
+
+@app.route("/invoices/<int:invoice_id>/void", methods=["POST"])
+def invoice_void(invoice_id):
+    from focuscore import invoices as inv_mod
+
+    return _invoice_action_redirect(
+        invoice_id, inv_mod.void_invoice, invoice_id,
+        request.form.get("reason") or "Other")
+
+
+@app.route("/invoices/<int:invoice_id>/reissue", methods=["POST"])
+def invoice_reissue(invoice_id):
+    from focuscore import invoices as inv_mod
+
+    try:
+        new_id = inv_mod.void_and_reissue(
+            invoice_id, request.form.get("reason") or "Other")
+        return redirect("/invoices/%d?msg=%s"
+                        % (new_id, "Reissued+as+a+new+draft."))
+    except inv_mod.InvoiceError as exc:
+        msg = str(exc)
+    return redirect("/invoices/%d?msg=%s"
+                    % (invoice_id, msg.replace(" ", "+")))
+
+
+@app.route("/invoices/<int:invoice_id>/print")
+def invoice_print(invoice_id):
+    """Standalone printable invoice (Q10: CSP, zero JS, auto-escaped)."""
+    from focuscore import invoices as inv_mod
+
+    try:
+        page_html = inv_mod.render_invoice_html(invoice_id)
+    except inv_mod.InvoiceError:
+        abort(404)
     return Response(page_html, mimetype="text/html")
 
 
