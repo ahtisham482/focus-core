@@ -242,6 +242,46 @@ class TrayApp:
             except Exception:  # noqa: BLE001 -- best-effort
                 pass
 
+    def _peak_watch(self):
+        """Phase 11: 5-minute peak-window toast. Checks once a minute;
+        when the peak window starts in <= 5 minutes and we haven't
+        toasted for this day-window, fires one Windows notification.
+        Council remediation: `now` is evaluated exactly once per tick
+        (no loop catch-ups after sleep/resume) and the dedup key is
+        f"{date}:peak_toast" so midnight boundaries and sleep/wake
+        cycles can't produce duplicate toasts. Best-effort, never
+        raises."""
+        import time
+        from datetime import datetime
+        while not self._quitting:
+            for _ in range(60):  # 1-minute slices; quit stays responsive
+                if self._quitting:
+                    return
+                time.sleep(1)
+            if self._quitting:
+                return
+            try:
+                from . import chronotype, store
+                # One evaluation of "now" per tick.
+                now = datetime.now()
+                status = chronotype.peak_status(now, db_path=self.db_path)
+                if status["state"] != "before" or status["minutes"] > 5:
+                    continue
+                key = "%s:peak_toast" % now.date().isoformat()
+                if store.get_setting("peak_toast_key", "",
+                                     path=self.db_path) == key:
+                    continue  # already toasted for this day-window
+                store.set_setting("peak_toast_key", key,
+                                  path=self.db_path)
+                label = chronotype.window_label(db_path=self.db_path)
+                self._notify(
+                    "Peak energy window (%s) starts in %d min. "
+                    "Open Focus Core for a 1-click deep-focus launch."
+                    % (label, status["minutes"]),
+                    "Peak window approaching")
+            except Exception:  # noqa: BLE001 -- best-effort
+                pass
+
     def on_quick_session(self, icon=None, item=None):
         result = start_quick_session(self.db_path)
         if "error" in result:
@@ -385,6 +425,9 @@ class TrayApp:
         threading.Thread(target=self._nightly_wal_checkpoint,
                          daemon=True,
                          name="focuscore-wal-checkpoint").start()
+        # Phase 11: 5-minute peak-window toast watcher.
+        threading.Thread(target=self._peak_watch, daemon=True,
+                         name="focuscore-peak-watch").start()
         self.icon = pystray.Icon("focus-core", make_icon_image(),
                                  "Focus Core", self.build_menu())
         self.window = self._create_window(desktop, launcher)

@@ -67,7 +67,7 @@ def test_migration_8_applies_cleanly_and_is_idempotent(tmp_path):
     conn = _connect(db)
     try:
         version = conn.execute("PRAGMA user_version").fetchone()[0]
-        assert version == 8
+        assert version == 9
         tables = {r[0] for r in conn.execute(
             "SELECT name FROM sqlite_master WHERE type = 'table'")}
         for t in ("invoices", "invoice_lines", "invoice_counters",
@@ -133,7 +133,7 @@ def test_migration_8_upgrade_from_v7_preserves_data(tmp_path):
     migrations.apply_migrations(db)
     conn = _connect(db)
     try:
-        assert conn.execute("PRAGMA user_version").fetchone()[0] == 8
+        assert conn.execute("PRAGMA user_version").fetchone()[0] == 9
         row = conn.execute(
             "SELECT invoice_id FROM timesheet_entries").fetchone()
         assert row["invoice_id"] is None
@@ -182,7 +182,7 @@ def test_migration_8_failure_leaves_version_at_7(tmp_path, monkeypatch):
 
     patched = [
         mig_mod.Migration(m.version, m.name,
-                          boom if m.version == 8 else m.apply)
+                          boom if m.version == 9 else m.apply)
         for m in mig_mod.MIGRATIONS
     ]
     monkeypatch.setattr(mig_mod, "MIGRATIONS", patched)

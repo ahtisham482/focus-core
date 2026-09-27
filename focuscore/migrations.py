@@ -19,7 +19,7 @@ from . import backup, paths, store
 
 logger = logging.getLogger(__name__)
 
-LATEST_VERSION = 8
+LATEST_VERSION = 9
 
 
 class MigrationError(Exception):
@@ -760,6 +760,61 @@ def _migration_0008_invoicing(conn: sqlite3.Connection) -> None:
     )
 
 
+def _migration_0009_gamification(conn: sqlite3.Connection) -> None:
+    """Migration 9: Phase 11 gamification (XP ledger + badges).
+
+    Integer-only XP math (bonuses as integer deltas, streak multiplier
+    as x10 integer). Chronotype peak window lives in the settings
+    table (no new table). Idempotent: IF NOT EXISTS everywhere.
+
+    Council remediation (Phase 11 audit):
+    - xp_ledger.session_id FK -> focus_sessions(id) ON DELETE CASCADE
+      (phantom XP purged if a session is deleted).
+    - badges.session_id FK -> focus_sessions(id) ON DELETE SET NULL
+      (earned badges survive session archival).
+    - uq_xp_ledger_session partial unique index: double-award proof.
+    - idx_activities_ts: bounded range scans for the depth gauge.
+    """
+    conn.execute(
+        """
+        CREATE TABLE IF NOT EXISTS xp_ledger (
+            id INTEGER PRIMARY KEY,
+            session_id INTEGER NOT NULL
+                REFERENCES focus_sessions(id) ON DELETE CASCADE,
+            day TEXT NOT NULL,
+            base_xp INTEGER NOT NULL,
+            peak_bonus INTEGER NOT NULL DEFAULT 0,
+            clean_bonus INTEGER NOT NULL DEFAULT 0,
+            streak_mult_x10 INTEGER NOT NULL DEFAULT 10,
+            total_xp INTEGER NOT NULL,
+            awarded_at TEXT NOT NULL
+        )
+        """)
+    conn.execute(
+        "CREATE INDEX IF NOT EXISTS idx_xp_ledger_day ON xp_ledger(day)")
+    conn.execute(
+        "CREATE UNIQUE INDEX IF NOT EXISTS uq_xp_ledger_session "
+        "ON xp_ledger(session_id) WHERE session_id IS NOT NULL")
+    conn.execute(
+        """
+        CREATE TABLE IF NOT EXISTS badges (
+            id INTEGER PRIMARY KEY,
+            badge_key TEXT NOT NULL UNIQUE,
+            session_id INTEGER
+                REFERENCES focus_sessions(id) ON DELETE SET NULL,
+            awarded_at TEXT NOT NULL,
+            meta TEXT NOT NULL DEFAULT '{}'
+        )
+        """)
+    # idx_activities_ts: bounded range scans for the depth gauge.
+    # Defensive: adversarial/partial base schemas may lack the column.
+    cols = {r[1] for r in conn.execute("PRAGMA table_info(activities)")}
+    if "ts" in cols:
+        conn.execute(
+            "CREATE INDEX IF NOT EXISTS idx_activities_ts "
+            "ON activities(ts)")
+
+
 MIGRATIONS: List[Migration] = [
     Migration(1, "0001_afk_intervals", _migration_0001_afk_intervals),
     Migration(2, "0002_shield_columns", _migration_0002_shield_columns),
@@ -788,6 +843,11 @@ MIGRATIONS: List[Migration] = [
         8,
         "0008_invoicing",
         _migration_0008_invoicing,
+    ),
+    Migration(
+        9,
+        "0009_gamification",
+        _migration_0009_gamification,
     ),
 ]
 

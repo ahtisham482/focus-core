@@ -308,6 +308,28 @@ def get_day_activities(day, path=None):
         conn.close()
 
 
+def get_activities_range(start_ts, end_ts, path=None):
+    """Bounded time-range scan (Phase 11, council remediation).
+
+    Uses idx_activities_ts -- no full-day scans, no unbounded LIMIT.
+    start_ts/end_ts are ISO strings; returns rows ORDER BY ts ASC.
+    """
+    init_db(path)
+    conn = get_db(path)
+    try:
+        return [
+            dict(row)
+            for row in conn.execute(
+                "SELECT ts, duration, app, title, category, score "
+                "FROM activities WHERE ts >= ? AND ts <= ? "
+                "ORDER BY ts ASC",
+                (start_ts, end_ts),
+            )
+        ]
+    finally:
+        conn.close()
+
+
 def get_day_summary(day, path=None):
     """Aggregate one day.
 

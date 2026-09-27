@@ -403,7 +403,6 @@ def restore_backup(name, db_path=None, dest_dir=None):
     else:
         safety = None
     staging = db.parent / (db.name + ".restore-staging")
-    staging.unlink(missing_ok=True)
     try:
         # VACUUM the backup into staging (verifies it reads cleanly),
         # then verify and atomically swap.
@@ -416,15 +415,9 @@ def restore_backup(name, db_path=None, dest_dir=None):
         _verify_backup_file(staging, src_rowcount)
         # Atomic swap: the live database is never half-overwritten.
         os.replace(str(staging), str(db))
-        for ext in ("-wal", "-shm"):
-            try:
-                (db.parent / (db.name + ext)).unlink(missing_ok=True)
-            except OSError:
-                pass
         # Sprint 4 (Qwen item 7): repair invoice counters so the next
         # issued number continues after the highest non-void invoice.
         _repair_invoice_counters(db)
-
     finally:
         try:
             staging.unlink(missing_ok=True)

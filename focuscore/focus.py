@@ -133,9 +133,18 @@ def end_session(db_path=None, now=None):
     store.end_session(active["id"], "completed", _now_iso(now), path=db_path)
     session = store.get_session(active["id"], path=db_path)
     cues_mod.play_cue("session_end", enabled=cue_enabled(db_path))
+    # Phase 11: award XP + badges once per completed session. Failure
+    # here must never break session completion.
+    xp = {}
+    try:
+        from . import gamification as gami_mod
+        xp = gami_mod.award_session_xp(session["id"], db_path=db_path)
+    except Exception:
+        xp = {}
     return {"session": session,
             "summary": session_summary(session["id"], db_path=db_path,
-                                       now=now)}
+                                       now=now),
+            "xp": xp}
 
 
 def abort_session(db_path=None, now=None):
@@ -523,6 +532,86 @@ def _fmt_hms(total_seconds):
     if hours:
         return "%d:%02d:%02d" % (hours, minutes, seconds)
     return "%d:%02d" % (minutes, seconds)
+
+
+def depth_state(session_id, db_path=None, now=None):
+    """Real-time depth gauge for an active session (Phase 11).
+
+    Returns {'state': 'flow'|'deep'|'surface',
+             'dominant_score': int, 'switches_15m': int,
+             'uninterrupted_min': float}.
+
+    Inputs (trailing 15-minute window of tracked activities):
+    - dominant score: score bucket (+2/+1/0/-1/-2) with most seconds.
+    - switches: number of distinct apps in the window.
+    - uninterrupted: minutes since session start (or last break end)
+      with no -1/-2 app activity.
+
+    Rules:
+    - flow:    dominant +2, 0 switches, uninterrupted >= 15.
+    - deep:    dominant +1/+2, switches <= 2.
+    - surface: everything else (warm-up, high switching).
+
+    Council remediation: single bounded range query via
+    idx_activities_ts -- no full-day scans, no unbounded LIMIT.
+    """
+    now = now or datetime.now()
+    session = store.get_session(session_id, path=db_path)
+    if not session:
+        return {"state": "surface", "dominant_score": 0,
+                "switches_15m": 0, "uninterrupted_min": 0.0}
+
+    start = _to_naive(session["started_at"])
+    window_start = now - timedelta(minutes=15)
+
+    seconds_by_score = {2: 0.0, 1: 0.0, 0: 0.0, -1: 0.0, -2: 0.0}
+    apps = set()
+    last_distraction_end = None
+
+    for event in store.get_activities_range(
+            window_start.isoformat(timespec="seconds"),
+            now.isoformat(timespec="seconds"), path=db_path):
+        try:
+            ev_start = _to_naive(event["ts"])
+        except (ValueError, TypeError):
+            continue
+        ev_end = ev_start + timedelta(
+            seconds=float(event.get("duration") or 0))
+        # Clip to both the session window and the trailing-15m window.
+        clip_start = max(ev_start, window_start, start)
+        clip_end = min(ev_end, now)
+        secs = (clip_end - clip_start).total_seconds()
+        if secs <= 0:
+            continue
+        score = event.get("score")
+        score = score if score in (2, 1, 0, -1, -2) else 0
+        seconds_by_score[score] += secs
+        app = (event.get("app") or "").strip()
+        if app:
+            apps.add(app)
+        if score in (-1, -2):
+            last_distraction_end = clip_end \
+                if last_distraction_end is None \
+                else max(last_distraction_end, clip_end)
+
+    if sum(seconds_by_score.values()) > 0:
+        dominant = max(seconds_by_score,
+                       key=lambda s: (seconds_by_score[s], s))
+    else:
+        dominant = 0  # no activity data: neutral, never assume +2
+    switches = max(0, len(apps) - 1)
+    anchor = last_distraction_end or start
+    uninterrupted = max(0.0, (now - anchor).total_seconds() / 60.0)
+
+    if dominant == 2 and switches == 0 and uninterrupted >= 15:
+        state = "flow"
+    elif dominant in (1, 2) and switches <= 2:
+        state = "deep"
+    else:
+        state = "surface"
+    return {"state": state, "dominant_score": dominant,
+            "switches_15m": switches,
+            "uninterrupted_min": round(uninterrupted, 1)}
 
 
 def main():

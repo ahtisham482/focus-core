@@ -115,7 +115,14 @@ class RulesSnapshot:
     cycle: object  # active pomodoro cycle dict or None
     active_pass: object  # emergency pass dict or None
     hud_enabled: bool
-    fetched_at_mono: float  # time.monotonic() when built
+    force_hardcore: bool = False  # Phase 11: peak-window escalation,
+    # baked in by the refresher (I-1 safe: worker only reads it).
+    generated_at_monotonic: float = 0.0  # council remediation: worker
+    # fail-safes force_hardcore=False when the snapshot is older than
+    # 120s or the peak window has ended (purely in-memory, 0 SQLite).
+    peak_window_end_iso: str = ""  # today's peak end, ISO; "" = none
+    fetched_at_mono: float = 0.0  # time.monotonic() when built
+    # (kept for Sprint 4 test compat; mirrors generated_at_monotonic)
 
 
 @dataclasses.dataclass(frozen=True)
@@ -174,6 +181,17 @@ def _build_snapshot(db_path):
     # Freeze overrides as sorted tuples for the frozen dataclass.
     overrides_t = tuple(sorted(
         (str(k).lower(), str(v)) for k, v in (overrides or {}).items()))
+    # Phase 11: peak-window escalation. Read on the refresher thread
+    # (one settings read, off the critical path); the worker only ever
+    # reads the baked-in flag -- I-1 holds.
+    try:
+        from . import chronotype
+        force_hardcore = chronotype.is_peak_now(db_path=db_path)
+        peak_end_iso = chronotype.peak_window_end_iso(db_path=db_path)
+    except Exception:
+        force_hardcore = False
+        peak_end_iso = ""
+    now_mono = time.monotonic()
     return RulesSnapshot(
         rules=tuple(rules or []),
         overrides=overrides_t,
@@ -181,15 +199,37 @@ def _build_snapshot(db_path):
         cycle=cycle,
         active_pass=active_pass,
         hud_enabled=hud_enabled,
-        fetched_at_mono=time.monotonic(),
+        force_hardcore=force_hardcore,
+        generated_at_monotonic=now_mono,
+        peak_window_end_iso=peak_end_iso,
+        fetched_at_mono=now_mono,
     )
+
+
+def _snapshot_force_hardcore(snapshot):
+    """Resolve the effective peak-window escalation from a snapshot.
+
+    Council remediation: fail-safe to False when the snapshot is stale
+    (>120s old) or the peak window has ended. Purely in-memory
+    evaluation -- 0 SQLite, I-1 holds.
+    """
+    if snapshot is None or not getattr(snapshot, "force_hardcore", False):
+        return False
+    gen = getattr(snapshot, "generated_at_monotonic", 0.0) or 0.0
+    fresh = (time.monotonic() - gen) <= 120.0
+    end_iso = getattr(snapshot, "peak_window_end_iso", "") or ""
+    not_expired = (not end_iso) or (
+        datetime.now().isoformat(timespec="seconds") < end_iso)
+    return bool(fresh and not_expired)
 
 
 def _empty_snapshot():
     """Fail-open starting snapshot before the first refresh lands."""
+    now_mono = time.monotonic()
     return RulesSnapshot(rules=(), overrides=(), session=None,
                          cycle=None, active_pass=None, hud_enabled=True,
-                         fetched_at_mono=time.monotonic())
+                         generated_at_monotonic=now_mono,
+                         fetched_at_mono=now_mono)
 
 
 class SnapshotHolder:
@@ -638,6 +678,12 @@ def shield_once(state, client, categorize_fn, db_path=None, now=None,
             session_id = session.get("id")
             session_enforcement = session.get("enforcement_mode") \
                 or "strict"
+            # Phase 11: peak-window escalation. The refresher baked
+            # force_hardcore into the snapshot (in-memory read only).
+            # _snapshot_force_hardcore applies the staleness fail-safe
+            # (council remediation): 0 SQLite, I-1 holds.
+            if _snapshot_force_hardcore(snapshot):
+                session_enforcement = "hardcore"
             try:
                 blocked, score, category = blocker.is_blocked(
                     window["app"], window["title"], window["url"],
