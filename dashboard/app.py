@@ -42,19 +42,20 @@ ONBOARDED_FLAG = paths.onboarded_flag()
 # Top navigation: (key, label, href). "Review" jumps to today's
 # uncategorized activities when a day is known.
 NAV_LINKS = [
-    ("home", "Home", "/"),
-    ("timesheet", "Timesheet", "/timesheet"),
-    ("invoices", "Invoices", "/invoices"),
-    ("report", "Report", "/report"),
-    ("coaching", "Coaching", "/coaching"),
-    ("intelligence", "Deep time", "/intelligence"),
-    ("focus", "Focus", "/focus"),
-    ("shield", "Shield", "/shield"),
-    ("goals", "Goals", "/goals"),
-    ("alerts", "Alerts", "/alerts"),
-    ("backup", "Backup", "/backup"),
-    ("review", "Review", "/activities"),
+    ("home",         "Home",       "/",             "home"),
+    ("timesheet",    "Timesheet",  "/timesheet",    "timesheet"),
+    ("invoices",     "Invoices",   "/invoices",     "invoice"),
+    ("report",       "Report",     "/report",       "report"),
+    ("coaching",     "Coaching",   "/coaching",     "coaching"),
+    ("intelligence", "Deep time",  "/intelligence", "brain"),
+    ("focus",        "Focus",      "/focus",        "timer"),
+    ("shield",       "Shield",     "/shield",       "shield"),
+    ("goals",        "Goals",      "/goals",        "target"),
+    ("alerts",       "Alerts",     "/alerts",       "bell"),
+    ("backup",       "Backup",     "/backup",       "report"),
+    ("review",       "Review",     "/activities",   "timesheet"),
 ]
+
 
 
 def is_onboarded():
@@ -83,24 +84,52 @@ def _parse_day(value):
         return None
 
 
-def layout(title, body, day=None, refresh=300, active="home", help_key=None):
-    """Page shell: nav bar, shared stylesheet, footer. No inline CSS --
-    everything visual lives in dashboard/static/style.css (offline).
+def layout(title, body, day=None, refresh=300, active="home",
+           help_key=None, hero=None, body_class=""):
+    """Page shell: nav bar, design-system stylesheet, footer.
 
-    help_key selects the contextual /help/<key> article linked in the
-    footer. When omitted it is derived from the nav key (review -> the
-    activities article); pages outside the nav pass it explicitly, and
-    the help pages themselves use active="help" so the footer falls
-    back to the /help index.
+    hero: optional HTML string for the context-aware page header.
+          When None, a plain h1 page-hero block is rendered.
+    body_class: extra CSS classes added to <body> (e.g. 'zen-mode').
     """
+    # ── Resolve theme setting ──────────────────────────────────────
+    try:
+        from focuscore import store as _store
+        theme = _store.get_setting("ui_theme", "system") or "system"
+    except Exception:
+        theme = "system"
+    theme_attr = "" if theme == "system" else " data-theme='%s'" % theme
+
+    # ── Build nav with icon + label ────────────────────────────────
     links = []
-    for key, label, href in NAV_LINKS:
+    for nav_item in NAV_LINKS:
+        key, label, href, icon = nav_item
         url = href
         if key == "review" and day:
             url = href + "?day=" + day
         cls = " class='active'" if key == active else ""
-        links.append("<a href='%s'%s>%s</a>" % (url, cls, label))
-    nav = "<nav class='topnav'>" + "".join(links) + "</nav>"
+        svg = ("<svg width='15' height='15' aria-hidden='true'>"
+               "<use href='/static/icons.svg#icon-%s'/></svg>" % icon)
+        links.append("<a href='%s'%s>%s%s</a>" % (url, cls, svg, label))
+
+    # Theme toggle buttons (server-side POST, no JS required)
+    theme_toggle = (
+        "<form class='theme-toggle' method='post' action='/settings/theme'>"
+        "<button type='submit' name='theme' value='light' title='Light mode'>"
+        "<svg width='14' height='14'><use href='/static/icons.svg#icon-sun'/></svg>"
+        "</button>"
+        "<button type='submit' name='theme' value='dark' title='Dark mode'>"
+        "<svg width='14' height='14'><use href='/static/icons.svg#icon-moon'/></svg>"
+        "</button>"
+        "</form>"
+    )
+
+    nav = ("<nav class='topnav' id='topnav'>"
+           + "".join(links)
+           + theme_toggle
+           + "</nav>")
+
+    # ── Help / footer ──────────────────────────────────────────────
     if help_key is None:
         help_key = {"home": "home", "timesheet": "timesheet",
                     "invoices": "invoices",
@@ -111,19 +140,39 @@ def layout(title, body, day=None, refresh=300, active="home", help_key=None):
                     "backup": "backup", "review": "activities"}.get(active)
     help_href = "/help/" + help_key if help_key else "/help"
     footer = (
-        "<footer>Focus Core &middot; your data never leaves this PC "
+        "<footer class='page-footer'>Focus Core &middot; "
+        "your data never leaves this PC "
         "&middot; <a href='%s'>Help</a> "
         "&middot; <a href='/welcome/restart'>Take the tour again</a></footer>"
         % help_href)
+
+
+    # ── Page hero / title ─────────────────────────────────────────
+    if hero is None:
+        hero_html = (
+            "<div class='page-hero'>"
+            "<div class='page-hero-text'>"
+            "<h1 class='page-title'>%s</h1>"
+            "</div></div>" % escape(title))
+    else:
+        hero_html = hero
+
+    bc = "body" + (" " + body_class if body_class else "")
     return (
-        "<!doctype html><html><head><meta charset='utf-8'>"
+        "<!doctype html><html lang='en'%s><head><meta charset='utf-8'>"
         "<meta name='viewport' content='width=device-width, initial-scale=1'>"
         "<meta http-equiv='refresh' content='%d'>"
         "<title>%s &middot; Focus Core</title>"
+        "<link rel='preload' href='/static/fonts/GeistVF.woff2' "
+        "as='font' type='font/woff2' crossorigin>"
         "<link rel='stylesheet' href='/static/style.css'>"
-        "<link rel='icon' href='/static/icon.png'></head>"        "<body>%s<h1>%s</h1>"
-        "<div class='sub'>Focus Core &middot; Phase 6</div>%s%s</body></html>"
-        % (refresh, escape(title), nav, escape(title), body, footer)
+        "<link rel='icon' href='/static/icon.png'>"
+        "</head>"
+        "<%s>%s<main class='page-main'>%s%s</main>%s"
+        "<script src='/static/nav.js'></script>"
+        "</body></html>"
+        % (theme_attr, refresh, escape(title),
+           bc, nav, hero_html, body, footer)
     )
 
 
@@ -378,6 +427,7 @@ def home_page():
     per thing that needs the user -- each with exactly one button."""
     from focuscore import home as home_mod
     from focuscore import activitywatch as aw_mod
+    from focuscore import chronotype, focus as focus_mod
 
     today = date.today().isoformat()
     try:
@@ -394,11 +444,69 @@ def home_page():
     seconds_by_level = summary["seconds_by_level"]
     focus_hours = _hours(seconds_by_level.get(2, 0)
                          + seconds_by_level.get(1, 0))
+    streak = focus_mod.current_streak()
+    peak_lbl = chronotype.window_label()
+
+    # ── Context-aware Hero Header (Merlin Cold-start & Active spec) ──
+    if total <= 0 and streak == 0:
+        # Merlin's Cold-Start Hero specification (Day 1 / zero data)
+
+        hero_html = (
+            "<div class='page-hero'>"
+            "<div class='page-hero-text'>"
+            "<h1 class='page-title'>Day one &mdash; your focus story starts now.</h1>"
+            "<p class='page-sub'>Work normally today. Focus Core is learning your "
+            "rhythm &mdash; tomorrow you'll see your first Flow Index, your peak "
+            "hours, and your streak.</p>"
+            "<p class='page-sub' style='margin-top:8px'>"
+            "<span>Flow Index: <b style='color:var(--ink-muted)'>"
+            "&mdash; (tracking begins now)</b></span>"
+            "<span class='page-sub-dot'>&middot;</span>"
+            "<span>Streak: <b>Day 1</b></span>"
+            "<span class='page-sub-dot'>&middot;</span>"
+            "<span>Peak: <b>%s</b></span>"
+            "</p>"
+            "</div>"
+            "<div class='page-hero-actions'>"
+            "<a class='btn' href='/focus'>Start a focus session</a>"
+            "</div>"
+            "</div>" % escape(peak_lbl)
+        )
+    else:
+        # Active state context-aware hero
+        hr = datetime.now().hour
+        greeting = (
+            "Good morning" if hr < 12
+            else ("Good afternoon" if hr < 18 else "Good evening")
+        )
+        peak_status_text = (
+            "\u26a1 Peak now" if chronotype.is_peak_now()
+            else ("Peak: %s" % peak_lbl)
+        )
+        pulse_val_str = "%.1f" % pulse if pulse is not None else "--"
+        hero_html = (
+            "<div class='page-hero'>"
+            "<div class='page-hero-text'>"
+            "<h1 class='page-title'>%s</h1>"
+            "<p class='page-sub'>"
+            "<span>Pulse: <b data-live>%s</b></span>"
+            "<span class='page-sub-dot'>&middot;</span>"
+            "<span>&#128293; %d-day streak</span>"
+            "<span class='page-sub-dot'>&middot;</span>"
+            "<span>%s</span>"
+            "</p>"
+            "</div>"
+            "<div class='page-hero-actions'>"
+            "<a class='btn' href='/focus'>Start focus session</a>"
+            "</div>"
+            "</div>" % (greeting, pulse_val_str, streak, escape(peak_status_text))
+        )
+
 
     if total > 0 and pulse is not None:
         band = home_mod.pulse_band(pulse)
         pulse_html = ("<div class='card stat'><div class='lbl'>Today's "
-                      "Pulse</div><div class='pulse %s'>%.1f</div>"
+                      "Pulse</div><div class='pulse %s' data-live>%.1f</div>"
                       "<div class='note'>0-100. Green 60+, amber 40-59, "
                       "red below 40.</div></div>" % (band, pulse))
     else:
@@ -409,9 +517,9 @@ def home_page():
 
     stats_html = (
         "<div class='grid'>"
-        "<div class='card stat'><div class='num'>%.1f</div>"
+        "<div class='card stat'><div class='num' data-live data-tabular>%.1f</div>"
         "<div class='lbl'>tracked hours</div></div>"
-        "<div class='card stat'><div class='num'>%.1f</div>"
+        "<div class='card stat'><div class='num' data-live data-tabular>%.1f</div>"
         "<div class='lbl'>focused hours</div></div>"
         "</div>" % (_hours(total), focus_hours))
 
@@ -435,7 +543,8 @@ def home_page():
             + "<div class='card'><p><a href='/day/%s'>See today's full "
               "details</a> &middot; <a href='/timesheet?day=%s'>Today's "
               "timesheet</a></p></div>" % (today, today))
-    return layout("Home", body, day=today, active="home")
+    return layout("Home", body, day=today, active="home", hero=hero_html)
+
 
 
 # ------------------------------------------------------------ welcome ---

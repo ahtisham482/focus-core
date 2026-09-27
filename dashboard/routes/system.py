@@ -22,6 +22,24 @@ from dashboard.app import (
     layout,
 )
 
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Theme setting (server-side, no JS required)
+# ─────────────────────────────────────────────────────────────────────────────
+
+@app.route("/settings/theme", methods=["POST"])
+def settings_theme():
+    """Toggle light / dark / system theme via a simple form POST.
+    Stored in the settings table; read by layout() on every page render.
+    """
+    theme = request.form.get("theme", "system")
+    if theme not in ("light", "dark", "system"):
+        theme = "system"
+    store.set_setting("ui_theme", theme)
+    referrer = request.referrer or "/"
+    return redirect(referrer)
+
+
 @app.route("/backup")
 def backup_page():
     from focuscore import backup as backup_mod
@@ -585,6 +603,28 @@ def shield_page():
     else:
         blocks_html = ("<p class='note'>Nothing blocked today yet.</p>")
 
+    shield_state = "off" if killed else ("protected" if daemon else "off")
+    blocks_today_count = len(blocks)
+    hero_html = (
+        "<div class='page-hero'>"
+        "<div class='page-hero-text'>"
+        "<h1 class='page-title'>Shield</h1>"
+        "<p class='page-sub'>"
+        "<span>Status: <span class='badge badge--%s'>%s</span></span>"
+        "<span class='page-sub-dot'>&middot;</span>"
+        "<span><b>%d</b> distraction(s) blocked today</span>"
+        "<span class='page-sub-dot'>&middot;</span>"
+        "<span><b>%d</b> active rule(s)</span>"
+        "</p>"
+        "</div>"
+        "</div>" % (
+            shield_state,
+            "Protected" if shield_state == "protected" else "Inactive",
+            blocks_today_count, len(rules)
+        )
+    )
+
+
     body = (
         "<div class='card'><h3>Shield status</h3>%s</div>"
         "<div class='card'><h3>Always-on rules</h3>%s</div>"
@@ -595,7 +635,8 @@ def shield_page():
         "<div class='card'><h3>Blocked today</h3>%s</div>"
         % (status_html, rules_html, pass_html, blocks_html)
     )
-    return layout("Shield", body, active="shield", help_key="shield")
+    return layout("Shield", body, active="shield", help_key="shield", hero=hero_html)
+
 
 
 @app.route("/shield/rule/add", methods=["POST"])
@@ -920,10 +961,46 @@ def intelligence_page():
         "</details></div>"
         % (sel_day, prev_day, "".join(hour_blocks)))
 
+    flow_res = intel_mod.flow_index(sel_day)
+    ratio_buckets = intel_mod.day_ratio_buckets(sel_day)
+    switches_res = intel_mod.switch_rate(sel_day)
+
+    if flow_res.get("score") is None:
+        # FLOW-1: Insufficient data (< 15 min) -> tri-state neutral, NEVER "Flow: 0"
+        flow_hero_str = (
+            "<b style='color:var(--ink-muted)'>&mdash; (tracking begins now)</b>"
+        )
+    else:
+        flow_hero_str = "<b>%d/100 (%s)</b>" % (flow_res["score"], flow_res["label"])
+
+    tot_sec = sum(ratio_buckets.values())
+    deep_pct = (
+        (ratio_buckets.get("deep", 0.0) / tot_sec * 100.0) if tot_sec > 0 else 0.0
+    )
+    sw_hr = switches_res.get("per_hour")
+    sw_str = ("%.1f / hr" % sw_hr) if sw_hr is not None else "--"
+
+    hero_html = (
+        "<div class='page-hero'>"
+        "<div class='page-hero-text'>"
+        "<h1 class='page-title'>Deep Time</h1>"
+        "<p class='page-sub'>"
+        "<span>Flow Index: %s</span>"
+        "<span class='page-sub-dot'>&middot;</span>"
+        "<span><b>%.0f%%</b> deep work</span>"
+        "<span class='page-sub-dot'>&middot;</span>"
+        "<span><b>%s</b> context switches</span>"
+        "</p>"
+        "</div>"
+        "</div>" % (flow_hero_str, deep_pct, sw_str)
+    )
+
+
     body = (chrono_card + rhythm_card + peaks_card + depth_card
             + anatomy_card + trends_card + timeline_card
             + _phase12_cards(sel_day))
-    return layout("Deep time", body, active="intelligence")
+    return layout("Deep time", body, active="intelligence", hero=hero_html)
+
 
 
 

@@ -18,27 +18,119 @@ from dashboard.app import (
 
 # ------------------------------------------------------- SVG ring helper ---
 
-def _svg_ring(remaining, total, mode="remaining", size=140, depth="surface"):
+import math as _math
+
+# UI-10: Depth state → (hue color, luminance-boosted color for dual-encoding)
+# Dual-encode: hue AND luminance so depth is never hue-only (deuteranopia guard).
+# Grey = unmeasured (FLOW-1 tri-state), not failure.
+_DEPTH_COLORS = {
+    "flow":      ("#22c55e", "#4ade80"),   # green base + bright (luminance ↑)
+    "deep":      ("#fbbf24", "#fde68a"),   # amber base + bright
+    "surface":   ("#94a3b8", "#94a3b8"),   # slate (no luminance boost needed)
+    "unmeasured":("#64748b", "#64748b"),   # darker slate = no data yet
+}
+# UI-10: depth → numeric score for JS pulse-inversion amplitude
+_DEPTH_SCORES = {"flow": 1.0, "deep": 0.5, "surface": 0.0, "unmeasured": 0.0}
+
+# UI-10: depth → human-readable ARIA label component
+_DEPTH_ARIA = {
+    "flow":      "Flow state",
+    "deep":      "Deep work",
+    "surface":   "Surface focus",
+    "unmeasured":"Focus not yet measured",
+}
+
+
+def _svg_ring(remaining, total, mode="remaining", size=220, depth="surface"):
     """Inline SVG progress ring. Pure SVG+CSS, zero libraries.
 
-    mode: 'remaining' (classic/pomodoro countdown) or 'elapsed'
-    (flowtime counts up toward the soft target).
+    UI-10 compliant:
+    - 220px default (up from 140px)
+    - Tick marks at 25%, 50%, 75% of the ring
+    - Dual-encoded depth: hue + luminance (not hue-only, deuteranopia safe)
+    - data-depth-score for JS pulse-inversion amplitude
+    - ARIA label on the SVG for screen readers
+    - Grey = unmeasured (FLOW-1 tri-state), never = failure
+    - mode: 'remaining' (countdown) or 'elapsed' (flowtime count-up)
     """
-    colors = {"flow": "#4caf50", "deep": "#ffb300", "surface": "#9e9e9e"}
-    color = colors.get(depth, "#9e9e9e")
+    cx, cy, r = 100, 100, 86          # viewBox 200×200
+    circ = 2 * _math.pi * r
+
+    # Progress fraction (0.0 → 1.0)
+    if total > 0:
+        frac = max(0.0, min(1.0, remaining / total))
+    else:
+        frac = 0.0
+    elapsed_frac = 1.0 - frac
+
+    stroke_offset = circ * (1.0 - (frac if mode == "remaining" else elapsed_frac))
+
+    d_key = depth if depth in _DEPTH_COLORS else "surface"
+    base_color, bright_color = _DEPTH_COLORS[d_key]
+    depth_score = _DEPTH_SCORES.get(d_key, 0.0)
+    aria_depth  = _DEPTH_ARIA.get(d_key, "Focus")
+
+    # Time label
+    if mode == "remaining":
+        time_label = _fmt_countdown(remaining)
+        aria_time  = "%s remaining" % time_label
+        sub_label  = "remaining"
+    else:
+        elapsed = total - remaining
+        time_label = _fmt_countdown(elapsed)
+        aria_time  = "%s elapsed" % time_label
+        sub_label  = "elapsed"
+
+    full_aria = "%s \u00b7 %s" % (aria_depth, aria_time)
+
+    # Tick marks at 25%, 50%, 75% (rotated back since SVG is rotated -90deg)
+    # In the rotated SVG coordinate space (-90deg), 0% = top.
+    tick_html = ""
+    for pct in (0.25, 0.50, 0.75):
+        angle = 2 * _math.pi * pct  # angle in rotated frame
+        x1 = cx + (r - 8) * _math.cos(angle)
+        y1 = cy + (r - 8) * _math.sin(angle)
+        x2 = cx + (r + 4) * _math.cos(angle)
+        y2 = cy + (r + 4) * _math.sin(angle)
+        tick_html += (
+            "<line x1='%.1f' y1='%.1f' x2='%.1f' y2='%.1f' "
+            "stroke='var(--border)' stroke-width='2' stroke-linecap='round'/>"
+            % (x1, y1, x2, y2)
+        )
+
     return (
-        "<div class='fc-ring' data-fc-ring data-total='%s' "
-        "data-remaining='%s' data-mode='%s'>"
-        "<svg width='%d' height='%d' viewBox='0 0 120 120'>"
-        "<circle class='fc-ring-bg' cx='60' cy='60' r='54'/>"
-        "<circle class='fc-ring-fg' cx='60' cy='60' r='54' "
-        "style='stroke:%s'/>"
+        "<div class='fc-ring' data-fc-ring "
+        "data-total='%(total)s' data-remaining='%(remaining)s' "
+        "data-mode='%(mode)s' data-depth-score='%(score).1f' "
+        "role='img' aria-label='%(aria)s'>"
+        "<svg width='%(sz)d' height='%(sz)d' viewBox='0 0 200 200' "
+        "style='transform:rotate(-90deg)' aria-hidden='true'>"
+        # Background track
+        "<circle class='fc-ring-bg' cx='%(cx)d' cy='%(cy)d' r='%(r)d'/>"
+        # Progress arc — color uses both base (fill) and bright at deep/flow
+        "<circle class='fc-ring-fg' cx='%(cx)d' cy='%(cy)d' r='%(r)d' "
+        "style='stroke:%(color)s;"
+        "stroke-dasharray:%(circ).1f;"
+        "stroke-dashoffset:%(offset).1f'/>"
+        # Tick marks
+        "%(ticks)s"
         "</svg>"
-        "<div class='fc-ring-label'>%s</div>"
+        # Center label
+        "<div class='fc-ring-label'>"
+        "<span class='fc-ring-time' data-pulse "
+        "style='color:%(bright)s'>%(time)s</span>"
+        "<span class='fc-ring-sublabel'>%(sub)s</span>"
         "</div>"
-        % (total, remaining, mode, size, size, color,
-           _fmt_countdown(remaining) if mode == "remaining" else
-           "%s elapsed" % _fmt_countdown(total - remaining))
+        "</div>"
+        % dict(
+            total=total, remaining=remaining, mode=mode,
+            score=depth_score, aria=full_aria,
+            sz=size, cx=cx, cy=cy, r=r,
+            color=base_color, bright=bright_color,
+            circ=circ, offset=stroke_offset,
+            ticks=tick_html,
+            time=time_label, sub=sub_label,
+        )
     )
 
 
@@ -54,26 +146,57 @@ def _cycle_dots(done, target, on_break=False):
     return "<div class='fc-cycle-dots'>%s</div>" % "".join(dots)
 
 
-def _depth_pill(session_id, depth):
-    labels = {"flow": "🟢 Flow State", "deep": "🟡 Deep Work",
-              "surface": "⚪ Surface Focus"}
-    colors = {"flow": "#4caf50", "deep": "#ffb300", "surface": "#9e9e9e"}
+def _depth_pill(session_id, depth, on_break=False):
+    """Depth state pill with token-based colors and CSS class targeting.
+    UI-10: grey = surface (not failure), dual-encode via CSS class + border.
+    Merlin: on break, pill shows '☕ On Break' without a distracting numerical score.
+    """
+    if on_break:
+        return (
+            "<div>"
+            "<span id='fc-depth-pill' class='is-break' data-session-id='%s' "
+            "style='border-color:var(--warn);color:var(--warn);"
+            "background:var(--warn-soft)'>"
+            "\u2615 On Break</span>"
+            "<div class='fc-depth-meter-track'>"
+            "<div id='fc-depth-meter' style='width:100%%;background:var(--warn)'></div>"
+            "</div>"
+            "<p class='note'>Resting your focus rhythm &middot; "
+            "distraction blocking paused</p>"
+            "</div>" % session_id
+        )
+
+
+    labels = {
+        "flow":    "\U0001f7e2 Flow State",
+        "deep":    "\U0001f7e1 Deep Work",
+        "surface": "\u26aa Surface Focus",
+    }
+    # Use CSS token colors via inline style for border — matches the ring color
+    base_colors, _ = zip(*[_DEPTH_COLORS.get(k, ("#94a3b8","#94a3b8"))
+                            for k in ("flow","deep","surface")])
+    color_map = dict(zip(("flow","deep","surface"), base_colors))
     st = depth.get("state", "surface")
     widths = {"flow": "100%", "deep": "62%", "surface": "30%"}
+    color = color_map.get(st, "#94a3b8")
     return (
-        "<div><span id='fc-depth-pill' data-session-id='%s' "
-        "style='border-color:%s'>%s</span>"
+        "<div>"
+        "<span id='fc-depth-pill' data-session-id='%s' "
+        "style='border-color:%s;color:%s'>%s</span>"
         "<div class='fc-depth-meter-track'>"
         "<div id='fc-depth-meter' style='width:%s;background:%s'></div>"
         "</div>"
-        "<p class='note'>%d app switch(es) in 15 min &middot; "
-        "%.0f min uninterrupted</p></div>"
-        % (session_id, colors.get(st, "#9e9e9e"),
+        "<p class='note'>%d app switch(es) in 15&thinsp;min &middot; "
+        "%.0f&thinsp;min uninterrupted</p>"
+        "</div>"
+        % (session_id, color, color,
            labels.get(st, labels["surface"]),
-           widths.get(st, "30%"), colors.get(st, "#9e9e9e"),
+           widths.get(st, "30%"), color,
            depth.get("switches_15m", 0),
            depth.get("uninterrupted_min", 0.0))
     )
+
+
 
 
 def _soundscape_controls():
@@ -399,19 +522,23 @@ def _pomodoro_active_page_v11(active, streak_html, cues_form, focus_mod):
             controls = (
                 "<form class='inline' method='post' "
                 "action='/focus/cycle/break/end'>"
-                "<button type='submit'>End break early</button></form> "
+                "<button type='submit' class='btn' "
+                "style='background:var(--ink);color:var(--ink-inverted)'>"
+                "End break early</button></form> "
                 "<form class='inline' method='post' "
                 "action='/focus/cycle/break/skip'>"
-                "<button type='submit'>Skip break</button></form> ")
+                "<button type='submit' class='btn secondary'>"
+                "Skip break</button></form> ")
             note = "Blocking is resting too."
+        depth_val = "surface" if cycle["kind"] == "work" else "unmeasured"
+        on_brk = (cycle["kind"] != "work")
         ring_html = (
             "<div class='fc-ring-wrap'>%s<div>"
             "<p><b>%s</b></p><p class='note'>%s</p>%s</div></div>"
             "%s"
-            % (_svg_ring(remaining, total, depth=depth["state"]),
-               headline, note, _depth_pill(active["id"], depth),
-               _cycle_dots(done, target,
-                           on_break=cycle["kind"] != "work")))
+            % (_svg_ring(remaining, total, depth=depth_val),
+               headline, note, _depth_pill(active["id"], depth, on_break=on_brk),
+               _cycle_dots(done, target, on_break=on_brk)))
         controls_html = "<p>%s</p>" % (controls + _session_buttons_v11())
     else:
         ring_html = (
@@ -429,7 +556,10 @@ def _pomodoro_active_page_v11(active, streak_html, cues_form, focus_mod):
            _zen_button(), _soundscape_controls(), cues_form, streak_html,
            _focus_scripts())
     )
-    return layout("Focus session", body, active="focus")
+    b_cls = "break-mode" if (cycle and cycle["kind"] != "work") else ""
+    return layout("Focus session", body, active="focus", body_class=b_cls)
+
+
 
 
 def _flowtime_active_page_v11(active, streak_html, cues_form, focus_mod):

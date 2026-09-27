@@ -195,7 +195,30 @@ def timesheet_page():
            _category_options(), _project_options(), projects_html,
            export_html)
     )
-    return layout("Timesheet " + day, body, day, active="timesheet")
+
+    total_minutes = sum(float(e.get("minutes", 0)) for e in entries)
+    total_hours = total_minutes / 60.0
+    hero_html = (
+        "<div class='page-hero'>"
+        "<div class='page-hero-text'>"
+        "<h1 class='page-title'>Timesheet &middot; %s</h1>"
+        "<p class='page-sub'>"
+        "<span><b>%.1f</b> hours logged</span>"
+        "<span class='page-sub-dot'>&middot;</span>"
+        "<span><b>%d</b> entries</span>"
+        "<span class='page-sub-dot'>&middot;</span>"
+        "<span>Status: <b>%s</b></span>"
+        "</p>"
+        "</div>"
+        "</div>" % (
+            escape(day), total_hours, len(entries),
+            "Locked" if locked else "Editable"
+        )
+    )
+
+    return layout("Timesheet " + day, body, day, active="timesheet", hero=hero_html)
+
+
 
 
 @app.route("/timesheet/accept", methods=["POST"])
