@@ -14,12 +14,21 @@ bypass + multi-monitor + scoped keyboard swallow (R4), tkinter
 threading split (R5), expanded protected list (R6), pass resilience
 (R7).
 
+Sprint 4 (v1.12.0) hardening -- Qwen binding verdict:
+INVARIANT I-1 (Enforcement Independence): enforcement operates
+exclusively against in-memory state. The worker thread performs ZERO
+SQLite calls on its critical path; it reads from an immutable
+RulesSnapshot refreshed by a background task. Telemetry persistence is
+a separate, failure-tolerant writer thread. If the write path is
+blocked, slow, or dead, enforcement continues unaffected.
+
 Usage:
     python -m focuscore.shield --run            # shield daemon
     python -m focuscore.shield --run --session-only   # session guard
 """
 
 import argparse
+import dataclasses
 import json
 import os
 import queue
@@ -72,6 +81,263 @@ PROTECTED_PROCESSES = frozenset({
 # In-memory emergency passes (R7: used when SQLite is unreachable).
 _MEMORY_PASSES = []
 _MEMORY_LOCK = threading.Lock()
+
+
+# ---------------------------------------------------------------------------
+# Sprint 4 (v1.12.0): Enforcement Independence (Qwen I-1).
+#
+# The worker thread NEVER touches SQLite. All enforcement inputs live in
+# an immutable RulesSnapshot, refreshed by a background task every
+# SNAPSHOT_REFRESH_SECONDS via a single-pointer atomic swap (the GIL
+# makes the swap atomic). On refresh failure the worker keeps using the
+# stale snapshot -- enforcement degrades gracefully, never stops.
+# ---------------------------------------------------------------------------
+
+SNAPSHOT_REFRESH_SECONDS = 45  # background refresh cadence (30-60s)
+TELEMETRY_QUEUE_MAXSIZE = 10000  # bounded telemetry queue (item 3)
+TELEMETRY_BATCH_SIZE = 500  # writer flush batch
+TELEMETRY_SPILL_MAX_FILES = 3  # rotated JSONL spill files
+TELEMETRY_SPILL_MAX_BYTES = 5 * 1024 * 1024  # 5 MB per spill file
+WRITER_LIVENESS_TIMEOUT = 180  # restart writer if silent this long
+WORKER_LIVENESS_CHECK_SECONDS = 30  # UI supervisor check cadence
+WORKER_LIVENESS_SILENCE_SECONDS = 90  # restart worker after this
+UI_QUEUE_MAXSIZE = 256  # ui_q cap with drop-oldest (item 4)
+
+
+@dataclasses.dataclass(frozen=True)
+class RulesSnapshot:
+    """Immutable enforcement inputs. Built by _build_snapshot() on the
+    refresher thread; read by the worker thread. Frozen so the worker
+    can never mutate what the refresher built."""
+    rules: tuple  # block rule dicts (enabled, already filtered)
+    overrides: tuple  # (app_lower, category) override pairs
+    session: object  # active session dict or None
+    cycle: object  # active pomodoro cycle dict or None
+    active_pass: object  # emergency pass dict or None
+    hud_enabled: bool
+    fetched_at_mono: float  # time.monotonic() when built
+
+
+@dataclasses.dataclass(frozen=True)
+class UICommand:
+    """Frozen UI message: plain data only. No Tcl/Tk objects, no locks,
+    no callables -- the UI thread must never touch worker-owned objects
+    (Qwen item 4)."""
+    cmd: str
+    label: str = ""
+    app: str = ""
+    locked: bool = False
+    session_id: int = 0
+    db_path: str = ""
+    payload: object = None
+
+
+def _build_snapshot(db_path):
+    """Read everything enforcement needs from SQLite. Runs ONLY on the
+    refresher thread -- never on the worker's critical path."""
+    from . import focus as focus_mod
+    from . import store
+    # Settle pomodoro cycles first so the snapshot sees clean state.
+    try:
+        focus_mod.settle_session(db_path=db_path)
+    except Exception:
+        pass
+    try:
+        rules = store.get_block_rules(path=db_path, only_enabled=True)
+    except Exception:
+        rules = []
+    try:
+        overrides = store.get_overrides(path=db_path)
+    except Exception:
+        overrides = {}
+    try:
+        session = focus_mod.get_active_session(db_path=db_path)
+    except Exception:
+        session = None
+    cycle = None
+    if session and session.get("status") == "active" \
+            and session.get("session_type") == "pomodoro":
+        try:
+            cycle = store.get_active_cycle(session.get("id"),
+                                           path=db_path)
+        except Exception:
+            cycle = None
+    try:
+        active_pass = pass_active(now=datetime.now(), db_path=db_path)
+    except Exception:
+        active_pass = None
+    try:
+        hud_enabled = store.get_setting("hud_enabled", "1",
+                                        path=db_path) == "1"
+    except Exception:
+        hud_enabled = True
+    # Freeze overrides as sorted tuples for the frozen dataclass.
+    overrides_t = tuple(sorted(
+        (str(k).lower(), str(v)) for k, v in (overrides or {}).items()))
+    return RulesSnapshot(
+        rules=tuple(rules or []),
+        overrides=overrides_t,
+        session=session,
+        cycle=cycle,
+        active_pass=active_pass,
+        hud_enabled=hud_enabled,
+        fetched_at_mono=time.monotonic(),
+    )
+
+
+def _empty_snapshot():
+    """Fail-open starting snapshot before the first refresh lands."""
+    return RulesSnapshot(rules=(), overrides=(), session=None,
+                         cycle=None, active_pass=None, hud_enabled=True,
+                         fetched_at_mono=time.monotonic())
+
+
+class SnapshotHolder:
+    """Single-pointer atomic swap holder. The GIL makes attribute
+    assignment atomic; readers never block."""
+
+    def __init__(self):
+        self.current = _empty_snapshot()
+
+    def get(self):
+        return self.current
+
+    def swap(self, snapshot):
+        self.current = snapshot
+
+
+def _snapshot_refresher(stop_event, holder, db_path,
+                        interval=SNAPSHOT_REFRESH_SECONDS):
+    """Background thread: rebuild the snapshot every ``interval``
+    seconds. Any failure keeps the stale snapshot -- enforcement never
+    stops because a refresh failed."""
+    while not stop_event.is_set():
+        try:
+            holder.swap(_build_snapshot(db_path))
+        except Exception as exc:
+            print("shield snapshot refresh failed: %s" % exc,
+                  file=sys.stderr)
+        stop_event.wait(interval)
+
+
+# ---------------------------------------------------------------------------
+# Sprint 4 (v1.12.0): Telemetry writer thread (Qwen item 3).
+#
+# Enforcement never writes to SQLite. Block events go onto a bounded
+# queue; a dedicated writer thread batches them (~500) into the DB. On
+# saturation or write failure, events spill to ephemeral rotated JSONL
+# (shield_spill.jsonl, 3 files x 5 MB). The spill is best-effort
+# telemetry -- losing it never affects enforcement.
+# ---------------------------------------------------------------------------
+
+def _spill_dir():
+    try:
+        d = paths.user_data_dir()
+    except Exception:
+        d = os.path.expanduser("~")
+    return str(d)
+
+
+def _spill_path(index):
+    return os.path.join(_spill_dir(),
+                        "shield_spill.%d.jsonl" % index)
+
+
+def _spill_event(event):
+    """Append one telemetry event to the rotated spill files."""
+    try:
+        # Find the first spill file under the size cap.
+        target = None
+        for i in range(TELEMETRY_SPILL_MAX_FILES):
+            p = _spill_path(i)
+            try:
+                size = os.path.getsize(p)
+            except OSError:
+                size = 0
+            if size < TELEMETRY_SPILL_MAX_BYTES:
+                target = p
+                break
+        if target is None:
+            # All full: rotate (drop oldest, shift down).
+            for i in range(TELEMETRY_SPILL_MAX_FILES - 1):
+                try:
+                    os.replace(_spill_path(i + 1), _spill_path(i))
+                except OSError:
+                    pass
+            target = _spill_path(TELEMETRY_SPILL_MAX_FILES - 1)
+        with open(target, "a", encoding="utf-8") as fh:
+            fh.write(json.dumps(event) + "\n")
+    except Exception:
+        pass  # spill is best-effort; never raise
+
+
+def _flush_telemetry_batch(batch, db_path):
+    """Write one batch of telemetry events to SQLite. Raises on
+    failure so the caller can spill instead."""
+    from . import store
+    conn = store.get_db(db_path)
+    try:
+        for event in batch:
+            kind = event.get("kind")
+            if kind == "block":
+                store.record_block(
+                    event.get("session_id")
+                    if event.get("session_id") else RULE_ONLY_SESSION_ID,
+                    event.get("at"), event.get("app"),
+                    event.get("title"), event.get("url"),
+                    event.get("score"), event.get("category"),
+                    action_taken=event.get("action_taken"),
+                    process_name=event.get("process_name"),
+                    window_handle=event.get("hwnd"), path=db_path,
+                    _conn=conn)
+            elif kind == "intercept":
+                store.increment_intercepted(event.get("session_id"),
+                                            path=db_path, _conn=conn)
+        conn.commit()
+    finally:
+        conn.close()
+
+
+def _telemetry_writer(stop_event, telemetry_q, db_path, liveness_event):
+    """Dedicated writer thread: batch telemetry into SQLite, spill to
+    JSONL on saturation/failure. Sets liveness_event every loop."""
+    batch = []
+    while not stop_event.is_set():
+        liveness_event.set()
+        try:
+            event = telemetry_q.get(timeout=5)
+            batch.append(event)
+            while len(batch) < TELEMETRY_BATCH_SIZE:
+                try:
+                    batch.append(telemetry_q.get_nowait())
+                except queue.Empty:
+                    break
+            if len(batch) >= TELEMETRY_BATCH_SIZE:
+                try:
+                    _flush_telemetry_batch(batch, db_path)
+                except Exception:
+                    for e in batch:
+                        _spill_event(e)
+                batch = []
+        except queue.Empty:
+            if batch:
+                try:
+                    _flush_telemetry_batch(batch, db_path)
+                except Exception:
+                    for e in batch:
+                        _spill_event(e)
+                batch = []
+        except Exception:
+            # Never let the writer die on a bad event.
+            batch = []
+    # Final flush on shutdown.
+    if batch:
+        try:
+            _flush_telemetry_batch(batch, db_path)
+        except Exception:
+            for e in batch:
+                _spill_event(e)
+    liveness_event.set()
 
 
 # ---------------------------------------------------------------------------
@@ -253,7 +519,8 @@ def shield_once(state, client, categorize_fn, db_path=None, now=None,
                 overlay_fn=None, fullscreen_fn=None,
                 last_notified=None, session_only=False,
                 foreground_fn=None, now_mono=None,
-                resume_grace_until=None):
+                resume_grace_until=None, snapshot=None,
+                telemetry_q=None):
     """Run one enforcement cycle.
 
     Pure decision flow with injected side effects. ``session_only``
@@ -261,6 +528,12 @@ def shield_once(state, client, categorize_fn, db_path=None, now=None,
     Returns a dict with "action" in ACTIONS plus context. Never raises:
     any unexpected failure returns {"action": "none", "reason": ...} --
     the shield fails open, never closed.
+
+    Sprint 4 (Qwen I-1): when ``snapshot`` (a RulesSnapshot) is given,
+    ZERO SQLite calls are made -- all enforcement inputs come from the
+    snapshot. Telemetry (block records, intercept counts) goes onto
+    ``telemetry_q`` instead of direct SQLite writes. When ``snapshot``
+    is None, the legacy SQLite path runs (used by unit tests).
     """
     from . import blocker, focus as focus_mod, store
     from . import win32
@@ -294,8 +567,13 @@ def shield_once(state, client, categorize_fn, db_path=None, now=None,
                     "app": window["app"]}
 
         # 3. Emergency pass wins over everything (R7).
+        # Sprint 4 (I-1): snapshot mode reads the pre-fetched pass;
+        # legacy mode queries SQLite.
         try:
-            active_pass = pass_active(now=now, db_path=db_path)
+            if snapshot is not None:
+                active_pass = snapshot.active_pass
+            else:
+                active_pass = pass_active(now=now, db_path=db_path)
         except Exception:
             active_pass = None
         if active_pass:
@@ -313,17 +591,28 @@ def shield_once(state, client, categorize_fn, db_path=None, now=None,
             pass
 
         # 4. Session + rules.
+        # Sprint 4 (I-1): snapshot mode uses pre-fetched session, cycle,
+        # rules, and overrides. Zero SQLite on the enforcement path.
         try:
-            session = focus_mod.get_active_session(db_path=db_path)
+            if snapshot is not None:
+                session = snapshot.session
+            else:
+                session = focus_mod.get_active_session(db_path=db_path)
         except Exception:
             session = None
         try:
-            overrides = store.get_overrides(path=db_path)
+            if snapshot is not None:
+                overrides = dict(snapshot.overrides)
+            else:
+                overrides = store.get_overrides(path=db_path)
         except Exception:
             overrides = {}
         try:
-            rules = [] if session_only else store.get_block_rules(
-                path=db_path, only_enabled=True)
+            if snapshot is not None:
+                rules = [] if session_only else list(snapshot.rules)
+            else:
+                rules = [] if session_only else store.get_block_rules(
+                    path=db_path, only_enabled=True)
         except Exception:
             rules = []
 
@@ -337,8 +626,11 @@ def shield_once(state, client, categorize_fn, db_path=None, now=None,
         if session and session.get("status") == "active" \
                 and session.get("session_type") == "pomodoro":
             try:
-                cycle = store.get_active_cycle(session.get("id"),
-                                               path=db_path)
+                if snapshot is not None:
+                    cycle = snapshot.cycle
+                else:
+                    cycle = store.get_active_cycle(session.get("id"),
+                                                   path=db_path)
                 on_break = bool(cycle and cycle.get("kind") == "break")
             except Exception:
                 on_break = False
@@ -451,16 +743,39 @@ def shield_once(state, client, categorize_fn, db_path=None, now=None,
                               file=sys.stderr)
 
         # 7. Record + counters.
+        # Sprint 4 (I-1): telemetry NEVER goes to SQLite on the
+        # enforcement path. Snapshot mode queues it for the writer
+        # thread; legacy mode writes directly (unit tests).
         try:
-            store.record_block(
-                session_id if session_id else RULE_ONLY_SESSION_ID,
-                now.isoformat(timespec="seconds"),
-                window["app"], window["title"], window["url"],
-                score, category, action_taken=action_taken,
-                process_name=process_name, window_handle=hwnd,
-                path=db_path)
-            if session_id:
-                store.increment_intercepted(session_id, path=db_path)
+            if snapshot is not None and telemetry_q is not None:
+                try:
+                    telemetry_q.put_nowait({
+                        "kind": "block",
+                        "session_id": session_id,
+                        "at": now.isoformat(timespec="seconds"),
+                        "app": window["app"], "title": window["title"],
+                        "url": window["url"], "score": score,
+                        "category": category,
+                        "action_taken": action_taken,
+                        "process_name": process_name, "hwnd": hwnd,
+                    })
+                    if session_id:
+                        telemetry_q.put_nowait({
+                            "kind": "intercept",
+                            "session_id": session_id,
+                        })
+                except queue.Full:
+                    pass  # bounded queue; drop rather than block
+            else:
+                store.record_block(
+                    session_id if session_id else RULE_ONLY_SESSION_ID,
+                    now.isoformat(timespec="seconds"),
+                    window["app"], window["title"], window["url"],
+                    score, category, action_taken=action_taken,
+                    process_name=process_name, window_handle=hwnd,
+                    path=db_path)
+                if session_id:
+                    store.increment_intercepted(session_id, path=db_path)
         except Exception as exc:
             print("shield record failed: %s" % exc, file=sys.stderr)
 
@@ -474,14 +789,46 @@ def shield_once(state, client, categorize_fn, db_path=None, now=None,
 
 
 def _queue_overlay(label, app, locked, session_id, db_path):
-    """Default overlay_fn: hand the command to the UI thread."""
-    _UI_QUEUE.put(("overlay", {"label": label, "app": app,
-                               "locked": locked, "session_id": session_id,
-                               "db_path": db_path}))
+    """Default overlay_fn: hand the command to the UI thread.
+
+    Sprint 4 (Qwen item 4): frozen UICommand, plain data only; the
+    bounded queue drops the oldest on saturation (never blocks the
+    worker)."""
+    cmd = UICommand(cmd="overlay", label=label or "", app=app or "",
+                    locked=bool(locked),
+                    session_id=int(session_id or 0),
+                    db_path=db_path or "")
+    try:
+        _UI_QUEUE.put_nowait(cmd)
+    except queue.Full:
+        try:
+            _UI_QUEUE.get_nowait()  # drop oldest
+        except queue.Empty:
+            pass
+        try:
+            _UI_QUEUE.put_nowait(cmd)
+        except queue.Full:
+            pass
+
+
+def _queue_ui_command(cmd):
+    """Put a UICommand on the bounded UI queue (drop-oldest)."""
+    try:
+        _UI_QUEUE.put_nowait(cmd)
+    except queue.Full:
+        try:
+            _UI_QUEUE.get_nowait()
+        except queue.Empty:
+            pass
+        try:
+            _UI_QUEUE.put_nowait(cmd)
+        except queue.Full:
+            pass
 
 
 # Module-level UI queue, set by run_shield() before the worker starts.
-_UI_QUEUE = queue.Queue()
+# Sprint 4: bounded at UI_QUEUE_MAXSIZE with drop-oldest semantics.
+_UI_QUEUE = queue.Queue(maxsize=UI_QUEUE_MAXSIZE)
 
 
 # ---------------------------------------------------------------------------
@@ -534,8 +881,17 @@ def shield_daemon_running():
         return False
 
 
-def _worker_main(stop_event, event_q, ui_q, db_path, session_only):
-    """Worker thread: hook events + message pump + policy engine."""
+def _worker_main(stop_event, event_q, ui_q, db_path, session_only,
+                 snapshot_holder=None, telemetry_q=None,
+                 worker_alive=None):
+    """Worker thread: hook events + message pump + policy engine.
+
+    Sprint 4 (Qwen I-1): the worker performs ZERO SQLite calls. It
+    reads enforcement inputs from ``snapshot_holder`` (atomic swap) and
+    queues telemetry onto ``telemetry_q``. ``worker_alive`` (a
+    threading.Event) is set every loop iteration for the UI
+    supervisor's liveness check (item 5).
+    """
     from . import win32
     from .ingest import ActivityWatchClient
     from .taxonomy import categorize as categorize_fn
@@ -559,27 +915,21 @@ def _worker_main(stop_event, event_q, ui_q, db_path, session_only):
     resume_grace_until = 0.0  # Phase 8 R2: monotonic deadline
 
     def _engine_cycle():
-        from . import focus as focus_mod
         nonlocal swallow_handle, swallow_until, resume_grace_until
-        # Phase 8: settle pomodoro cycles first (hybrid timer, R1).
-        # Idempotent and cheap; never raises out of here.
-        try:
-            settled = focus_mod.settle_session(db_path=db_path)
-            if settled.get("suspend_detected"):
-                resume_grace_until = (time.monotonic()
-                                      + focus_mod.RESUME_GRACE_SECONDS)
-        except Exception:
-            pass
+        # Sprint 4: snapshot mode -- zero SQLite. The refresher thread
+        # already settled pomodoro cycles before building the snapshot.
+        snapshot = (snapshot_holder.get()
+                    if snapshot_holder is not None else None)
+        # Resume-grace: derive from snapshot freshness when available.
+        # (Legacy path keeps the old monotonic computation.)
         result = shield_once(
             state, client, categorize_fn, db_path=db_path,
             last_notified=last_notified, session_only=session_only,
-            resume_grace_until=resume_grace_until)
+            resume_grace_until=resume_grace_until,
+            snapshot=snapshot, telemetry_q=telemetry_q)
         # An emergency pass dismisses any open overlay immediately.
         if result.get("reason") == "emergency pass":
-            try:
-                ui_q.put(("overlay_close", {}))
-            except Exception:
-                pass
+            _queue_ui_command(UICommand(cmd="overlay_close"))
         # Hardcore lock: swallow Alt+Tab / Win key for LOCK_SECONDS.
         # Installed on THIS thread (it pumps messages). try/finally
         # discipline; failure just means no swallow (fail-safe).
@@ -596,14 +946,27 @@ def _worker_main(stop_event, event_q, ui_q, db_path, session_only):
 
     try:
         while not stop_event.is_set():
+            # Liveness: set every iteration (Qwen item 5).
+            if worker_alive is not None:
+                try:
+                    worker_alive.set()
+                except Exception:
+                    pass
             if os.path.exists(kill_switch_path()):
                 break
             if session_only:
                 # Old guard behavior: stop when the session ends.
+                # Sprint 4: read from snapshot, not SQLite.
                 try:
-                    from . import focus as focus_mod
-                    if not focus_mod.get_active_session(
-                            db_path=db_path):
+                    snap = (snapshot_holder.get()
+                            if snapshot_holder is not None else None)
+                    active = (snap.session if snap is not None
+                              else None)
+                    if active is None:
+                        from . import focus as focus_mod
+                        active = focus_mod.get_active_session(
+                            db_path=db_path)
+                    if not active:
                         break
                 except Exception:
                     pass
@@ -650,23 +1013,27 @@ def _worker_main(stop_event, event_q, ui_q, db_path, session_only):
         except Exception:
             pass
         # Tell the UI thread to quit its mainloop.
-        try:
-            ui_q.put(("quit", {}))
-        except Exception:
-            pass
+        _queue_ui_command(UICommand(cmd="quit"))
 
 
-def _ui_main(stop_event, ui_q, db_path):
+def _ui_main(stop_event, ui_q, db_path, worker_alive=None,
+             restart_requested=None, snapshot_holder=None):
     """Main thread: tkinter owner for HUD + overlays (R5).
 
     No tkinter/display -> wait on stop_event; enforcement keeps
     running headless (notifications only).
+
+    Sprint 4 (Qwen items 4-5): the drain() reschedule is in a
+    ``finally`` block (unconditional); UI messages are frozen
+    UICommands; the worker liveness event is checked every 30 s and a
+    restart is requested after 90 s of silence. Returns "worker_silent"
+    when the worker died, "stopped" otherwise.
     """
     try:
         import tkinter as tk
     except Exception:
         stop_event.wait()
-        return
+        return "stopped"
 
     from . import hud as hud_mod
     from . import store
@@ -675,12 +1042,20 @@ def _ui_main(stop_event, ui_q, db_path):
     root.withdraw()  # we only ever show Toplevels
     hud = None
     try:
-        if store.get_setting("hud_enabled", "1", path=db_path) == "1":
+        hud_enabled = True
+        if snapshot_holder is not None:
+            hud_enabled = bool(snapshot_holder.get().hud_enabled)
+        else:
+            hud_enabled = store.get_setting(
+                "hud_enabled", "1", path=db_path) == "1"
+        if hud_enabled:
             hud = hud_mod.HudWindow(root, db_path=db_path)
     except Exception:
         hud = None
     overlays = []
     last_setting_check = 0.0
+    last_liveness_check = 0.0
+    worker_dead = False
 
     def _close_overlays():
         for win in overlays:
@@ -690,86 +1065,123 @@ def _ui_main(stop_event, ui_q, db_path):
                 pass
         overlays.clear()
 
-    def drain():
-        nonlocal last_setting_check
-        if stop_event.is_set():
+    def _handle_command(cmd):
+        """Handle one UICommand. Plain data only -- never touches
+        worker-owned objects."""
+        nonlocal hud
+        if not isinstance(cmd, UICommand):
+            return  # ignore legacy/unknown payloads
+        if cmd.cmd == "overlay":
             _close_overlays()
             try:
-                if hud is not None:
-                    hud.destroy()
+                wins = hud_mod.show_block_overlay(
+                    root, cmd.label, cmd.app, locked=cmd.locked,
+                    session_id=cmd.session_id, db_path=cmd.db_path)
+                overlays.extend(wins)
+            except Exception as exc:
+                print("overlay failed: %s" % exc, file=sys.stderr)
+        elif cmd.cmd == "overlay_close":
+            _close_overlays()
+        elif cmd.cmd == "hud_update" and hud is not None:
+            try:
+                hud.update_snapshot(cmd.payload)
             except Exception:
                 pass
-            root.quit()
-            return
+        elif cmd.cmd == "hud_hide" and hud is not None:
+            try:
+                hud.hide()
+            except Exception:
+                pass
+        elif cmd.cmd == "hud_show":
+            try:
+                if hud is None:
+                    hud = hud_mod.HudWindow(root, db_path=db_path)
+                else:
+                    hud.show()
+            except Exception:
+                pass
+        elif cmd.cmd == "quit":
+            stop_event.set()
+
+    def drain():
+        nonlocal last_setting_check, last_liveness_check, worker_dead
+        nonlocal hud
         try:
-            while True:
-                cmd, payload = ui_q.get_nowait()
-                if cmd == "overlay":
-                    _close_overlays()
-                    try:
-                        wins = hud_mod.show_block_overlay(
-                            root, payload.get("label"),
-                            payload.get("app"),
-                            locked=payload.get("locked", False),
-                            session_id=payload.get("session_id"),
-                            db_path=payload.get("db_path"))
-                        overlays.extend(wins)
-                    except Exception as exc:
-                        print("overlay failed: %s" % exc,
-                              file=sys.stderr)
-                elif cmd == "overlay_close":
-                    _close_overlays()
-                elif cmd == "hud_update" and hud is not None:
-                    try:
-                        hud.update_snapshot(payload)
-                    except Exception:
-                        pass
-                elif cmd == "hud_hide" and hud is not None:
-                    try:
-                        hud.hide()
-                    except Exception:
-                        pass
-                elif cmd == "hud_show":
-                    try:
+            if stop_event.is_set():
+                _close_overlays()
+                try:
+                    if hud is not None:
+                        hud.destroy()
+                except Exception:
+                    pass
+                root.quit()
+                return
+            try:
+                while True:
+                    _handle_command(ui_q.get_nowait())
+            except queue.Empty:
+                pass
+            # Worker liveness: check every 30 s (Qwen item 5).
+            now_t = time.time()
+            if worker_alive is not None and \
+                    now_t - last_liveness_check >= \
+                    WORKER_LIVENESS_CHECK_SECONDS:
+                last_liveness_check = now_t
+                try:
+                    last_beat = worker_alive.last_beat
+                except Exception:
+                    last_beat = time.monotonic()
+                if time.monotonic() - last_beat >= \
+                        WORKER_LIVENESS_SILENCE_SECONDS:
+                    print("shield: worker silent for 90s, "
+                          "requesting restart", file=sys.stderr)
+                    worker_dead = True
+                    if restart_requested is not None:
+                        restart_requested.set()
+                    stop_event.set()
+                    root.quit()
+                    return
+            # Periodic HUD refresh from a fresh snapshot, plus a slow
+            # re-read of the hud_enabled setting (web/tray toggles apply
+            # within ~5 s without restarting the daemon).
+            try:
+                if hud is not None and hud.visible:
+                    hud.update_snapshot(
+                        hud_mod.hud_snapshot(db_path=db_path))
+                if now_t - last_setting_check > 5:
+                    last_setting_check = now_t
+                    if snapshot_holder is not None:
+                        want = bool(
+                            snapshot_holder.get().hud_enabled)
+                    else:
+                        want = store.get_setting(
+                            "hud_enabled", "1",
+                            path=db_path) == "1"
+                    if want and (hud is None or not hud.visible):
                         if hud is None:
                             hud = hud_mod.HudWindow(root,
                                                     db_path=db_path)
                         else:
                             hud.show()
-                    except Exception:
-                        pass
-                elif cmd == "quit":
-                    stop_event.set()
-        except queue.Empty:
-            pass
-        # Periodic HUD refresh from a fresh snapshot, plus a slow
-        # re-read of the hud_enabled setting (web/tray toggles apply
-        # within ~5 s without restarting the daemon).
-        try:
-            if hud is not None and hud.visible:
-                hud.update_snapshot(
-                    hud_mod.hud_snapshot(db_path=db_path))
-            now_t = time.time()
-            if now_t - last_setting_check > 5:
-                last_setting_check = now_t
-                want = store.get_setting("hud_enabled", "1",
-                                         path=db_path) == "1"
-                if want and (hud is None or not hud.visible):
-                    if hud is None:
-                        hud = hud_mod.HudWindow(root, db_path=db_path)
-                    else:
-                        hud.show()
-                elif not want and hud is not None and hud.visible:
-                    hud.hide()
-        except Exception:
-            pass
-        root.after(UI_DRAIN_MS, drain)
+                    elif not want and hud is not None and hud.visible:
+                        hud.hide()
+            except Exception:
+                pass
+        finally:
+            # Sprint 4 (Qwen item 4): the reschedule is UNCONDITIONAL.
+            # No exception in drain() can ever stop the UI loop.
+            try:
+                if not stop_event.is_set():
+                    root.after(UI_DRAIN_MS, drain)
+            except Exception:
+                pass
 
     root.after(UI_DRAIN_MS, drain)
     try:
         root.mainloop()
     except Exception:
         pass
+    return "worker_silent" if worker_dead else "stopped"
 
 
 def run_shield(db_path=None, session_only=False):
@@ -777,6 +1189,12 @@ def run_shield(db_path=None, session_only=False):
 
     Single instance via the named kernel mutex (R3). Main thread owns
     tkinter; the worker thread owns the Win32 hook + engine (R5).
+
+    Sprint 4 (Qwen items 1-5, 13):
+    - Worker reads RulesSnapshot (zero SQLite), refreshed every 45 s.
+    - Telemetry writer thread batches block events into SQLite.
+    - Worker liveness supervised; silent 90 s -> worker restart.
+    - Graceful shutdown: drain queues, stop threads, join, checkpoint.
     """
     from . import win32
     if not win32.is_windows():
@@ -786,20 +1204,144 @@ def run_shield(db_path=None, session_only=False):
     if mutex is None:
         print("Shield is already running; not starting a second copy.")
         return
-    stop_event = threading.Event()
-    event_q = queue.Queue()
-    ui_q = queue.Queue()
-    worker = threading.Thread(
-        target=_worker_main,
-        args=(stop_event, event_q, ui_q, db_path, session_only),
-        name="shield-worker", daemon=True)
-    worker.start()
+
+    # Shared infrastructure (created once, reused across restarts).
+    snapshot_holder = SnapshotHolder()
     try:
-        _ui_main(stop_event, ui_q, db_path)
+        # Prime the snapshot synchronously so the first enforcement
+        # cycle has real rules, not the empty fail-open snapshot.
+        snapshot_holder.swap(_build_snapshot(db_path))
+    except Exception as exc:
+        print("shield: initial snapshot failed: %s" % exc,
+              file=sys.stderr)
+    telemetry_q = queue.Queue(maxsize=TELEMETRY_QUEUE_MAXSIZE)
+    ui_q = queue.Queue(maxsize=UI_QUEUE_MAXSIZE)
+    event_q = queue.Queue()
+    global _UI_QUEUE
+    _UI_QUEUE = ui_q
+
+    stop_event = threading.Event()
+    restart_requested = threading.Event()
+    worker_alive = _LivenessEvent()
+    writer_alive = _LivenessEvent()
+
+    # Background threads (snapshot refresher + telemetry writer).
+    refresher = threading.Thread(
+        target=_snapshot_refresher,
+        args=(stop_event, snapshot_holder, db_path),
+        name="shield-snapshot", daemon=True)
+    refresher.start()
+    writer = threading.Thread(
+        target=_telemetry_writer,
+        args=(stop_event, telemetry_q, db_path, writer_alive),
+        name="shield-telemetry", daemon=True)
+    writer.start()
+
+    def _start_worker():
+        worker_alive.clear()
+        worker_alive.beat()  # fresh timestamp
+        w = threading.Thread(
+            target=_worker_main,
+            args=(stop_event, event_q, ui_q, db_path, session_only,
+                  snapshot_holder, telemetry_q, worker_alive),
+            name="shield-worker", daemon=True)
+        w.start()
+        return w
+
+    worker = _start_worker()
+    try:
+        # UI loop; restarts the worker if it went silent (item 5).
+        while True:
+            restart_requested.clear()
+            reason = _ui_main(stop_event, ui_q, db_path,
+                              worker_alive=worker_alive,
+                              restart_requested=restart_requested,
+                              snapshot_holder=snapshot_holder)
+            # Worker finished; join it before deciding.
+            worker.join(timeout=10)
+            if stop_event.is_set() and not restart_requested.is_set():
+                break  # clean stop (kill switch, quit, session end)
+            if reason == "worker_silent" or restart_requested.is_set():
+                print("shield: restarting silent worker",
+                      file=sys.stderr)
+                # Drain stale UI commands before the new worker starts.
+                _drain_queue(ui_q)
+                stop_event.clear()
+                worker = _start_worker()
+                continue
+            break
     finally:
+        # Sprint 4 (Qwen item 13): graceful shutdown order.
+        # 1. Drain queues (process what's already queued).
+        _drain_queue(ui_q)
+        _drain_telemetry(telemetry_q, db_path)
+        # 2. Signal stop.
         stop_event.set()
+        # 3. Join worker threads (bounded wait).
         worker.join(timeout=10)
+        writer.join(timeout=15)
+        refresher.join(timeout=5)
+        # 4. Checkpoint SQLite (truncate WAL).
+        try:
+            from . import store
+            conn = store.get_db(db_path)
+            try:
+                conn.execute("PRAGMA wal_checkpoint(TRUNCATE)")
+            finally:
+                conn.close()
+        except Exception:
+            pass
+        # 5. Release the singleton mutex.
         win32.release_singleton_mutex(mutex)
+
+
+class _LivenessEvent(threading.Event):
+    """threading.Event with a beat timestamp. Workers call beat() (or
+    set(), which also beats); supervisors read ``last_beat``."""
+
+    def __init__(self):
+        super().__init__()
+        self._beat = time.monotonic()
+
+    def set(self):
+        self._beat = time.monotonic()
+        super().set()
+
+    def beat(self):
+        self._beat = time.monotonic()
+
+    @property
+    def last_beat(self):
+        return self._beat
+
+
+def _drain_queue(q):
+    """Remove all pending items from a queue (shutdown drain)."""
+    try:
+        while True:
+            q.get_nowait()
+    except queue.Empty:
+        pass
+    except Exception:
+        pass
+
+
+def _drain_telemetry(telemetry_q, db_path):
+    """Flush remaining telemetry to SQLite on shutdown (best-effort)."""
+    batch = []
+    try:
+        while True:
+            batch.append(telemetry_q.get_nowait())
+    except queue.Empty:
+        pass
+    except Exception:
+        pass
+    if batch:
+        try:
+            _flush_telemetry_batch(batch, db_path)
+        except Exception:
+            for e in batch:
+                _spill_event(e)
 
 
 def ensure_shield_running(db_path=None):

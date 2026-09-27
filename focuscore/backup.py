@@ -55,7 +55,6 @@ import hashlib
 import logging
 import os
 import re
-import shutil
 import sqlite3
 import threading
 import uuid
@@ -182,12 +181,14 @@ def _verify_checksum(backup_path):
 def create_backup(db_path=None, dest_dir=None):
     """Copy the database to a timestamped backup file.
 
-    Uses SQLite's backup API (not a raw file copy) so it is safe even
-    while the dashboard is writing to the database. The backup is
-    written to a temp file and atomically renamed into place, then a
-    SHA256 sidecar is recorded. Returns the Path of the new backup
-    file. Raises FileNotFoundError when there is no database to back
-    up yet.
+    Sprint 4 (Qwen item 6): uses ``VACUUM INTO`` (not a raw file copy,
+    not the backup API) so the snapshot is transactionally consistent
+    even while the dashboard holds a write transaction open in WAL
+    mode. The vacuumed copy lands in a staging file, is verified with
+    ``PRAGMA quick_check`` + row-count comparison, then atomically
+    renamed into place. A SHA256 sidecar is recorded. Returns the Path
+    of the new backup file. Raises FileNotFoundError when there is no
+    database to back up yet.
     """
     src = Path(db_path or store.DEFAULT_DB_PATH)
     if not src.exists():
@@ -196,38 +197,93 @@ def create_backup(db_path=None, dest_dir=None):
     folder = backup_dir(dest_dir)
     ts = _timestamp()
 
-    # Unique tempfile per invocation prevents WinError 32 / WinError 5
-    # collisions on Windows
+    # Unique staging file per invocation prevents WinError 32 /
+    # WinError 5 collisions on Windows.
     unique_suffix = f"{os.getpid()}_{threading.get_ident()}_{uuid.uuid4().hex[:8]}"
-    tmp = folder / f"focuscore-{ts}-{unique_suffix}.tmp"
+    staging = folder / f"backup_staging-{unique_suffix}.db"
 
     try:
         src_conn = sqlite3.connect(str(src), timeout=30.0)
         try:
-            dst_conn = sqlite3.connect(str(tmp), timeout=30.0)
-            try:
-                src_conn.backup(dst_conn)
-            finally:
-                dst_conn.close()
+            # Count first, then VACUUM immediately on the same
+            # connection to minimize the race window. (Exact match
+            # under concurrent writers is not guaranteed; see
+            # _verify_backup_file.)
+            src_rowcount = _total_rowcount(src_conn)
+            # VACUUM INTO is atomic w.r.t. concurrent writers: the
+            # output is a consistent snapshot.
+            src_conn.execute("VACUUM INTO ?",
+                             (str(staging),))
         finally:
             src_conn.close()
 
-        # Atomic publish: synchronize target resolution and rename
+        # Verify the staging copy before publishing.
+        _verify_backup_file(staging, src_rowcount)
+
+        # Atomic publish: synchronize target resolution and rename.
         with _backup_lock:
             target = folder / ("focuscore-%s.db" % ts)
             counter = 2
             while target.exists():
                 target = folder / ("focuscore-%s-%d.db" % (ts, counter))
                 counter += 1
-            os.replace(str(tmp), str(target))
+            os.replace(str(staging), str(target))
     finally:
         # An interrupted write must not leave a partial backup behind.
         try:
-            tmp.unlink(missing_ok=True)
+            staging.unlink(missing_ok=True)
         except OSError:
             pass
     _write_checksum(target)
     return target
+
+
+def _total_rowcount(conn):
+    """Total rows across all user tables (verification fingerprint)."""
+    total = 0
+    tables = [r[0] for r in conn.execute(
+        "SELECT name FROM sqlite_master WHERE type = 'table' "
+        "AND name NOT LIKE 'sqlite_%'")]
+    for table in tables:
+        try:
+            total += conn.execute(
+                'SELECT COUNT(*) FROM "%s"' % table).fetchone()[0]
+        except Exception:
+            pass
+    return total
+
+
+def _verify_backup_file(path, expected_rowcount=None):
+    """PRAGMA quick_check + row-count sanity. Raises ValueError on
+    corruption (quick_check failure) or a torn backup (no tables).
+
+    Sprint 4 note: the row-count comparison is advisory, not a hard
+    gate. Under concurrent writers the source row count can change
+    between VACUUM INTO and the count (VACUUM cannot run in a
+    transaction), so an exact match is not achievable. A mismatch is
+    logged; only corruption or an empty backup fails.
+    """
+    conn = sqlite3.connect(str(path), timeout=30.0)
+    try:
+        row = conn.execute("PRAGMA quick_check").fetchone()
+        if not row or str(row[0]).lower() != "ok":
+            raise ValueError(
+                "Backup verification failed: quick_check=%r" % (row,))
+        tables = [r[0] for r in conn.execute(
+            "SELECT name FROM sqlite_master WHERE type = 'table' "
+            "AND name NOT LIKE 'sqlite_%'")]
+        if not tables:
+            raise ValueError("Backup verification failed: no tables "
+                             "(torn backup)")
+        if expected_rowcount is not None:
+            actual = _total_rowcount(conn)
+            if actual != expected_rowcount:
+                logger.warning(
+                    "Backup row count differs (source had %d, backup "
+                    "has %d); concurrent writes likely.",
+                    expected_rowcount, actual)
+    finally:
+        conn.close()
 
 
 def list_backups(dest_dir=None):
@@ -312,15 +368,19 @@ def restore_backup(name, db_path=None, dest_dir=None):
     anything is touched -- a corrupt or tampered backup is refused with
     ``ValueError``. Backups without a checksum sidecar (created before
     integrity checks existed) still restore, with a warning that their
-    integrity could not be verified. Then the CURRENT database is copied
-    to ``focuscore.db.pre-restore-<timestamp>`` next to the database,
-    and the backup is copied to a temp file and atomically renamed over
-    the live database, so an interrupted restore can never leave the
-    database half-overwritten. Returns the safety-copy Path.
+    integrity could not be verified. Then the CURRENT database is
+    vacuumed to ``focuscore.db.pre-restore-<timestamp>`` (the safety
+    copy), the backup is vacuumed to a staging file next to the live
+    database and atomically renamed over it, so an interrupted restore
+    can never leave the database half-overwritten. Finally the invoice
+    counters are repaired (Sprint 4, Qwen item 7). Returns the
+    safety-copy Path.
 
     ``name`` must be a plain backup file name (e.g.
     ``focuscore-20260925-120000.db``); path separators are rejected so a
     crafted name cannot read or write outside the backup folder.
+
+    Sprint 4: no raw file copies anywhere -- ``shutil.copy2`` is gone.
     """
     if not BACKUP_NAME_PATTERN.match(name or ""):
         raise ValueError("Not a valid backup name: %r" % (name,))
@@ -334,20 +394,65 @@ def restore_backup(name, db_path=None, dest_dir=None):
     db = Path(db_path or store.DEFAULT_DB_PATH)
     safety = db.parent / ("focuscore.db.pre-restore-%s" % _timestamp())
     if db.exists():
-        shutil.copy2(str(db), str(safety))
+        # Safety copy via VACUUM INTO (consistent snapshot, no raw copy).
+        live_conn = sqlite3.connect(str(db), timeout=30.0)
+        try:
+            live_conn.execute("VACUUM INTO ?", (str(safety),))
+        finally:
+            live_conn.close()
     else:
         safety = None
-    tmp = db.parent / (db.name + TMP_SUFFIX)
+    staging = db.parent / (db.name + ".restore-staging")
+    staging.unlink(missing_ok=True)
     try:
-        shutil.copy2(str(src), str(tmp))
+        # VACUUM the backup into staging (verifies it reads cleanly),
+        # then verify and atomically swap.
+        src_conn = sqlite3.connect(str(src), timeout=30.0)
+        try:
+            src_rowcount = _total_rowcount(src_conn)
+            src_conn.execute("VACUUM INTO ?", (str(staging),))
+        finally:
+            src_conn.close()
+        _verify_backup_file(staging, src_rowcount)
         # Atomic swap: the live database is never half-overwritten.
-        os.replace(str(tmp), str(db))
+        os.replace(str(staging), str(db))
+        for ext in ("-wal", "-shm"):
+            try:
+                (db.parent / (db.name + ext)).unlink(missing_ok=True)
+            except OSError:
+                pass
+        # Sprint 4 (Qwen item 7): repair invoice counters so the next
+        # issued number continues after the highest non-void invoice.
+        _repair_invoice_counters(db)
+
     finally:
         try:
-            tmp.unlink(missing_ok=True)
+            staging.unlink(missing_ok=True)
         except OSError:
             pass
     return safety
+
+
+def _repair_invoice_counters(db_path):
+    """Sprint 4 (Qwen item 7): after a restore, set each year's
+    next_number to max(existing non-void sequence) + 1 so numbering
+    continues without reuse or collision. No-op when the invoice
+    tables don't exist (pre-invoice backups)."""
+    conn = sqlite3.connect(str(db_path), timeout=30.0)
+    try:
+        tables = {r[0] for r in conn.execute(
+            "SELECT name FROM sqlite_master WHERE type = 'table'")}
+        if "invoice_counters" not in tables or "invoices" not in tables:
+            return
+        conn.execute(
+            "UPDATE invoice_counters SET next_number = ("
+            "SELECT COALESCE(MAX(CAST(SUBSTR(number, 10) AS INTEGER)),"
+            " 0) + 1 FROM invoices "
+            "WHERE number LIKE 'INV-' || invoice_counters.year || '-%' "
+            "AND status != 'void')")
+        conn.commit()
+    finally:
+        conn.close()
 
 
 def verify_all_backups(dest_dir=None):

@@ -26,12 +26,16 @@ Binding rules:
   units). No float() anywhere in this module.
 """
 
-from datetime import date, datetime, timedelta
+from datetime import date, datetime, timedelta, timezone
 
 from focuscore import money as money_mod
 from focuscore import store
 
 STATUSES = ("draft", "sent", "paid", "void")
+
+# Sprint 4 (Qwen item 8): the invoice number format is INV-YYYY-NNNN --
+# the sequence is 4 digits, so 9999 per year is the hard ceiling.
+MAX_INVOICE_SEQ_PER_YEAR = 9999
 
 
 class InvoiceError(Exception):
@@ -48,6 +52,16 @@ class DoubleBillingError(InvoiceError):
 
 class CurrencyMixError(InvoiceError):
     """Raised when selected entries span more than one currency."""
+
+
+class CounterExhaustedError(InvoiceError):
+    """Sprint 4: raised when a year's invoice sequence would exceed
+    9999 (the INV-YYYY-NNNN format has 4 sequence digits)."""
+
+
+class ClockJumpError(InvoiceError):
+    """Sprint 4: raised when the system clock appears to have jumped
+    backward (current year < highest year with issued invoices)."""
 
 
 def _now_utc():
@@ -551,7 +565,17 @@ def _next_number(conn, year):
 
 def send_invoice(invoice_id, path=None):
     """draft -> sent: assign the sequential number (Q2/Q15), freeze
-    totals, set issued/due dates. Atomic or not at all."""
+    totals, set issued/due dates. Atomic or not at all.
+
+    Sprint 4 (Qwen item 8): the year is captured INSIDE the BEGIN
+    IMMEDIATE transaction via a single datetime.now(timezone.utc) call
+    (no TOCTOU across the year boundary); CounterExhaustedError when
+    the sequence would exceed 9999; ClockJumpError when the clock
+    jumped backward past the highest issued year.
+
+    Sprint 4 (Qwen item 9): the transaction commits in milliseconds and
+    commits BEFORE any HTML is rendered (the dashboard redirects after
+    this returns)."""
     store.init_db(path)
     conn = store.get_db(path)
     try:
@@ -572,8 +596,28 @@ def send_invoice(invoice_id, path=None):
             totals = compute_totals_for_lines(
                 lines, inv["discount_pct"], inv["tax_pct"]
             )
-            year = _today().year
+            # Sprint 4: single UTC timestamp captured INSIDE the
+            # transaction -- the year cannot change mid-send.
+            now_utc = datetime.now(timezone.utc)
+            year = now_utc.year
+            # Clock-jump guard: never issue into a year older than the
+            # highest year that already has numbers.
+            max_year_row = conn.execute(
+                "SELECT MAX(year) FROM invoice_counters").fetchone()
+            max_year = (int(max_year_row[0])
+                        if max_year_row and max_year_row[0] is not None
+                        else year)
+            if year < max_year:
+                raise ClockJumpError(
+                    "System clock appears to have moved backward "
+                    "(year %d < %d). Fix the clock and try again."
+                    % (year, max_year))
             seq = _next_number(conn, year)
+            # Format guard: INV-YYYY-NNNN has 4 sequence digits.
+            if seq > MAX_INVOICE_SEQ_PER_YEAR:
+                raise CounterExhaustedError(
+                    "Invoice numbers for %d are exhausted (limit %d). "
+                    "Contact support." % (year, MAX_INVOICE_SEQ_PER_YEAR))
             number = "INV-%d-%04d" % (year, seq)
             due_days = 14
             try:

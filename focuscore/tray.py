@@ -223,6 +223,25 @@ class TrayApp:
                 self._apply_pending_update(pending)
                 return
 
+    def _nightly_wal_checkpoint(self):
+        """Sprint 4 (Qwen item 10): TRUNCATE-checkpoint the WAL once a
+        day on a dedicated connection. The supervisor (tray) owns this
+        because it's the longest-lived process."""
+        import time
+        from . import store
+        while not self._quitting:
+            # Sleep in small increments so quit is responsive.
+            for _ in range(24 * 60):  # ~24 h in 1-minute slices
+                if self._quitting:
+                    return
+                time.sleep(60)
+            if self._quitting:
+                return
+            try:
+                store.checkpoint_wal(self.db_path)
+            except Exception:  # noqa: BLE001 -- best-effort
+                pass
+
     def on_quick_session(self, icon=None, item=None):
         result = start_quick_session(self.db_path)
         if "error" in result:
@@ -360,6 +379,12 @@ class TrayApp:
             pass
         threading.Thread(target=self._watch_for_update, daemon=True,
                          name="focuscore-update-watch").start()
+        # Sprint 4 (Qwen item 10): the tray is the long-running
+        # supervisor -- it TRUNCATE-checkpoints the WAL nightly on a
+        # dedicated connection so the -wal file stays bounded.
+        threading.Thread(target=self._nightly_wal_checkpoint,
+                         daemon=True,
+                         name="focuscore-wal-checkpoint").start()
         self.icon = pystray.Icon("focus-core", make_icon_image(),
                                  "Focus Core", self.build_menu())
         self.window = self._create_window(desktop, launcher)

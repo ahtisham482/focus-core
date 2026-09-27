@@ -134,10 +134,47 @@ def get_db(path=None):
     return conn
 
 
+def checkpoint_wal(path=None):
+    """Sprint 4 (Qwen item 10): TRUNCATE-checkpoint the WAL on a
+    dedicated connection. Called nightly by the supervisor (tray) and
+    on graceful shutdown. Keeps the -wal file from growing unboundedly
+    when a reader holds a long transaction. Returns the checkpoint
+    result dict, or None on failure (never raises)."""
+    try:
+        conn = get_db(path)
+        try:
+            row = conn.execute(
+                "PRAGMA wal_checkpoint(TRUNCATE)").fetchone()
+            if row is not None:
+                return {"busy": row[0], "log": row[1],
+                        "checkpointed": row[2]}
+            return {"busy": 0, "log": 0, "checkpointed": 0}
+        finally:
+            conn.close()
+    except Exception:
+        return None
+
+
 def init_db(path=None):
     from . import migrations
 
     migrations.apply_migrations(path)
+    # Sprint 4 (Qwen item 12): idempotent index for the invoice_lines
+    # -> timesheet_entries FK. No user_version bump (indexes don't
+    # change semantics); IF NOT EXISTS makes it safe to run on every
+    # startup.
+    try:
+        conn = get_db(path)
+        try:
+            conn.execute(
+                "CREATE INDEX IF NOT EXISTS idx_invoice_lines_entry "
+                "ON invoice_lines(timesheet_entry_id)")
+            conn.commit()
+        finally:
+            conn.close()
+    except Exception:
+        pass  # table may not exist yet on very old DBs; migration 8
+        # creates it, and the next init_db will add the index.
 
 
 
@@ -801,12 +838,27 @@ def list_sessions(limit=20, path=None):
 
 def record_block(session_id, ts, app, title, url, score, category,
                  path=None, action_taken="blocked", process_name="",
-                 window_handle=0):
+                 window_handle=0, _conn=None):
     """Remember one blocked distraction (session or always-on shield).
 
     action_taken / process_name / window_handle fill the M0
     migration-2 columns; session_id 0 means "no session -- the shield".
+
+    Sprint 4: ``_conn`` lets the telemetry writer batch many blocks
+    into one transaction (caller owns commit/close). When ``_conn`` is
+    None the function opens, commits, and closes its own connection
+    (legacy behavior, unchanged).
     """
+    if _conn is not None:
+        _conn.execute(
+            "INSERT INTO focus_blocks "
+            "(session_id, ts, app, title, url, score, category, "
+            "action_taken, process_name, window_handle) "
+            "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+            (session_id, ts, app, title, url, score, category,
+             action_taken, process_name or "", window_handle or 0),
+        )
+        return
     init_db(path)
     conn = get_db(path)
     try:
@@ -823,8 +875,18 @@ def record_block(session_id, ts, app, title, url, score, category,
         conn.close()
 
 
-def increment_intercepted(session_id, path=None):
-    """Bump the M0 intercepted_count on a focus session."""
+def increment_intercepted(session_id, path=None, _conn=None):
+    """Bump the M0 intercepted_count on a focus session.
+
+    Sprint 4: ``_conn`` batches into the caller's transaction (see
+    record_block)."""
+    if _conn is not None:
+        _conn.execute(
+            "UPDATE focus_sessions SET intercepted_count = "
+            "COALESCE(intercepted_count, 0) + 1 WHERE id = ?",
+            (session_id,),
+        )
+        return
     init_db(path)
     conn = get_db(path)
     try:
