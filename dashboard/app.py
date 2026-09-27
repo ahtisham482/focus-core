@@ -1254,4 +1254,3 @@ if __name__ == "__main__":
               % args.host)
     from dashboard.app import app as application
     application.run(host=args.host, port=args.port)
-

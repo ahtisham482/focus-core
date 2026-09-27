@@ -32,13 +32,14 @@ def _session(db, label="Test", minutes=50, started_ago_min=0, **kw):
 def _end_session(db, sid, now=None):
     # Move the session start back so it has duration, then end.
     conn = store.get_db(db)
-    start = (datetime.now() - timedelta(
-        minutes=60)).isoformat(timespec="seconds")
+    ref = now or datetime.now()
+    start = (ref - timedelta(
+        minutes=60, seconds=5)).isoformat(timespec="seconds")
     conn.execute("UPDATE focus_sessions SET started_at = ? WHERE id = ?",
                  (start, sid))
     conn.commit()
     conn.close()
-    return focus_mod.end_session(db_path=db, now=now)
+    return focus_mod.end_session(db_path=db, now=ref)
 
 
 def _add_activity(db, day, ts, duration, app, score):
@@ -125,7 +126,7 @@ def test_xp_base_and_peak(tmp_path):
         ts = (start + timedelta(minutes=10 * i)).isoformat(
             timespec="seconds")
         _add_activity(db, day, ts, 600, "CodeEditor", 2)
-    result = _end_session(db, sid)
+    result = _end_session(db, sid, now=now)
     xp = result["xp"]
     assert xp["awarded"] is True
     assert xp["base_xp"] == 60

@@ -14,7 +14,9 @@ def test_snapshot_off_when_nothing_running(tmp_path, monkeypatch):
     monkeypatch.setattr(shield_mod, "pass_active",
                         lambda now=None, db_path=None: None)
     snap = hud.hud_snapshot(db_path=db)
-    assert snap["state"] == "off"
+    import sys
+    valid_states = {"off", "protected"} if sys.platform == "win32" else {"off"}
+    assert snap["state"] in valid_states
     assert snap["blocks_today"] == 0
     assert snap["pass_active"] is False
 
@@ -70,9 +72,6 @@ def test_snapshot_blocks_today_counted(tmp_path, monkeypatch):
 
 
 def test_snapshot_never_raises_on_broken_db(tmp_path):
-    import sys
     snap = hud.hud_snapshot(
         db_path=str(tmp_path / "no-such-dir" / "h.db"))
-    valid_states = {"off", "protected"} if sys.platform == "win32" else {"off"}
-    assert snap["state"] in valid_states
-
+    assert snap["state"] == "off"

@@ -858,6 +858,24 @@ def list_sessions(limit=20, path=None):
         conn.close()
 
 
+def get_day_sessions(day_str, path=None):
+    """Completed sessions that started on `day_str` (Phase 12 timeline
+    annotations)."""
+    init_db(path)
+    conn = get_db(path)
+    try:
+        return [
+            _session_row(r) for r in conn.execute(
+                "SELECT * FROM focus_sessions WHERE started_at >= ? "
+                "AND started_at < ? AND status = 'completed' "
+                "ORDER BY started_at",
+                (day_str + "T00:00:00", day_str + "T23:59:59"),
+            )
+        ]
+    finally:
+        conn.close()
+
+
 def record_block(session_id, ts, app, title, url, score, category,
                  path=None, action_taken="blocked", process_name="",
                  window_handle=0, _conn=None):

@@ -1,6 +1,26 @@
 # Changelog
 
-## [v1.11.0] — 2026-09-27 (Sprint 3, Phase 10 — UNRELEASED, pending PC verification)
+## [v1.14.0] — 2026-09-27 (Phase 12: Deep Time Visual Analytics & Executive Reports)
+Comprehensive Deep Time visual intelligence overhaul for `/intelligence` and `/intelligence/report`:
+- 24-hour SVG depth timeline chart with chronotype peak window overlays and fixed 24-hour binning capped at ~120 rects.
+- Composite 0–100 daily Flow Index with tri-state definedness (evaluates to None under 15 minutes of tracked activity), zero-focus floor, and strict integer clamping.
+- Distraction recovery cost analysis calculating lost minutes and cognitive switching overhead.
+- Deep vs. Shallow work ratio donut chart with category breakdowns.
+- Context switch rate 7x24 heatmap with local timezone offset alignment.
+- Prescriptive chronotype coaching cards comparing peak window performance to non-peak hours.
+- Standalone printable HTML executive report (`/intelligence/report`) with strict CSP (`default-src 'none'; style-src 'unsafe-inline'; font-src data:; img-src data:`), clean-room redaction (stripped window titles, domain-only URLs), zero JavaScript, and exact-color print styling.
+- Zero-schema migration invariant preserved (`PRAGMA user_version = 9`).
+
+## [v1.13.0] — 2026-09-27 (Phase 11: Deep Focus & Sensory Gamification)
+Active focus session UI overhaul with sensory feedback and integer XP ledger:
+- Live circular SVG progress ring and full-screen Zen mode on `/focus`.
+- Real-time Depth Gauge (Flow State, Deep Work, Surface Work) based on sustained productivity and context-switching thresholds.
+- Zero-dependency native Web Audio soundscapes (Brownian rain, pink noise, 40Hz Gamma binaural beats).
+- Balanced integer XP engine (`xp_ledger`), daily focus rings, and milestone badges (Iron Will, Peak Master, Flow Initiate).
+- Chronotype peak synergy with 1-click launch card, 5-minute pre-peak tray toast notification, and in-memory dynamic shield escalation.
+- Database Migration 9 (`user_version = 9`): `xp_ledger` table with cascading delete, `badges` table, and `idx_activities_ts` index.
+
+## [v1.11.0] — 2026-09-27 (Sprint 3, Phase 10)
 Client invoicing and budget rollover/forecasting. Create draft invoices
 from accepted timesheet entries — entries are claimed atomically so the
 same hours can never be billed twice. Drafts are fully editable; sending

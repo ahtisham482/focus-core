@@ -921,7 +921,396 @@ def intelligence_page():
         % (sel_day, prev_day, "".join(hour_blocks)))
 
     body = (chrono_card + rhythm_card + peaks_card + depth_card
-            + anatomy_card + trends_card + timeline_card)
+            + anatomy_card + trends_card + timeline_card
+            + _phase12_cards(sel_day))
     return layout("Deep time", body, active="intelligence")
 
 
+
+
+# ============================================ Phase 12 (v1.14.0) SVGs ---
+# Pure server-rendered inline SVG builders. No JS, no external libs.
+
+_SVG_SCORE_COLORS = {2: "#1a7f37", 1: "#4ac26b", 0: "#d0d7de",
+                     -1: "#fb8500", -2: "#da3633"}
+
+
+def _svg_depth_timeline(hours, peak=None, sessions=()):
+    """24h stacked depth bars. `hours`: {h: {score: seconds}}.
+    `peak`: (start_hour, end_hour) overlay band. `sessions`:
+    [(start_hour_float, end_hour_float, label)].
+
+    Fixed binning: exactly 24 hour bins, at most 5 stacked rects per
+    bin, so the DOM is bounded at ~120 <rect> regardless of how many
+    activity events the day has (GLM P12-6 invariant: never >300).
+    """
+    W, bar_w, gap = 960, 34, 6
+    top, bar_h, label_h = 10, 170, 24
+    parts = ["<svg viewBox='0 0 %d %d' width='100%%' role='img' "
+             "aria-label='24-hour depth timeline'>" % (W, top + bar_h
+                                                       + label_h)]
+    max_s = max((sum(h.values()) for h in hours.values()), default=1) \
+        or 1
+    if peak:
+        ps, pe = peak
+        x0 = ps * (bar_w + gap)
+        x1 = min(pe, 24) * (bar_w + gap) - gap
+        parts.append(
+            "<rect x='%.1f' y='%d' width='%.1f' height='%d' "
+            "fill='#fff8c5' opacity='0.85'><title>Peak energy window"
+            "</title></rect>" % (x0, top, x1 - x0, bar_h))
+    for h in range(24):
+        x = h * (bar_w + gap)
+        y = top + bar_h
+        segs = []
+        for score in (2, 1, 0, -1, -2):
+            s = hours[h][score]
+            if s <= 0:
+                continue
+            sh = s / max_s * bar_h
+            y -= sh
+            segs.append(
+                "<rect x='%.1f' y='%.1f' width='%d' height='%.1f' "
+                "fill='%s'><title>%02d:00 score %+d: %.0f min</title>"
+                "</rect>" % (x, y, bar_w, sh,
+                             _SVG_SCORE_COLORS[score], h, score,
+                             s / 60.0))
+        parts.append("".join(segs))
+        if h % 3 == 0:
+            parts.append(
+                "<text x='%.1f' y='%d' font-size='11' fill='#57606a'>"
+                "%02d:00</text>" % (x, top + bar_h + 16, h))
+    for s0, s1, label in sessions:
+        x0 = s0 * (bar_w + gap)
+        x1 = min(s1, 24) * (bar_w + gap) - gap
+        parts.append(
+            "<rect x='%.1f' y='%d' width='%.1f' height='%d' "
+            "fill='none' stroke='#0969da' stroke-width='2' "
+            "stroke-dasharray='4,2'><title>Focus session: %s</title>"
+            "</rect>" % (x0, top + bar_h - 22, max(x1 - x0, 4), 22,
+                         escape(label)))
+    parts.append("</svg>")
+    return "".join(parts)
+
+
+def _svg_donut(buckets):
+    """Deep/shallow/neutral/distraction donut. `buckets`: minutes."""
+    total = sum(buckets.values()) or 1
+    r, cx, cy = 60, 80, 80
+    circ = 2 * 3.14159265 * r
+    order = [("deep", "#1a7f37"), ("shallow", "#4ac26b"),
+             ("neutral", "#d0d7de"), ("distraction", "#da3633")]
+    parts = ["<svg viewBox='0 0 320 160' width='100%%' role='img' "
+             "aria-label='Deep versus shallow work donut'>"]
+    offset = 0
+    for key, color in order:
+        frac = buckets.get(key, 0) / total
+        dash = frac * circ
+        parts.append(
+            "<circle cx='%d' cy='%d' r='%d' fill='none' stroke='%s' "
+            "stroke-width='28' stroke-dasharray='%.1f %.1f' "
+            "stroke-dashoffset='%.1f' transform='rotate(-90 %d %d)'>"
+            "<title>%s: %.0f min (%.0f%%)</title></circle>"
+            % (cx, cy, r, color, dash, circ - dash, -offset, cx, cy,
+               key.capitalize(), buckets.get(key, 0), frac * 100))
+        offset += dash
+    deep_pct = buckets.get("deep", 0) / total * 100
+    parts.append(
+        "<text x='%d' y='%d' text-anchor='middle' font-size='22' "
+        "font-weight='bold' fill='#1f2328'>%.0f%%</text>"
+        "<text x='%d' y='%d' text-anchor='middle' font-size='11' "
+        "fill='#57606a'>deep work</text>" % (cx, cy - 2, deep_pct, cx,
+                                             cy + 18))
+    lx = 170
+    for i, (key, color) in enumerate(order):
+        y = 30 + i * 30
+        parts.append(
+            "<rect x='%d' y='%d' width='14' height='14' fill='%s'/>"
+            "<text x='%d' y='%d' font-size='12' fill='#1f2328'>%s "
+            "-- %.0f min</text>"
+            % (lx, y, color, lx + 20, y + 12, key.capitalize(),
+               buckets.get(key, 0)))
+    parts.append("</svg>")
+    return "".join(parts)
+
+
+def _svg_heatmap(grid):
+    """7x24 switch-count heatmap. `grid`: {weekday: {hour: count}}."""
+    names = ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"]
+    cw, chh, ox, oy = 34, 22, 44, 8
+    W = ox + 24 * cw + 10
+    H = oy + 7 * chh + 26
+    max_c = max((c for wd in grid.values() for c in wd.values()),
+                default=0)
+
+    def _color(c):
+        if max_c == 0 or c == 0:
+            return "#eaeef2"
+        t = c / max_c
+        # green -> yellow -> red
+        r = int(26 + t * (218 - 26))
+        g = int(127 + t * (54 - 127))
+        b = int(55 + t * (51 - 55))
+        return "#%02x%02x%02x" % (r, g, b)
+
+    parts = ["<svg viewBox='0 0 %d %d' width='100%%' role='img' "
+             "aria-label='Weekly switch heatmap'>" % (W, H)]
+    for wd in range(7):
+        y = oy + wd * chh
+        parts.append(
+            "<text x='%d' y='%d' font-size='11' fill='#57606a'>%s</text>"
+            % (ox - 8, y + 15, names[wd]))
+        for h in range(24):
+            c = grid[wd][h]
+            parts.append(
+                "<rect x='%d' y='%d' width='%d' height='%d' "
+                "fill='%s'><title>%s %02d:00 -- %d switches</title>"
+                "</rect>" % (ox + h * cw, y, cw - 2, chh - 3,
+                             _color(c), names[wd], h, c))
+    for h in range(0, 24, 3):
+        parts.append(
+            "<text x='%d' y='%d' font-size='10' fill='#57606a'>%02d</text>"
+            % (ox + h * cw, H - 8, h))
+    parts.append("</svg>")
+    return "".join(parts)
+
+
+def _svg_sparkline(values, labels=()):
+    """Simple polyline sparkline for week trend values."""
+    W, H, pad = 600, 120, 14
+    n = len(values)
+    parts = ["<svg viewBox='0 0 %d %d' width='100%%' role='img' "
+             "aria-label='Week flow trend'>" % (W, H)]
+    if n < 2:
+        parts.append(
+            "<text x='%d' y='%d' font-size='12' fill='#57606a'>Not "
+            "enough days yet.</text>" % (pad, H // 2))
+        parts.append("</svg>")
+        return "".join(parts)
+    lo, hi = min(values), max(values)
+    span = (hi - lo) or 1
+    pts = []
+    for i, v in enumerate(values):
+        x = pad + i * (W - 2 * pad) / (n - 1)
+        y = H - pad - (v - lo) / span * (H - 2 * pad)
+        pts.append("%.1f,%.1f" % (x, y))
+    parts.append(
+        "<polyline points='%s' fill='none' stroke='#0969da' "
+        "stroke-width='2'/>" % " ".join(pts))
+    for i, v in enumerate(values):
+        x = pad + i * (W - 2 * pad) / (n - 1)
+        y = H - pad - (v - lo) / span * (H - 2 * pad)
+        lab = labels[i] if i < len(labels) else ""
+        parts.append(
+            "<circle cx='%.1f' cy='%.1f' r='4' fill='#0969da'>"
+            "<title>%s: %d</title></circle>" % (x, y, escape(lab), v))
+    parts.append("</svg>")
+    return "".join(parts)
+
+
+# ===================================== Phase 12 (v1.14.0) page cards ---
+
+def _phase12_cards(sel_day):
+    """Build the Phase 12 analytics cards HTML for /intelligence."""
+    from focuscore import intelligence as intel_mod
+    from focuscore import chronotype as chrono_mod
+
+    flow = intel_mod.flow_index(sel_day)
+    delta_txt = ""
+    if flow["wow_delta"] is not None:
+        arrow = "▲" if flow["wow_delta"] >= 0 else "▼"
+        delta_txt = ("<p class='note'>%s %d vs last 7 days</p>"
+                     % (arrow, abs(flow["wow_delta"])))
+    if flow["score"] is None:
+        flow_card = (
+            "<div class='card'><h3>Flow Index -- %s</h3>"
+            "<p><b>Insufficient Data</b></p><p class='note'>%s</p></div>"
+            % (escape(sel_day), escape(flow["note"] or "")))
+    else:
+        flow_card = (
+            "<div class='card'><h3>Flow Index -- %s</h3>"
+            "<p style='font-size:42px;font-weight:bold;margin:4px 0'>%d"
+            "<span style='font-size:16px;color:#57606a'>/100</span></p>"
+            "<p><b>%s</b></p>%s"
+            "<p class='note'>Deep work %d pts + steadiness %d pts + "
+            "low switching %d pts.</p>"
+            "<details class='how'><summary>How we compute this</summary>"
+            "<p class='note'>40 points for your share of +1/+2 minutes, "
+            "30 for how fast you reach focus (median time-to-focus), 30 "
+            "for few context switches per hour. Integer math, 0-100.</p>"
+            "</details></div>"
+            % (escape(sel_day), flow["score"], escape(flow["label"]),
+               delta_txt, flow["components"]["deep_ratio_pts"],
+               flow["components"]["ttf_pts"],
+               flow["components"]["switch_pts"]))
+
+    # 24h depth timeline with peak overlay + session annotations.
+    hours = intel_mod.day_hourly_depth(sel_day)
+    enabled, pstart, pend = chrono_mod.get_window()
+    peak = (pstart.hour + pstart.minute / 60.0,
+            pend.hour + pend.minute / 60.0) if enabled else None
+    sessions = []
+    for s in store.get_day_sessions(sel_day) or ():
+        try:
+            st = datetime.fromisoformat(
+                s["started_at"].replace("Z", ""))
+            en = datetime.fromisoformat(
+                (s["ended_at"] or s["started_at"]).replace("Z", ""))
+            sessions.append((st.hour + st.minute / 60.0,
+                             en.hour + en.minute / 60.0,
+                             s.get("label") or "session"))
+        except (ValueError, TypeError, KeyError):
+            continue
+    timeline_card = (
+        "<div class='card'><h3>24-hour depth timeline -- %s</h3>%s"
+        "<p class='note'>Green = deep/productive, grey = neutral, "
+        "orange/red = distraction. Yellow band = your peak window. "
+        "Blue dashed boxes = focus sessions.</p></div>"
+        % (escape(sel_day),
+           _svg_depth_timeline(hours, peak=peak, sessions=sessions)))
+
+    buckets = intel_mod.day_ratio_buckets(sel_day)
+    donut_card = (
+        "<div class='card'><h3>Deep vs shallow -- %s</h3>%s</div>"
+        % (escape(sel_day), _svg_donut(buckets)))
+
+    rec = intel_mod.recovery_cost(sel_day)
+    friction = "".join(
+        "<li><b>%s</b> -- %.0f min of distraction</li>"
+        % (escape(f["app"]), f["minutes"])
+        for f in rec["top_friction"])
+    recovery_card = (
+        "<div class='card'><h3>Distraction recovery cost -- %s</h3>"
+        "<p>About <b>%d minutes</b> lost to context recovery today "
+        "(%d switches, %d distraction blocks).</p>"
+        "<p class='note'>Rule of thumb: each switch costs ~1 minute, "
+        "each distraction block ~10 minutes to get back into flow.</p>"
+        "%s</div>"
+        % (escape(sel_day), rec["recovery_minutes"], rec["switches"],
+           rec["distraction_blocks"],
+           ("<ul>%s</ul>" % friction) if friction
+           else "<p class='note'>No friction apps today.</p>"))
+
+    coach = intel_mod.coaching_cards()
+    coach_items = "".join(
+        "<div class='coach'><b>%s</b><p>%s</p></div>"
+        % (escape(c["title"]), escape(c["body"])) for c in coach)
+    coach_card = ("<div class='card'><h3>Coaching for tomorrow</h3>%s"
+                  "</div>" % coach_items)
+
+    trends = intel_mod.week_flow_trends()
+    trend_txt = ("<p>This week: <b>%.1f</b>%s</p>"
+                 % (trends["this_week"]["mean"],
+                    (" (baseline %.1f, delta %+.1f)"
+                     % (trends["baseline_mean"], trends["delta"]))
+                    if trends["delta"] is not None
+                    else " (no baseline yet)"))
+    spark = _svg_sparkline([d["score"] for d in trends["daily"]],
+                           [d["day"] for d in trends["daily"]])
+    today_d = date.today()
+    heat = intel_mod.switch_heatmap_7x24(
+        today_d - timedelta(days=27), today_d)
+    trends_card = (
+        "<div class='card'><h3>Week trends</h3>%s%s"
+        "<h4>Context switches by weekday and hour (4 weeks)</h4>%s"
+        "</div>" % (trend_txt, spark, _svg_heatmap(heat)))
+
+    report_link = (
+        "<div class='card'><h3>Executive report</h3>"
+        "<p><a href='/intelligence/report?day=%s'>Open the printable "
+        "Deep Work Intelligence Report</a> -- clean print layout, no "
+        "scripts.</p></div>" % escape(sel_day))
+
+    return (flow_card + timeline_card + donut_card + recovery_card
+            + coach_card + trends_card + report_link)
+
+
+@app.route("/intelligence/report")
+def intelligence_report():
+    """Standalone printable Deep Work Intelligence Report (Phase 12).
+
+    Strict CSP, zero JavaScript, print CSS -- Phase 9/10 standard.
+    """
+    from focuscore import intelligence as intel_mod
+    from focuscore import chronotype as chrono_mod
+
+    sel_day = request.args.get("day", date.today().isoformat())
+    try:
+        date.fromisoformat(sel_day)
+    except ValueError:
+        sel_day = date.today().isoformat()
+
+    flow = intel_mod.flow_index(sel_day)
+    if flow["score"] is None:
+        flow_big = ("<p><b>Insufficient Data</b></p><p>%s</p>"
+                    % escape(flow["note"] or ""))
+    else:
+        flow_big = ("<p style='font-size:36px;font-weight:bold'>%d/100 -- "
+                    "%s</p>" % (flow["score"], escape(flow["label"])))
+    buckets = intel_mod.day_ratio_buckets(sel_day)
+    hours = intel_mod.day_hourly_depth(sel_day)
+    enabled, pstart, pend = chrono_mod.get_window()
+    peak = (pstart.hour + pstart.minute / 60.0,
+            pend.hour + pend.minute / 60.0) if enabled else None
+    rec = intel_mod.recovery_cost(sel_day)
+    coach = intel_mod.coaching_cards()
+    trends = intel_mod.week_flow_trends()
+
+    coach_html = "".join(
+        "<div class='coach'><h4>%s</h4><p>%s</p></div>"
+        % (escape(c["title"]), escape(c["body"])) for c in coach)
+    friction = "".join(
+        "<li>%s -- %.0f min</li>" % (escape(f["app"]), f["minutes"])
+        for f in rec["top_friction"])
+    trend_line = ("Week mean %.1f%s"
+                  % (trends["this_week"]["mean"],
+                     (" (baseline %.1f, delta %+.1f)"
+                      % (trends["baseline_mean"], trends["delta"]))
+                     if trends["delta"] is not None else ""))
+
+    from focuscore import __version__ as focuscore_version
+
+    return (
+        "<!DOCTYPE html><html><head><meta charset='utf-8'>"
+        "<meta http-equiv=\"Content-Security-Policy\" content=\""
+        "default-src 'none'; style-src 'unsafe-inline'; img-src data:; "
+        "font-src data:;\">"
+        "<title>Deep Work Intelligence Report -- %s</title>"
+        "<style>"
+        "body{font-family:system-ui,sans-serif;max-width:900px;"
+        "margin:24px auto;padding:0 16px;color:#1f2328}"
+        ".card{border:1px solid #d0d7de;border-radius:8px;padding:16px;"
+        "margin:16px 0;break-inside:avoid}"
+        ".coach{background:#f6f8fa;border-radius:8px;padding:12px;"
+        "margin:8px 0}"
+        "h1{font-size:26px}h3{margin-top:0}"
+        ".note{color:#57606a;font-size:13px}"
+        "@media print{.noprint{display:none}"
+        "body{margin:0;max-width:none;-webkit-print-color-adjust:exact;"
+        "print-color-adjust:exact}.card{box-shadow:none}}"
+        "</style></head><body>"
+        "<h1>Deep Work Intelligence Report</h1>"
+        "<p class='noprint'><a href='/intelligence'>Back to Deep time"
+        "</a> | Print via your browser (Ctrl+P).</p>"
+        "<div class='card'><h3>Flow Index -- %s</h3>%s"
+        "<p>%s</p></div>"
+        "<div class='card'><h3>24-hour depth timeline</h3>%s</div>"
+        "<div class='card'><h3>Deep vs shallow</h3>%s</div>"
+        "<div class='card'><h3>Recovery cost</h3>"
+        "<p><b>%d minutes</b> lost to context recovery "
+        "(%d switches, %d distraction blocks).</p><ul>%s</ul></div>"
+        "<div class='card'><h3>Coaching</h3>%s</div>"
+        "<div class='card'><h3>Week trend</h3><p>%s</p>%s</div>"
+        "<footer class='note'>Generated: %s · Focus Core v%s · "
+        "Schema v9</footer>"
+        "</body></html>"
+        % (escape(sel_day), escape(sel_day), flow_big,
+           trend_line,
+           _svg_depth_timeline(hours, peak=peak),
+           _svg_donut(buckets), rec["recovery_minutes"],
+           rec["switches"], rec["distraction_blocks"], friction,
+           coach_html, escape(trend_line),
+           _svg_sparkline([d["score"] for d in trends["daily"]],
+                           [d["day"] for d in trends["daily"]]),
+           datetime.now().isoformat(timespec="seconds"),
+           focuscore_version))
