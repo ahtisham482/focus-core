@@ -390,11 +390,16 @@ def test_dashboard_phase4_pages_return_200(tmp_path, monkeypatch):
     for url in ("/timesheet?day=2026-09-21",
                 "/report?week=2026-09-21",
                 "/coaching",
-                "/timesheet/export?day=2026-09-21"):
+                "/timesheet/export/client?from=2026-09-21&to=2026-09-21"):
         response = client.get(url)
         assert response.status_code == 200, url
-    export = client.get("/timesheet/export?day=2026-09-21")
+    export = client.get(
+        "/timesheet/export/client?from=2026-09-21&to=2026-09-21")
     assert export.headers["Content-Type"].startswith("text/csv")
     assert "attachment" in export.headers["Content-Disposition"]
-    assert export.data.decode("utf-8").splitlines()[0] == \
-        ",".join(timesheet.CSV_COLUMNS)
+    lines = export.data.decode("utf-8").splitlines()
+    # Phase 9: client CSV is safe by default -- manifest comment first, and
+    # no app names / window titles in the header or body.
+    assert lines[0].startswith("# manifest: ")
+    assert "app" not in lines[1].split(",")
+    assert "title" not in lines[1].split(",")

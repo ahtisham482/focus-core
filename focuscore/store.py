@@ -901,11 +901,28 @@ def session_days_with_completion(path=None):
 # ------------------------------------------------------------ timesheets ---
 
 def _project_row(row):
+    def _col(name, default=None):
+        try:
+            return row[name]
+        except (IndexError, KeyError):
+            return default
+
     return {
         "id": row["id"],
         "name": row["name"],
         "client": row["client"] or "",
         "created_at": row["created_at"],
+        # Phase 9 finance cache columns (current-state only; the
+        # project_budget_ledger is the historical truth).
+        "hourly_rate_minor": _col("hourly_rate_minor"),
+        "rate_currency": _col("rate_currency") or "USD",
+        "current_weekly_cap_seconds": _col("current_weekly_cap_seconds"),
+        "current_monthly_cap_seconds": _col("current_monthly_cap_seconds"),
+        "current_weekly_cap_amount_minor":
+            _col("current_weekly_cap_amount_minor"),
+        "current_monthly_cap_amount_minor":
+            _col("current_monthly_cap_amount_minor"),
+        "budget_currency": _col("budget_currency") or "USD",
     }
 
 
@@ -987,7 +1004,12 @@ _ENTRY_SELECT = (
 def create_entry(day, start_ts, end_ts, minutes, category, app="",
                  title="", project_id=None, task="", note="",
                  status="accepted", path=None):
-    """Insert a timesheet entry; returns its new id."""
+    """Insert a timesheet entry; returns its new id.
+
+    Phase 9 (Qwen M1): when the entry is tagged to a project that has a
+    current rate, the rate is snapshotted onto the entry as 'confirmed'.
+    Later project rate changes never touch this row.
+    """
     from datetime import datetime
 
     init_db(path)
@@ -1002,8 +1024,21 @@ def create_entry(day, start_ts, end_ts, minutes, category, app="",
              title or "", project_id, task or "", note or "", status,
              datetime.now().isoformat(timespec="seconds")),
         )
+        entry_id = cur.lastrowid
+        if project_id is not None:
+            proj = conn.execute(
+                "SELECT hourly_rate_minor, rate_currency FROM projects "
+                "WHERE id = ?", (project_id,)).fetchone()
+            if proj and proj["hourly_rate_minor"]:
+                conn.execute(
+                    "UPDATE timesheet_entries SET hourly_rate_minor = ?, "
+                    "rate_currency = ?, rate_status = 'confirmed' "
+                    "WHERE id = ?",
+                    (proj["hourly_rate_minor"],
+                     proj["rate_currency"] or "USD", entry_id),
+                )
         conn.commit()
-        return cur.lastrowid
+        return entry_id
     finally:
         conn.close()
 

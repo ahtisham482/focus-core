@@ -178,19 +178,32 @@ ARTICLES = {
         "what": ("Turns your tracked day into clean time entries with "
                  "project, client and task tags. The top of the page "
                  "suggests blocks on a visual timeline -- click a block to "
-                 "highlight its row."),
+                 "highlight its row. Projects can have hourly rates and "
+                 "weekly/monthly budgets, and any date range can be "
+                 "exported for clients."),
         "do": [
             "Review the suggested blocks, then Accept the good ones.",
             "Tag each entry with project, client, task and a note.",
             "Add entries by hand for time the tracker missed.",
+            "Set an hourly rate on a project -- new entries use it "
+            "automatically, and old entries keep whatever rate they had.",
+            "Set weekly/monthly budgets (hours and/or money) per project. "
+            "Bars show burndown; budgets are advisory only and every "
+            "change is kept in history.",
             "Lock the day when it looks right -- locked days can't be "
             "changed, so your records stay trustworthy.",
-            "Export any date range to CSV.",
+            "Export any date range: client CSV (safe by default), "
+            "structured JSON, or a printable Timesheet Statement.",
         ],
         "trouble": [
             "Tiny blocks missing? Anything under 5 minutes is skipped as "
             "noise -- that's normal.",
             "A gap of more than 5 minutes starts a new block.",
+            "Billed total looks low? Time with no confirmed rate is listed "
+            "separately as unrated -- set a rate or apply it to old "
+            "entries from the project card.",
+            "Client exports never include app names or window titles "
+            "unless you explicitly choose the detailed internal CSV.",
         ],
     },
     "backup": {

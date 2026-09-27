@@ -402,7 +402,7 @@ def test_legacy_9_tables_data_preservation_and_defaults(tmp_path: Path) -> None:
         assert "idx_timesheet_session" in idx_names
 
         # PRAGMA user_version is 6
-        assert conn.execute("PRAGMA user_version").fetchone()[0] == 6
+        assert conn.execute("PRAGMA user_version").fetchone()[0] == 7
     finally:
         conn.close()
 

@@ -1,5 +1,26 @@
 # Changelog
 
+## [v1.10.0] — 2026-09-27 (Sprint 3, Phase 9 — UNRELEASED, pending PC verification)
+Project tagging with hourly rates, advisory budget tracking, and client
+timesheet exports. Set an hourly rate per project — new time entries
+snapshot it automatically while old entries keep whatever rate they had
+(historical entries are never silently rewritten; an explicit, confirmed
+backfill with an audit trail is available from the project card).
+Weekly/monthly budgets in hours and/or money per project, with
+working-day-aware pacing bars (Mon–Fri by default, configurable);
+budgets are strictly advisory and every cap change is kept in an
+append-only history ledger, so past reports always reproduce. Client
+exports for any date range: safe CSV (no app names, window titles, or
+URLs by default; notes/tags opt-in; formula-injection protected),
+structured JSON (`focuscore.timesheet/v1`), and a standalone
+print-ready "Timesheet Statement" HTML (no external assets, works from a
+saved file). Money uses integer minor units throughout — no floating
+point. Every export carries a redaction manifest; detailed internal
+exports require explicit opt-in and are audit-logged. Database migration
+7 (rate snapshots, budget ledger, finance audit events, export
+indexes). Financial honesty rule: billed totals separate confirmed
+amounts, estimates, and unrated time — never mixed.
+
 ## [v1.9.0] — 2026-09-27 (Sprint 3, Phase 8 — UNRELEASED, pending PC verification)
 Adaptive Flowtime and Smart Pomodoro: focus sessions now come in three
 modes — **Classic** (the fixed timer you already know, unchanged),

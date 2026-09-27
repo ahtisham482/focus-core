@@ -19,6 +19,7 @@ Routes:
 """
 
 import sys
+import json as _json
 from datetime import date, datetime, timedelta
 from html import escape
 from pathlib import Path
@@ -1468,31 +1469,14 @@ def timesheet_page():
            or "<tr><td colspan='8' class='note'>No entries yet -- accept a "
               "suggestion above or add one manually below.</td></tr>"))
 
-    # --- projects ---
-    proj_rows = "".join(
-        "<tr><td>%s</td><td>%s</td>"
-        "<td><form class='inline' method='post' "
-        "action='/timesheet/project/delete' "
-        "onsubmit=\"return confirm('Delete this project? Its entries keep "
-        "their time but lose the project link.');\">"
-        "<input type='hidden' name='id' value='%d'>"
-        "<input type='hidden' name='day' value='%s'>"
-        "<button type='submit'>Delete</button></form></td></tr>"
-        % (escape(p["name"]), escape(p["client"] or "-"), p["id"], day)
-        for p in projects
-    )
-    projects_html = (
-        "<table><tr><th>Project</th><th>Client</th><th></th></tr>%s</table>"
-        "<form method='post' action='/timesheet/project/add' "
-        "style='margin-top:10px'>"
-        "<input type='hidden' name='day' value='%s'>"
-        "<label>Name <input type='text' name='name' required "
-        "size='20'></label> "
-        "<label>Client <input type='text' name='client' size='20'></label> "
-        "<button type='submit'>Add project</button></form>"
-        % ("".join(proj_rows)
-           or "<tr><td colspan='3' class='note'>No projects yet.</td></tr>",
-           day))
+    # --- projects (Phase 9: rate + budget cards) ---
+    projects_html = _project_cards_html(day)
+
+    # --- client export panel (Phase 9) ---
+    export_html = _export_panel_html(day, projects)
+
+    msg = escape(request.args.get("msg") or "")
+    msg_html = ("<div class='card'><p><b>%s</b></p></div>" % msg) if msg else ""
 
     lock_html = (
         "<p class='note'>This day is locked -- entries cannot be changed. "
@@ -1504,11 +1488,12 @@ def timesheet_page():
         "<button type='submit'>Lock day</button></form>" % day)
 
     body = (
+        "%s"
         "<div class='card'><h3>Timesheet -- %s</h3>"
         "<form class='inline' method='get' action='/timesheet'>"
         "<label>Day <input type='date' name='day' value='%s'></label> "
         "<button type='submit'>Show</button></form> "
-        "<a href='/timesheet/export?day=%s'>Export this day as CSV</a>"
+        "<a href='/timesheet/export/client?from=%s&to=%s'>Export this day as CSV</a>"
         "<p class='note'>Suggested blocks merge consecutive tracked "
         "activities of the same category (gaps over 5 minutes split a "
         "block). Accept one to add it to your timesheet.</p></div>"
@@ -1529,9 +1514,15 @@ def timesheet_page():
         "<label>Note <input type='text' name='note' size='18'></label></p>"
         "<p><button type='submit'>Add entry</button></p>"
         "</form></div>"
-        "<div class='card'><h3>Projects</h3>%s</div>"
-        % (day, day, day, timeline_html, sug_table, entries_table, lock_html, day,
-           _category_options(), _project_options(), projects_html)
+        "<div class='card'><h3>Projects, rates &amp; budgets</h3>"
+        "<p class='note'>Set an hourly rate per project; new time entries "
+        "use it automatically. Budgets are advisory only and every change "
+        "is kept in history.</p>%s</div>"
+        "<div class='card'><h3>Client exports</h3>%s</div>"
+        % (msg_html, day, day, day, day, timeline_html, sug_table, entries_table,
+           lock_html, day,
+           _category_options(), _project_options(), projects_html,
+           export_html)
     )
     return layout("Timesheet " + day, body, day, active="timesheet")
 
@@ -1663,26 +1654,407 @@ def timesheet_project_delete():
     return redirect("/timesheet?day=" + day)
 
 
-@app.route("/timesheet/export")
-def timesheet_export():
-    from focuscore import timesheet as ts_mod
-    import io
+@app.route("/timesheet/export/old")
+def timesheet_export_old():
+    """Legacy CSV kept for old bookmarks: redirects to the safe client
+    export (M4.1 -- the old app/title columns no longer leak by default)."""
+    from urllib.parse import urlencode
 
     day = _parse_day(request.args.get("day"))
     day_from = _parse_day(request.args.get("from")) or day
     day_to = _parse_day(request.args.get("to")) or day
     if not day_from or not day_to:
         abort(404)
-    buf = io.StringIO()
-    ts_mod.write_csv_rows(
-        store.list_entries(day_from=day_from, day_to=day_to), buf)
-    filename = ("timesheet-%s.csv" % day_from if day_from == day_to
-                else "timesheet-%s-to-%s.csv" % (day_from, day_to))
+    qs = urlencode({"from": day_from, "to": day_to})
+    return redirect("/timesheet/export/client?%s" % qs, code=302)
+
+
+# ------------------------------------------------ Phase 9: budgets ---
+
+def _budget_hbar(label, consumed_text, cap_text, pct, band):
+    """One horizontal budget bar; pct is 0..1+ (clamped for display)."""
+    width = max(0, min(100, int(round(pct * 100))))
+    band_label = {"on_track": "On track", "watch": "Watch",
+                  "warning": "Warning", "over": "Over budget"}.get(
+                      band, band)
+    return (
+        "<div class='hbar'><span class='lbl'>%s</span>"
+        "<span class='track'><span class='fill %s' style='width:%d%%'>"
+        "</span></span>"
+        "<span class='val'>%s of %s</span> "
+        "<span class='budget-band %s'>%s</span></div>"
+        % (escape(label), escape(band), width, escape(consumed_text),
+           escape(cap_text), escape(band), escape(band_label)))
+
+
+def _project_cards_html(day):
+    """Project cards with rate, budget bars, and budget/rate forms."""
+    from focuscore import budgets as budgets_mod
+    from focuscore import money as money_mod
+
+    cards = []
+    for p in store.list_projects():
+        pid = p["id"]
+        week = budgets_mod.budget_status(pid, "week", path=None)
+        month = budgets_mod.budget_status(pid, "month", path=None)
+        bars = []
+        for status, label in ((week, "This week"), (month, "This month")):
+            if status["hours"]:
+                h = status["hours"]
+                bars.append(_budget_hbar(
+                    label + " (time)",
+                    money_mod.format_duration(h["consumed_seconds"]),
+                    money_mod.format_duration(h["cap_seconds"]),
+                    h["pct"], h["band"]))
+            if status["amount"]:
+                a = status["amount"]
+                bars.append(_budget_hbar(
+                    label + " (billed)",
+                    money_mod.format_minor(a["consumed_minor"],
+                                           a["currency"]),
+                    money_mod.format_minor(a["cap_minor"], a["currency"]),
+                    a["pct"], a["band"]))
+        bars_html = "".join(bars) or (
+            "<p class='fine'>No budget set. Budgets are advisory only -- "
+            "they never block your work.</p>")
+        # Pacing note (working-day aware, suppressed on rest days).
+        pace_notes = []
+        for status in (week, month):
+            pacing = status.get("pacing")
+            if pacing and not pacing.get("suppressed") and pacing.get("band") \
+                    not in (None, "none"):
+                pace_notes.append(escape(pacing.get("explain", "")))
+        pace_html = ("<p class='fine'>%s</p>" % " ".join(pace_notes)
+                     if pace_notes else "")
+
+        rate_minor = p.get("hourly_rate_minor")
+        rate_text = (money_mod.format_minor(rate_minor, p.get("rate_currency"))
+                     + "/hr" if rate_minor else "no rate set")
+        unrated = budgets_mod.count_unrated_entries(pid)
+        backfill_html = ""
+        if unrated and rate_minor:
+            backfill_html = (
+                "<form class='inline' method='post' "
+                "action='/timesheet/project/backfill-rate' "
+                "onsubmit=\"return confirm('Apply the current rate (%s/hr) "
+                "to %d unrated entries? This will be recorded.');\">"
+                "<input type='hidden' name='id' value='%d'>"
+                "<input type='hidden' name='day' value='%s'>"
+                "<button type='submit'>Apply rate to %d unrated</button>"
+                "</form> "
+                % (escape(money_mod.format_minor(rate_minor,
+                                                 p.get("rate_currency"))),
+                   unrated, pid, day, unrated))
+
+        cards.append(
+            "<div class='proj-card'><h4>%s%s</h4>"
+            "<p class='fine'>Client: %s &middot; Rate: %s &middot; %s</p>"
+            "%s%s"
+            "<form method='post' action='/timesheet/project/rate'>"
+            "<input type='hidden' name='id' value='%d'>"
+            "<input type='hidden' name='day' value='%s'>"
+            "<label>Rate/hr <input type='text' name='rate' size='8' "
+            "placeholder='95.50'></label>"
+            "<button type='submit'>Set rate</button>"
+            "<span class='fine'>New entries use it; old entries keep "
+            "their rate.</span></form>"
+            "<form method='post' action='/timesheet/project/budget'>"
+            "<input type='hidden' name='id' value='%d'>"
+            "<input type='hidden' name='day' value='%s'>"
+            "<label>Week hrs <input type='text' name='week_hours' size='6' "
+            "placeholder='20'></label>"
+            "<label>Month hrs <input type='text' name='month_hours' size='6' "
+            "placeholder='80'></label>"
+            "<label>Week %s <input type='text' name='week_amount' size='8' "
+            "placeholder='2000'></label>"
+            "<label>Month %s <input type='text' name='month_amount' size='8' "
+            "placeholder='8000'></label>"
+            "<button type='submit'>Set budget</button>"
+            "<span class='fine'>Blank = no cap. Every change is kept in "
+            "history.</span></form>"
+            "%s"
+            "<form class='inline' method='post' "
+            "action='/timesheet/project/delete' "
+            "onsubmit=\"return confirm('Delete this project? Its entries keep "
+            "their time but lose the project link.');\">"
+            "<input type='hidden' name='id' value='%d'>"
+            "<input type='hidden' name='day' value='%s'>"
+            "<button type='submit'>Delete project</button></form>"
+            "</div>"
+            % (escape(p["name"]),
+               " (%s)" % escape(p["client"]) if p["client"] else "",
+               escape(p["client"] or "-"), escape(rate_text),
+               escape(week["summary"]),
+               bars_html, pace_html, pid, day, pid, day,
+               escape(money_mod.CURRENCY_SYMBOLS.get(
+                   (store.get_setting("currency", "USD") or "USD").upper(),
+                   "$")),
+               escape(money_mod.CURRENCY_SYMBOLS.get(
+                   (store.get_setting("currency", "USD") or "USD").upper(),
+                   "$")),
+               backfill_html, pid, day))
+    add_form = (
+        "<form method='post' action='/timesheet/project/add' "
+        "style='margin-top:10px'>"
+        "<input type='hidden' name='day' value='%s'>"
+        "<label>Name <input type='text' name='name' required "
+        "size='20'></label> "
+        "<label>Client <input type='text' name='client' size='20'></label> "
+        "<button type='submit'>Add project</button></form>" % day)
+    return "".join(cards) + add_form
+
+
+def _export_panel_html(day, projects):
+    """Client export panel: safe defaults, explicit internal opt-in."""
+    currency = (store.get_setting("currency", "USD") or "USD").upper()
+    proj_opts = ["<option value=''>All projects</option>"] + [
+        "<option value='%d'>%s</option>" % (p["id"], escape(p["name"]))
+        for p in projects]
+    clients = sorted({p["client"] for p in projects if p["client"]})
+    client_opts = ["<option value=''>All clients</option>"] + [
+        "<option value='%s'>%s</option>" % (escape(c), escape(c))
+        for c in clients]
+    return (
+        "<form method='get' action='/timesheet/export/client'>"
+        "<p><label>From <input type='date' name='from' required></label> "
+        "<label>To <input type='date' name='to' required></label></p>"
+        "<p><label>Project <select name='project_id'>%s</select></label> "
+        "<label>Client <select name='client'>%s</select></label></p>"
+        "<p><label><input type='checkbox' name='billable_only' value='1'> "
+        "Billable only</label> "
+        "<label><input type='checkbox' name='include_notes' value='1'> "
+        "Include my notes</label> "
+        "<label><input type='checkbox' name='show_estimates' value='1'> "
+        "Show estimate for unrated time</label></p>"
+        "<p><button type='submit'>Download client CSV</button> "
+        "<span class='fine'>Safe by default: no app names, window titles, "
+        "or URLs.</span></p></form>"
+        "<form method='get' action='/timesheet/export.json'>"
+        "<p class='fine'>Same filters as above work here too "
+        "(from, to, project_id, client, billable_only).</p>"
+        "<p><button type='submit' formaction='/timesheet/export.json'>"
+        "Download JSON</button> "
+        "<button type='submit' formaction='/timesheet/statement'>"
+        "Printable statement</button></p></form>"
+        "<p class='fine'><a href='/timesheet/export/client?detail=internal' "
+        "onclick=\"return confirm('The detailed export includes app names "
+        "and window titles, which may contain sensitive information. Use "
+        "for your own analysis only. Continue?');\">"
+        "Detailed internal CSV (includes app names &amp; window titles)"
+        "</a> &mdash; for your own analysis only, never send to clients.</p>"
+        "<p class='fine'>Currency: %s. Amounts use confirmed rates only; "
+        "unrated time is listed separately.</p>"
+        % ("".join(proj_opts), "".join(client_opts),
+           escape(currency)))
+
+
+@app.route("/timesheet/project/rate", methods=["POST"])
+def timesheet_project_rate():
+    from focuscore import budgets as budgets_mod
+    from focuscore import money as money_mod
+
+    day = _parse_day(request.form.get("day")) or date.today().isoformat()
+    msg = ""
+    try:
+        pid = int(request.form.get("id"))
+        rate_minor = money_mod.parse_rate_to_minor(request.form.get("rate"))
+        if rate_minor is None:
+            msg = "That rate was not understood -- use a number like 95.50."
+        else:
+            ok, msg = budgets_mod.set_project_rate(pid, rate_minor)
+    except (TypeError, ValueError):
+        msg = "Could not save the rate."
+    return redirect("/timesheet?day=" + day + "&msg=" + msg.replace(" ", "+"))
+
+
+@app.route("/timesheet/project/budget", methods=["POST"])
+def timesheet_project_budget():
+    from focuscore import budgets as budgets_mod
+    from focuscore import money as money_mod
+
+    day = _parse_day(request.form.get("day")) or date.today().isoformat()
+    msg = "Budget saved."
+    try:
+        pid = int(request.form.get("id"))
+        week_s = money_mod.parse_hours_to_seconds(
+            request.form.get("week_hours"))
+        month_s = money_mod.parse_hours_to_seconds(
+            request.form.get("month_hours"))
+        week_a = money_mod.parse_rate_to_minor(request.form.get("week_amount"))
+        month_a = money_mod.parse_rate_to_minor(
+            request.form.get("month_amount"))
+        # Blank fields mean "leave unchanged"; an explicit 0 removes a cap.
+        for period_type, cap_s, cap_a in (("week", week_s, week_a),
+                                         ("month", month_s, month_a)):
+            if cap_s is None and cap_a is None:
+                continue
+            ok, m = budgets_mod.set_budget(pid, period_type, cap_s, cap_a)
+            if not ok:
+                msg = m
+    except (TypeError, ValueError):
+        msg = "Could not save the budget."
+    return redirect("/timesheet?day=" + day + "&msg=" + msg.replace(" ", "+"))
+
+
+@app.route("/timesheet/project/backfill-rate", methods=["POST"])
+def timesheet_project_backfill_rate():
+    """Explicit, user-confirmed backfill (Qwen M1.5). The confirm() dialog
+    in the form IS the explicit confirmation; the action is audit-logged."""
+    from focuscore import budgets as budgets_mod
+
+    day = _parse_day(request.form.get("day")) or date.today().isoformat()
+    try:
+        pid = int(request.form.get("id"))
+        rate_minor, currency = budgets_mod.get_project_rate(pid)
+        if not rate_minor:
+            msg = "Set a project rate first."
+        else:
+            n = budgets_mod.backfill_rate(pid, rate_minor, currency)
+            msg = "%d entries marked as confirmed at the current rate." % n
+    except (TypeError, ValueError):
+        msg = "Could not apply the rate."
+    return redirect("/timesheet?day=" + day + "&msg=" + msg.replace(" ", "+"))
+
+
+def _export_filters():
+    """Shared query-string parsing for the three export endpoints."""
+    day_from = _parse_day(request.args.get("from"))
+    day_to = _parse_day(request.args.get("to"))
+    try:
+        project_id = request.args.get("project_id")
+        project_id = int(project_id) if project_id else None
+    except (TypeError, ValueError):
+        project_id = None
+    client = (request.args.get("client") or "").strip() or None
+    billable_only = request.args.get("billable_only") == "1"
+    include_notes = request.args.get("include_notes") == "1"
+    show_estimates = request.args.get("show_estimates") == "1"
+    return (day_from, day_to, project_id, client, billable_only,
+            include_notes, show_estimates)
+
+
+def json_dumps(payload):
+    """Deterministic JSON for exports (Qwen constraint F)."""
+    return _json.dumps(payload, sort_keys=True, separators=(",", ":"))
+
+
+@app.route("/timesheet/export/client")
+def timesheet_export_client():
+    from focuscore import exports as exports_mod
+
+    (day_from, day_to, project_id, client, billable_only,
+     include_notes, _show) = _export_filters()
+    if not day_from or not day_to or day_from > day_to:
+        abort(404)
+    internal = request.args.get("detail") == "internal"
+    rows = exports_mod.build_export_rows(
+        day_from, day_to, project_id=project_id, client=client,
+        billable_only=billable_only, include_app_details=internal,
+        include_notes=include_notes)
+    manifest = exports_mod.redaction_manifest(
+        include_app_details=internal, include_notes=include_notes)
+    if internal:
+        text = exports_mod.rows_to_detailed_csv(rows)
+        kind = "detailed-csv"
+        filename = "focuscore-timesheet-internal-%s-to-%s.csv"
+    else:
+        text = exports_mod.rows_to_csv(rows, manifest)
+        kind = "client-csv"
+        filename = "focuscore-timesheet-%s-to-%s.csv"
+    exports_mod.log_export_generated(
+        kind,
+        {"from": day_from, "to": day_to, "project_id": project_id,
+         "client": client, "billable_only": billable_only},
+        manifest, len(rows))
     return Response(
-        buf.getvalue(),
-        mimetype="text/csv",
-        headers={"Content-Disposition":
-                 "attachment; filename=%s" % filename})
+        text, mimetype="text/csv",
+        headers={"Content-Disposition": "attachment; filename=%s"
+                 % (filename % (day_from, day_to))})
+
+
+@app.route("/timesheet/export.json")
+def timesheet_export_json():
+    from focuscore import budgets as budgets_mod
+    from focuscore import exports as exports_mod
+
+    (day_from, day_to, project_id, client, billable_only,
+     include_notes, show_estimates) = _export_filters()
+    if not day_from or not day_to or day_from > day_to:
+        abort(404)
+    currency = (store.get_setting("currency", "USD") or "USD").upper()
+    rows = exports_mod.build_export_rows(
+        day_from, day_to, project_id=project_id, client=client,
+        billable_only=billable_only, include_app_details=False,
+        include_notes=include_notes)
+    manifest = exports_mod.redaction_manifest(include_notes=include_notes)
+    totals = exports_mod.compute_totals(
+        rows, project_id=project_id, currency=currency,
+        include_estimates=show_estimates)
+    budget_decl = None
+    if project_id:
+        start_day, _ = budgets_mod.period_bounds("month", day_from)
+        cap = budgets_mod.get_cap_for_period(project_id, "month", start_day)
+        if cap:
+            budget_decl = cap
+    payload = exports_mod.build_json_payload(
+        rows, totals,
+        {"from": day_from, "to": day_to, "project_id": project_id,
+         "client": client, "billable_only": billable_only},
+        manifest, budget_decl=budget_decl, currency=currency)
+    exports_mod.log_export_generated(
+        "json",
+        {"from": day_from, "to": day_to, "project_id": project_id,
+         "client": client, "billable_only": billable_only},
+        manifest, len(rows))
+    return Response(
+        json_dumps(payload), mimetype="application/json",
+        headers={"Content-Disposition": "attachment; filename=%s"
+                 % ("focuscore-timesheet-%s-to-%s.json"
+                    % (day_from, day_to))})
+
+
+@app.route("/timesheet/statement")
+def timesheet_statement():
+    from focuscore import budgets as budgets_mod
+    from focuscore import exports as exports_mod
+
+    (day_from, day_to, project_id, client, billable_only,
+     include_notes, show_estimates) = _export_filters()
+    if not day_from or not day_to or day_from > day_to:
+        abort(404)
+    currency = (store.get_setting("currency", "USD") or "USD").upper()
+    rows = exports_mod.build_export_rows(
+        day_from, day_to, project_id=project_id, client=client,
+        billable_only=billable_only, include_app_details=False,
+        include_notes=include_notes)
+    manifest = exports_mod.redaction_manifest(include_notes=include_notes)
+    totals = exports_mod.compute_totals(
+        rows, project_id=project_id, currency=currency,
+        include_estimates=show_estimates)
+    budget_decl = None
+    project_name = ""
+    if project_id:
+        start_day, _ = budgets_mod.period_bounds("month", day_from)
+        cap = budgets_mod.get_cap_for_period(project_id, "month", start_day)
+        if cap:
+            budget_decl = cap
+        for p in store.list_projects():
+            if p["id"] == project_id:
+                project_name = p["name"]
+                break
+    page_html = exports_mod.rows_to_statement_html(
+        rows, totals,
+        {"from": day_from, "to": day_to, "project_id": project_id,
+         "client": client, "billable_only": billable_only},
+        manifest, budget_decl=budget_decl, currency=currency,
+        project_name=project_name,
+        client_name=client or "")
+    exports_mod.log_export_generated(
+        "statement",
+        {"from": day_from, "to": day_to, "project_id": project_id,
+         "client": client, "billable_only": billable_only},
+        manifest, len(rows))
+    return Response(page_html, mimetype="text/html")
 
 
 # -------------------------------------------------------------- backup ---

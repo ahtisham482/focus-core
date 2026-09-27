@@ -19,7 +19,7 @@ from . import backup, paths, store
 
 logger = logging.getLogger(__name__)
 
-LATEST_VERSION = 6
+LATEST_VERSION = 7
 
 
 class MigrationError(Exception):
@@ -333,6 +333,175 @@ def _migration_0006_session_modes(conn: sqlite3.Connection) -> None:
     )
 
 
+def _migration_0007_finance(conn: sqlite3.Connection) -> None:
+    """Migration 7: financial-adjacent schema for Phase 9 (Qwen audit M1/M2/E/G).
+
+    Binding rules from the audit:
+    - Money is NEVER REAL: integer minor units everywhere.
+    - Time budgets are seconds, not fractional hours.
+    - Historical timesheet entries are NEVER silently backfilled with a
+      newly set project rate: new snapshot columns start NULL/'unknown'.
+    - Budget caps live in the append-only project_budget_ledger; the
+      projects.* cache columns are current-state only.
+    - Financial changes are recorded in finance_audit_events.
+    Legacy migration-4 REAL columns (hourly_rate, weekly_budget_hours)
+    are migrated once into the new integer columns and then left alone.
+    """
+    # -- 1. Rate snapshot on timesheet entries (M1) ---------------------
+    add_column_if_missing(
+        conn, "timesheet_entries", "hourly_rate_minor", "INTEGER"
+    )
+    add_column_if_missing(
+        conn, "timesheet_entries", "rate_currency", "TEXT"
+    )
+    add_column_if_missing(
+        conn,
+        "timesheet_entries",
+        "rate_status",
+        "TEXT NOT NULL DEFAULT 'unknown' "
+        "CHECK (rate_status IN ('unknown', 'confirmed', 'estimated'))",
+    )
+    add_column_if_missing(
+        conn, "timesheet_entries", "rate_confirmed_at_utc", "TEXT"
+    )
+
+    # -- 2. Project finance cache columns (M2: cache only) -------------
+    add_column_if_missing(
+        conn, "projects", "hourly_rate_minor", "INTEGER"
+    )
+    add_column_if_missing(conn, "projects", "rate_currency", "TEXT")
+    add_column_if_missing(
+        conn, "projects", "current_weekly_cap_seconds", "INTEGER"
+    )
+    add_column_if_missing(
+        conn, "projects", "current_monthly_cap_seconds", "INTEGER"
+    )
+    add_column_if_missing(
+        conn, "projects", "current_weekly_cap_amount_minor", "INTEGER"
+    )
+    add_column_if_missing(
+        conn, "projects", "current_monthly_cap_amount_minor", "INTEGER"
+    )
+    add_column_if_missing(conn, "projects", "budget_currency", "TEXT")
+
+    # -- 3. Append-only budget ledger (M2) ------------------------------
+    conn.execute(
+        """
+        CREATE TABLE IF NOT EXISTS project_budget_ledger (
+            id INTEGER PRIMARY KEY,
+            project_id INTEGER NOT NULL
+                REFERENCES projects(id) ON DELETE CASCADE,
+            period_type TEXT NOT NULL
+                CHECK (period_type IN ('week', 'month')),
+            period_start TEXT NOT NULL,
+            cap_seconds INTEGER,
+            cap_amount_minor INTEGER,
+            currency TEXT,
+            effective_from_utc TEXT NOT NULL,
+            note TEXT DEFAULT '',
+            created_at_utc TEXT NOT NULL
+        )
+        """
+    )
+    conn.execute(
+        "CREATE INDEX IF NOT EXISTS idx_budget_ledger_lookup "
+        "ON project_budget_ledger "
+        "(project_id, period_type, period_start, effective_from_utc)"
+    )
+    conn.execute(
+        "CREATE INDEX IF NOT EXISTS idx_budget_ledger_project_effective "
+        "ON project_budget_ledger (project_id, effective_from_utc)"
+    )
+
+    # -- 4. Finance audit events (E) ------------------------------------
+    conn.execute(
+        """
+        CREATE TABLE IF NOT EXISTS finance_audit_events (
+            id INTEGER PRIMARY KEY,
+            entity_type TEXT NOT NULL,
+            entity_id INTEGER,
+            event_type TEXT NOT NULL,
+            payload_json TEXT DEFAULT '',
+            created_at_utc TEXT NOT NULL
+        )
+        """
+    )
+    conn.execute(
+        "CREATE INDEX IF NOT EXISTS idx_finance_audit_entity "
+        "ON finance_audit_events (entity_type, entity_id)"
+    )
+
+    # -- 5. Export query indexes (G) ------------------------------------
+    conn.execute(
+        "CREATE INDEX IF NOT EXISTS idx_timesheet_project_day "
+        "ON timesheet_entries(project_id, day)"
+    )
+    conn.execute(
+        "CREATE INDEX IF NOT EXISTS idx_timesheet_day_project "
+        "ON timesheet_entries(day, project_id)"
+    )
+
+    # -- 6. One-time seeding from legacy migration-4 REAL columns ------
+    _migration_0007_seed_legacy(conn)
+
+    conn.execute(
+        "INSERT OR IGNORE INTO settings (key, value) VALUES "
+        "('currency', 'USD')"
+    )
+    conn.execute(
+        "INSERT OR IGNORE INTO settings (key, value) VALUES "
+        "('working_days', '0,1,2,3,4')"
+    )
+
+
+def _migration_0007_seed_legacy(conn: sqlite3.Connection) -> None:
+    """Copy legacy REAL money/hours into the new integer columns once.
+
+    hourly_rate (REAL $/hr) -> hourly_rate_minor (int cents) +
+    rate_currency. weekly_budget_hours (REAL) -> current_weekly_cap_seconds
+    + one ledger row so the cap has a history from day one. Existing
+    timesheet entries are deliberately NOT touched (M1.1).
+    """
+    from datetime import date, datetime, timedelta
+
+    now_utc = datetime.now().isoformat(timespec="seconds")
+    try:
+        for row in conn.execute(
+            "SELECT id, hourly_rate, weekly_budget_hours FROM projects"
+        ).fetchall():
+            pid = row["id"]
+            legacy_rate = row["hourly_rate"] or 0.0
+            legacy_hours = row["weekly_budget_hours"] or 0.0
+            rate_minor = (
+                int(round(legacy_rate * 100)) if legacy_rate > 0 else None
+            )
+            if rate_minor:
+                conn.execute(
+                    "UPDATE projects SET hourly_rate_minor = ?, "
+                    "rate_currency = 'USD' WHERE id = ?",
+                    (rate_minor, pid),
+                )
+            if legacy_hours > 0:
+                cap_seconds = int(round(legacy_hours * 3600))
+                conn.execute(
+                    "UPDATE projects SET current_weekly_cap_seconds = ? "
+                    "WHERE id = ?",
+                    (cap_seconds, pid),
+                )
+                monday = date.today() - timedelta(days=date.today().weekday())
+                conn.execute(
+                    "INSERT INTO project_budget_ledger "
+                    "(project_id, period_type, period_start, cap_seconds, "
+                    "cap_amount_minor, currency, effective_from_utc, note, "
+                    "created_at_utc) VALUES (?, 'week', ?, ?, NULL, 'USD', "
+                    "?, 'seeded from legacy weekly_budget_hours', ?)",
+                    (pid, monday.isoformat(), cap_seconds, now_utc, now_utc),
+                )
+    except Exception:
+        # Legacy columns may not exist on exotic DBs; seeding is best-effort.
+        pass
+
+
 MIGRATIONS: List[Migration] = [
     Migration(1, "0001_afk_intervals", _migration_0001_afk_intervals),
     Migration(2, "0002_shield_columns", _migration_0002_shield_columns),
@@ -351,6 +520,11 @@ MIGRATIONS: List[Migration] = [
         6,
         "0006_session_modes",
         _migration_0006_session_modes,
+    ),
+    Migration(
+        7,
+        "0007_finance",
+        _migration_0007_finance,
     ),
 ]
 

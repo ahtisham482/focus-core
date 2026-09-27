@@ -118,6 +118,25 @@ tr:target td { background: #fff8e1; }
 .goal-row .gname { font-weight: 600; }
 .goal-row .gmeta { font-size: 13px; color: var(--muted); }
 
+/* --- budget bars (Phase 9) ------------------------------------------------ */
+.hbar .fill.on_track { background: var(--green); }
+.hbar .fill.watch { background: var(--amber); }
+.hbar .fill.warning { background: #ef6c00; }
+.hbar .fill.over { background: var(--red); }
+.hbar .fill.none { background: #b0bec5; }
+.budget-band { font-size: 12px; font-weight: 700; padding: 2px 10px;
+  border-radius: 10px; color: #fff; }
+.budget-band.on_track { background: var(--green); }
+.budget-band.watch { background: var(--amber); }
+.budget-band.warning { background: #ef6c00; }
+.budget-band.over { background: var(--red); }
+.proj-card { border: 1px solid var(--line); border-radius: 8px;
+  padding: 12px 14px; margin-bottom: 12px; }
+.proj-card h4 { margin: 0 0 6px; }
+.proj-card .fine { font-size: 13px; color: var(--muted); }
+.proj-card form { margin-top: 8px; }
+.proj-card label { font-size: 13px; margin-right: 8px; }
+
 /* --- timesheet timeline ----------------------------------------------- */
 .timeline { position: relative; margin: 10px 0; padding-left: 86px; }
 .tl-block {

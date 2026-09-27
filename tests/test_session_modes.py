@@ -155,12 +155,12 @@ def test_end_session_closes_active_cycle(tmp_path):
 
 
 def test_cues_never_raise_and_fail_silent():
-    # Bad input or disabled cues are always silent no-ops (R6).
+    # Bad input or disabled cues are always False (R6).
     assert cues.play_cue("nope") is False
     assert cues.play_cue("cycle_end", enabled=False) is False
-    # Valid cue returns True on Windows where sound is dispatched; False elsewhere
-    expected = sys.platform == "win32"
-    assert cues.play_cue("cycle_end") is expected
+    # On Windows a valid cue returns True (sound requested on a
+    # background thread); off Windows it is a silent no-op.
+    assert cues.play_cue("cycle_end") is (sys.platform == "win32")
 
 
 # ---------------------------------------------------------------------------
