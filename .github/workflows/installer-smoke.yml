@@ -1,0 +1,111 @@
+# Installs the built installer on a fresh Windows runner, launches the
+# installed product, and smoke-tests that it actually serves.
+#
+# Why this exists: unit tests prove the code is correct; this proves the
+# shipped artifact works -- the installer installs, the app launches,
+# and the dashboard answers on a real Windows machine, with no human
+# in the loop. Runs on every push to main plus manual dispatch.
+#
+# Triggers:
+#   - push to main            -> build installer, install it, smoke-test
+#   - manual dispatch         -> same, on demand
+
+name: Installer smoke test
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+jobs:
+  smoke:
+    runs-on: windows-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Install build deps
+        run: pip install pillow
+
+      - name: Stage the app (embedded Python + code)
+        run: python installer/build.py --version "0.0.0.${{ github.run_number }}" --repo "${{ github.repository }}"
+
+      - name: Install Inno Setup
+        run: choco install innosetup --no-progress -y
+
+      - name: Compile the installer
+        shell: pwsh
+        run: |
+          & "C:\Program Files (x86)\Inno Setup 6\ISCC.exe" `
+            installer\installer.iss /DAppVersion="0.0.0.${{ github.run_number }}"
+          Get-ChildItem installer\FocusCore-Setup-*.exe
+
+      - name: Silent-install the product
+        shell: pwsh
+        run: |
+          $exe = Get-ChildItem installer\FocusCore-Setup-*.exe |
+                 Select-Object -First 1
+          & $exe.FullName /VERYSILENT /SUPPRESSMSGBOXES /NORESTART `
+            /LOG="$env:RUNNER_TEMP\install.log"
+          if ($LASTEXITCODE -ne 0) {
+            throw "Installer exited with code $LASTEXITCODE"
+          }
+          Write-Host "Installed: $($exe.Name)"
+
+      - name: Verify install layout
+        shell: pwsh
+        run: |
+          $app = "$env:LOCALAPPDATA\Programs\Focus Core"
+          foreach ($p in @("$app\python\python.exe",
+                           "$app\python\pythonw.exe",
+                           "$app\icon.ico")) {
+            if (-not (Test-Path $p)) { throw "Missing: $p" }
+          }
+          $lnk = "$env:USERPROFILE\Desktop\Focus Core.lnk"
+          if (-not (Test-Path $lnk)) { throw "Missing desktop shortcut" }
+          Write-Host "Install layout OK"
+
+      - name: Wait for the installed app to serve
+        shell: pwsh
+        run: |
+          # Silent install auto-launches the app ([Run] skipifnotsilent);
+          # the launcher starts the dashboard server on 127.0.0.1:5000.
+          $deadline = (Get-Date).AddSeconds(120)
+          $r = $null
+          do {
+            try {
+              $r = Invoke-WebRequest -Uri "http://127.0.0.1:5000/" `
+                     -UseBasicParsing -TimeoutSec 5
+              if ($r.StatusCode -eq 200) { break }
+            } catch { }
+            Start-Sleep -Seconds 3
+          } while ((Get-Date) -lt $deadline)
+          if (-not $r -or $r.StatusCode -ne 200) {
+            throw "Installed app never answered on 127.0.0.1:5000"
+          }
+          Write-Host "Server answered HTTP 200"
+
+      - name: Smoke-test key pages
+        shell: pwsh
+        run: |
+          foreach ($p in @("/", "/focus", "/goals")) {
+            $r = Invoke-WebRequest `
+                   -Uri "http://127.0.0.1:5000$p" `
+                   -UseBasicParsing -TimeoutSec 10
+            if ($r.StatusCode -ne 200) { throw "$p -> $($r.StatusCode)" }
+            if ($r.Content -notmatch "(?i)focus core") {
+              throw "$p body does not mention Focus Core"
+            }
+            Write-Host "$p OK ($($r.RawContentLength) bytes)"
+          }
+
+      - name: Upload install log on failure
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: smoke-install-log
+          path: ${{ runner.temp }}/install.log
