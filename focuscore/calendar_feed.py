@@ -582,6 +582,11 @@ def today_events(day=None, db_path=None, now=None):
         return [], "unconfigured"
     try:
         text, fresh = _fetch_fresh(db_path)
+        if text:
+            # Validate the feed parses (result discarded; parsed again
+            # below). Keeps the "Never raises" contract, e.g. on machines
+            # without tzdata where zoneinfo raises.
+            parse_ical(text)
     except Exception:
         return [], "unreachable"
     if not text:

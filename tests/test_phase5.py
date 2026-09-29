@@ -557,12 +557,17 @@ def test_home_shield_pill_reflects_daemon_not_session(monkeypatch, env,
     flag = tmp_path / ".onboarded"
     flag.write_text("2026-09-24")
     import dashboard.app as dash_app
+    from focuscore import shield as shield_mod
     monkeypatch.setattr(store, "DEFAULT_DB_PATH", db)
     monkeypatch.setattr(dash_app, "ONBOARDED_FLAG", flag)
     monkeypatch.setattr(backup, "newest_backup", lambda dest_dir=None: None)
     monkeypatch.setattr(dash_app, "run_day", lambda day: None)
+    # Pin the daemon signal: no Shield daemon enforcing, regardless of what
+    # the OS mutex happens to report on this machine (Windows CI runners
+    # disagree with Linux here). The test is about session-vs-daemon logic.
+    monkeypatch.setattr(shield_mod, "shield_daemon_running", lambda: False)
     day = datetime.now().date().isoformat()
-    # Active session, but no Shield daemon enforcing (Linux CI/test env).
+    # Active session, but no Shield daemon enforcing.
     focus_mod.start_session("Maths", 60, db_path=db,
                             now=datetime.fromisoformat(day + "T09:00:00"))
     html = dash_app.app.test_client().get("/").data.decode()
@@ -667,7 +672,7 @@ def test_home_light_theme_tokens(env, tmp_path, monkeypatch):
     html = dash_app.app.test_client().get("/").data.decode()
     assert "data-theme='light'" in html
     assert '<body class=\'living\'>' in html
-    css = open("dashboard/static/living.css").read()
+    css = open("dashboard/static/living.css", encoding="utf-8").read()
     assert 'html[data-theme="light"] body.living' in css
     assert "--bg0: #faf6ee" in css
 
@@ -688,7 +693,7 @@ def test_home_mobile_tabs(env, tmp_path, monkeypatch):
     # Inline SVG only — no icon-font dependency.
     assert "viewBox='0 0 24 24'" in html
     assert "material-symbols" not in html.lower()
-    css = open("dashboard/static/living.css").read()
+    css = open("dashboard/static/living.css", encoding="utf-8").read()
     assert "env(safe-area-inset-bottom)" in css
 
 
@@ -980,7 +985,7 @@ def test_focus_active_orb_time_up(env, tmp_path, monkeypatch):
 
 def test_focus_mobile_css_rules():
     """The 480px media query carries the Focus phone layout."""
-    css = open("dashboard/static/living.css").read()
+    css = open("dashboard/static/living.css", encoding="utf-8").read()
     assert "@media (max-width: 480px)" in css
     for needle in (".lv-orb, .lv-orb-live { width: 240px; height: 240px; }",
                    ".lv-orb-time { font-size: 56px;",
@@ -995,7 +1000,7 @@ def test_focus_mobile_css_rules():
 
 def test_focus_focus_visible_rules():
     """Keyboard focus is always visible on Living Focus controls."""
-    css = open("dashboard/static/living.css").read()
+    css = open("dashboard/static/living.css", encoding="utf-8").read()
     assert ".lv-chip:focus-visible" in css
     assert ".lv-begin:focus-visible" in css
     assert ".lv-act-btn:focus-visible" in css
@@ -1004,7 +1009,7 @@ def test_focus_focus_visible_rules():
 
 def test_focus_reduced_motion_covers_entrances():
     """Reduced motion stills entrance/breathing animations, keeps .st visible."""
-    css = open("dashboard/static/living.css").read()
+    css = open("dashboard/static/living.css", encoding="utf-8").read()
     idx = css.rfind("Slice 9: accessibility")
     block = css[idx:]
     assert "@media (prefers-reduced-motion: reduce)" in block
@@ -1013,7 +1018,7 @@ def test_focus_reduced_motion_covers_entrances():
 
 def test_focus_chip_radiogroup_keyboard_js():
     """Mode chips handle arrow keys like a real radiogroup."""
-    js = open("dashboard/static/living-focus.js").read()
+    js = open("dashboard/static/living-focus.js", encoding="utf-8").read()
     assert "ArrowRight" in js and "ArrowLeft" in js
     assert "selectChip(next, false)" in js
     assert "next.focus()" in js
@@ -1021,7 +1026,7 @@ def test_focus_chip_radiogroup_keyboard_js():
 
 def test_focus_orb_aria_label_refresh_js():
     """The in-session orb refreshes its aria-label per minute, not per tick."""
-    js = open("dashboard/static/living-focus.js").read()
+    js = open("dashboard/static/living-focus.js", encoding="utf-8").read()
     assert "refreshAria" in js
     assert "setAttribute('aria-label'" in js
     assert "lastMinute" in js
@@ -1034,7 +1039,7 @@ def test_living_light_theme_defines_page_background_tokens():
     while the page background uses --bg/--bg2, which stayed near-black under
     dark --ink text -> unreadable warm-paper theme.
     """
-    css = open("dashboard/static/living.css").read()
+    css = open("dashboard/static/living.css", encoding="utf-8").read()
     # explicit data-theme="light" block
     light_block = css.split('html[data-theme="light"] body.living {')[1]
     light_block = light_block.split("}")[0]
@@ -1049,14 +1054,14 @@ def test_living_light_theme_defines_page_background_tokens():
 
 def test_living_dark_theme_defines_bg0_for_tabs():
     """Regression: .lv-tabs uses var(--bg0); dark tokens must define it."""
-    css = open("dashboard/static/living.css").read()
+    css = open("dashboard/static/living.css", encoding="utf-8").read()
     assert ".lv-tabs" in css
     assert "--bg0: #0d0c0a" in css
 
 
 def test_living_pages_hide_legacy_page_hero():
     """Regression: living pages hide legacy chrome incl. .page-hero."""
-    css = open("dashboard/static/living.css").read()
+    css = open("dashboard/static/living.css", encoding="utf-8").read()
     assert "body.living .page-hero" in css
 
 
@@ -1066,7 +1071,7 @@ def test_living_light_theme_nav_uses_paper_not_dark_bar():
     Found by real browser rendering: in the light theme the nav kept its
     dark frosted background under dark --ink text -> muddy, poor contrast.
     """
-    css = open("dashboard/static/living.css").read()
+    css = open("dashboard/static/living.css", encoding="utf-8").read()
     assert "html[data-theme=\"light\"] body.living .lv-nav" in css
     assert "rgba(250,246,238,.62)" in css
 
@@ -1079,17 +1084,17 @@ def test_living_depth_pill_readable_on_paper():
     state color in --depth-c (border/meter keep it) and the light theme
     overrides the text to ink.
     """
-    css = open("dashboard/static/living.css").read()
+    css = open("dashboard/static/living.css", encoding="utf-8").read()
     assert "color: var(--depth-c, inherit)" in css
     # !important is load-bearing: it beats the inline --depth-c per state
     assert "--depth-c: var(--ink2) !important" in css
-    py = open("dashboard/routes/focus.py").read()
+    py = open("dashboard/routes/focus.py", encoding="utf-8").read()
     assert "--depth-c:%s" in py
 
 
 def test_living_film_grain_overlay_present():
     """Spec §2: fixed SVG-noise grain at 5% over living pages."""
-    css = open("dashboard/static/living.css").read()
+    css = open("dashboard/static/living.css", encoding="utf-8").read()
     assert "body.living::before" in css
     assert "feTurbulence" in css
     assert "opacity: .05" in css
@@ -1098,7 +1103,7 @@ def test_living_film_grain_overlay_present():
 
 def test_living_ambient_drift_present():
     """Spec §2: ambient ember drift washes on an 18s alternate loop."""
-    css = open("dashboard/static/living.css").read()
+    css = open("dashboard/static/living.css", encoding="utf-8").read()
     assert "body.living::after" in css
     assert "@keyframes lv-drift" in css
     assert "18s ease-in-out infinite alternate" in css
@@ -1107,11 +1112,11 @@ def test_living_ambient_drift_present():
 def test_living_screen_reader_timer_announcements():
     """Spec §8: ticking timer is aria-live=off; a role=status region
     announces every 5 minutes for screen-reader users."""
-    py = open("dashboard/routes/focus.py").read()
+    py = open("dashboard/routes/focus.py", encoding="utf-8").read()
     assert "id='lv-orb-time' aria-live='off'" in py
     assert "role='status' id='lv-orb-status'" in py
-    css = open("dashboard/static/living.css").read()
+    css = open("dashboard/static/living.css", encoding="utf-8").read()
     assert ".lv-visually-hidden" in css
-    js = open("dashboard/static/living-focus.js").read()
+    js = open("dashboard/static/living-focus.js", encoding="utf-8").read()
     assert "lv-orb-status" in js
     assert "5 * 60 * 1000" in js
