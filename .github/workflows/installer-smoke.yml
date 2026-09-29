@@ -47,12 +47,36 @@ jobs:
       - name: Silent-install the product
         shell: pwsh
         run: |
+          # NOTE: do NOT use `& $exe ...` + $LASTEXITCODE here. On 2026-09-29
+          # the call operator returned while the installer was still
+          # starting (empty $LASTEXITCODE, and $null -ne 0 is $true), so the
+          # step failed even though the installer was copying files fine.
+          # Start-Process -Wait -PassThru is the reliable pattern.
+          $ErrorActionPreference = 'Stop'
           $exe = Get-ChildItem installer\FocusCore-Setup-*.exe |
                  Select-Object -First 1
-          & $exe.FullName /VERYSILENT /SUPPRESSMSGBOXES /NORESTART `
-            /LOG="$env:RUNNER_TEMP\install.log"
-          if ($LASTEXITCODE -ne 0) {
-            throw "Installer exited with code $LASTEXITCODE"
+          if (-not $exe) { throw "No installer exe found" }
+          $log = "$env:RUNNER_TEMP\install.log"
+          $proc = Start-Process -FilePath $exe.FullName `
+                    -ArgumentList "/VERYSILENT", "/SUPPRESSMSGBOXES", `
+                      "/NORESTART", "/LOG=$log" `
+                    -Wait -PassThru
+          if ($proc.ExitCode -ne 0) {
+            throw "Installer exited with code $($proc.ExitCode)"
+          }
+          # Belt and braces: make sure the installer really finished writing
+          # files (shortcut present, no setup process left), not just that
+          # its bootstrap process exited.
+          $lnk = "$env:USERPROFILE\Desktop\Focus Core.lnk"
+          $deadline = (Get-Date).AddSeconds(300)
+          while ((Get-Date) -lt $deadline) {
+            $stillRunning = Get-Process -ErrorAction SilentlyContinue |
+              Where-Object { $_.ProcessName -like "FocusCore-Setup*" }
+            if ((-not $stillRunning) -and (Test-Path $lnk)) { break }
+            Start-Sleep -Seconds 5
+          }
+          if (-not (Test-Path $lnk)) {
+            throw "Installer exited 0 but the desktop shortcut never appeared"
           }
           Write-Host "Installed: $($exe.Name)"
 
