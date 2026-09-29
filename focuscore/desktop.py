@@ -17,7 +17,9 @@ Threading model (pywebview rules):
 - The Flask server stays a subprocess owned by the tray, exactly as before.
 """
 
+import tempfile
 import threading
+from pathlib import Path
 
 APP_TITLE = "Focus Core"
 WINDOW_WIDTH = 1200
@@ -96,3 +98,65 @@ def make_closing_handler(window, is_quitting, hide=None):
         return False
 
     return _on_closing
+
+
+def find_app_icon(search_dirs):
+    """Locate the .ico file for the native window; None when absent.
+
+    Installed copies ship icon.ico next to the app folder. Dev
+    checkouts only have dashboard/static/icon.png, which Pillow
+    converts on the fly into a temp .ico (best effort).
+    """
+    for d in search_dirs:
+        ico = Path(d) / "icon.ico"
+        if ico.is_file():
+            return str(ico)
+    try:
+        from PIL import Image
+        for d in search_dirs:
+            png = Path(d) / "dashboard" / "static" / "icon.png"
+            if png.is_file():
+                tmp = Path(tempfile.gettempdir()) / "focuscore-icon.ico"
+                with Image.open(png) as im:
+                    im.save(tmp, sizes=[(16, 16), (32, 32), (48, 48)])
+                return str(tmp)
+    except Exception:  # noqa: BLE001 -- icon is cosmetic, never fatal
+        pass
+    return None
+
+
+def set_window_icon(window_title, icon_path):
+    """Apply the Focus Core icon to the native window (Windows only).
+
+    pywebview does not expose window-icon setting on its Windows
+    backend, so this goes straight to the OS: find our top-level
+    window by title, load the .ico, send WM_SETICON (small + big).
+    Without it the title bar, taskbar and Alt+Tab show the Python
+    interpreter's icon -- the "feels like a Python file" problem.
+    Returns True when the icon was applied.
+    """
+    import os
+    if os.name != "nt" or not icon_path:
+        return False
+    if not os.path.isfile(icon_path):
+        return False
+    try:
+        import ctypes
+        user32 = ctypes.windll.user32
+        hwnd = user32.FindWindowW(None, window_title)
+        if not hwnd:
+            return False
+        LR_LOADFROMFILE = 0x10
+        IMAGE_ICON = 1
+        WM_SETICON = 0x80
+        ICON_SMALL, ICON_BIG = 0, 1
+        applied = False
+        for size, which in ((16, ICON_SMALL), (32, ICON_BIG)):
+            hicon = user32.LoadImageW(None, icon_path, IMAGE_ICON,
+                                     size, size, LR_LOADFROMFILE)
+            if hicon:
+                user32.SendMessageW(hwnd, WM_SETICON, which, hicon)
+                applied = True
+        return applied
+    except Exception:  # noqa: BLE001 -- cosmetic, never fatal
+        return False

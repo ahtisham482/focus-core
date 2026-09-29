@@ -308,6 +308,20 @@ class TrayApp:
         desktop.hide_window(self.window)
         return False
 
+    def _on_window_loaded(self):
+        """pywebview loaded event: stamp the Focus Core icon on the window.
+
+        The native window exists by now, so the OS call can find it.
+        Cosmetic only; failures are swallowed.
+        """
+        try:
+            from pathlib import Path
+            from . import desktop, launcher
+            icon = desktop.find_app_icon([Path(launcher.PROJECT_ROOT)])
+            desktop.set_window_icon(desktop.APP_TITLE, icon)
+        except Exception:  # noqa: BLE001 -- cosmetic, never fatal
+            pass
+
     def on_quit(self, icon=None, item=None):
         self._quitting = True
         window, self.window = self.window, None
@@ -438,6 +452,7 @@ class TrayApp:
             return
         # Native window: tray runs detached, GUI loop owns the main thread.
         self.window.events.closing += self._on_window_closing
+        self.window.events.loaded += self._on_window_loaded
         self.icon.run_detached()
         try:
             desktop.start_loop()  # blocks until the window is destroyed

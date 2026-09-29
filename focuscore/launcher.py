@@ -31,6 +31,31 @@ HOST = "127.0.0.1"
 PORT = 5000
 WAIT_TIMEOUT = 20  # seconds to wait for the server to answer
 APP_URL = "http://%s:%d/" % (HOST, PORT)
+# Windows AppUserModelID: the OS-level identity of the app, in the
+# conventional Publisher.Product form. Without an explicit ID, Windows
+# groups our window under the Python interpreter (pythonw.exe): the
+# taskbar, Alt+Tab and title bar show Python's icon and name, and the
+# app feels like "a Python file" instead of installed software.
+APP_ID = "FocusCore.FocusCore"
+
+
+def set_windows_app_identity(app_id=APP_ID):
+    """Tell Windows this process is Focus Core, not pythonw.
+
+    Sets the process's explicit AppUserModelID so the taskbar groups
+    the app under its own identity with its own name. Cosmetic only:
+    never raises, returns True when the identity was applied (Windows
+    only; a no-op everywhere else).
+    """
+    if sys.platform != "win32":
+        return False
+    try:
+        import ctypes
+        ctypes.windll.shell32.SetCurrentProcessExplicitAppUserModelID(
+            app_id)
+        return True
+    except Exception:  # noqa: BLE001 -- cosmetic, never fatal
+        return False
 
 
 def port_open(host=HOST, port=PORT, timeout=1.0):
@@ -147,6 +172,10 @@ def _background_update_check():
 
 
 def main():
+    # OS identity first: before any window exists, tell Windows this
+    # process is Focus Core (not the Python interpreter), so the
+    # taskbar/Alt+Tab show the app's own name and icon.
+    set_windows_app_identity()
     # Make sure the data folder exists before anything writes to it
     # (matters for installed copies, where it lives outside the app).
     from . import paths
