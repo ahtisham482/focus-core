@@ -103,6 +103,94 @@ jobs:
             Write-Host "$p OK ($($r.RawContentLength) bytes)"
           }
 
+      - name: Restore a dev backup into the installed copy
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          # 1. Build a fake "old laptop": dev database with a marker row,
+          #    backed up the same way the app backs up (checksum sidecar
+          #    included), then dropped into the installed backup folder.
+          $mk = @'
+          import os, shutil, sqlite3, sys
+          sys.path.insert(0, os.environ["GITHUB_WORKSPACE"])
+          from focuscore import backup as backup_mod
+          from focuscore import store
+
+          dev_db = os.path.join(os.environ["RUNNER_TEMP"], "dev-focuscore.db")
+          if os.path.exists(dev_db):
+              os.remove(dev_db)
+          store.init_db(dev_db)
+          conn = sqlite3.connect(dev_db)
+          conn.execute(
+              "INSERT INTO goals (name, direction, target_type, created_at)"
+              " VALUES ('CI-RESTORE-MARKER', 'at_least', 'category',"
+              " '2026-09-29')")
+          conn.commit()
+          conn.close()
+
+          staging = os.path.join(os.environ["RUNNER_TEMP"], "dev-backups")
+          made = backup_mod.create_backup(db_path=dev_db, dest_dir=staging)
+
+          target_dir = os.path.join(os.environ["LOCALAPPDATA"],
+                                    "Focus Core", "backups")
+          os.makedirs(target_dir, exist_ok=True)
+          shutil.copy2(str(made), os.path.join(target_dir, made.name))
+          shutil.copy2(str(made) + ".sha256",
+                       os.path.join(target_dir, made.name + ".sha256"))
+          print("BACKUP_NAME=" + made.name)
+          '@
+          $mk | Out-File -Encoding utf8 "$env:RUNNER_TEMP\mkdevbackup.py"
+          $out = python "$env:RUNNER_TEMP\mkdevbackup.py"
+          if ($LASTEXITCODE -ne 0) { throw "mkdevbackup.py failed" }
+          $out | ForEach-Object { Write-Host $_ }
+          $backupName = ($out | Where-Object { $_ -match '^BACKUP_NAME=' }) `
+            -replace '^BACKUP_NAME=', ''
+          if (-not $backupName) { throw "dev backup was not created" }
+
+          # 2. Restore it through the installed app's real HTTP endpoint.
+          $r = Invoke-WebRequest `
+                 -Uri "http://127.0.0.1:5000/backup/restore" `
+                 -Method POST -Body @{ name = $backupName } `
+                 -UseBasicParsing -TimeoutSec 60
+          if ($r.StatusCode -ne 200) {
+            throw "restore -> $($r.StatusCode)"
+          }
+          if ($r.Content -notmatch "Backup restored") {
+            throw "restore page did not confirm success"
+          }
+          Write-Host "Restore endpoint OK ($backupName)"
+
+          # 3. The marker row from the dev backup must now be in the
+          #    installed database file, and a pre-restore safety copy
+          #    must exist next to it.
+          $verify = @'
+          import glob, os, sqlite3
+          data_dir = os.path.join(os.environ["LOCALAPPDATA"], "Focus Core")
+          db = os.path.join(data_dir, "focuscore.db")
+          conn = sqlite3.connect(db)
+          row = conn.execute(
+              "SELECT name FROM goals WHERE name='CI-RESTORE-MARKER'"
+          ).fetchone()
+          conn.close()
+          if not row:
+              raise SystemExit("marker goal missing after restore")
+          safety = glob.glob(
+              os.path.join(data_dir, "focuscore.db.pre-restore-*"))
+          if not safety:
+              raise SystemExit("no pre-restore safety copy found")
+          print("marker present in installed db; safety copy: "
+                + os.path.basename(safety[0]))
+          '@
+          $verify | Out-File -Encoding utf8 "$env:RUNNER_TEMP\verifyrestore.py"
+          python "$env:RUNNER_TEMP\verifyrestore.py"
+          if ($LASTEXITCODE -ne 0) { throw "verifyrestore.py failed" }
+
+          # 4. The server must still be answering after the atomic swap.
+          $r = Invoke-WebRequest -Uri "http://127.0.0.1:5000/" `
+                 -UseBasicParsing -TimeoutSec 10
+          if ($r.StatusCode -ne 200) { throw "/ -> $($r.StatusCode)" }
+          Write-Host "Server alive after restore"
+
       - name: Upload install log on failure
         if: failure()
         uses: actions/upload-artifact@v4
