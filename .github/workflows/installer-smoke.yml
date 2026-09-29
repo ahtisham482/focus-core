@@ -170,6 +170,26 @@ jobs:
             Write-Host "$p OK ($($r.RawContentLength) bytes)"
           }
 
+      - name: Human-like UI test (Playwright)
+        # Drives the INSTALLED app in a real Chromium the way a person
+        # would: navigates pages, fills the goal form, accepts the delete
+        # confirm dialog, asserts visible results, screenshots every step,
+        # and fails on any JS console/page error. See smoke/e2e_windows.py.
+        shell: pwsh
+        run: |
+          pip install playwright
+          playwright install chromium
+          python smoke/e2e_windows.py --base-url "http://127.0.0.1:5000" `
+            --shots-dir "$env:RUNNER_TEMP\e2e-shots"
+
+      - name: Upload UI test screenshots
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: smoke-e2e-shots
+          path: ${{ runner.temp }}/e2e-shots
+          if-no-files-found: warn
+
       - name: Screenshot the running app (visual check)
         # I review this screenshot myself after the run: it shows the real
         # app window AND the taskbar, so the Windows app-identity work

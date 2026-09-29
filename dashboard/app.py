@@ -181,7 +181,7 @@ def layout(title, body, day=None, refresh=300, active="home",
     )
 
 
-def _goal_progress_html(ev):
+def _goal_progress_html(ev, wrap=True):
     """One goal row: name, progress bar, current/target, status badge."""
     width = min(ev["pct"], 100.0)
     color = {"on_track": "#2e7d32", "achieved": "#2e7d32",
@@ -195,16 +195,18 @@ def _goal_progress_html(ev):
             escape(ev["target_name"] or ""),
             ">=" if ev["direction"] == "more_than" else "<=", ev["target"])
         current_text = "%.0f min" % ev["current"]
-    return (
-        "<div class='goal-row'><span class='gname'>%s</span> "
+    inner = (
+        "<span class='gname'>%s</span> "
         "<span class='badge %s'>%s</span><br>"
         "<span class='gmeta'>%s of %s</span>"
         "<div class='progress'><div style='width:%.1f%%;background:%s'></div></div>"
-        "</div>"
         % (escape(ev["name"]), ev["status"],
            STATUS_LABEL.get(ev["status"], ev["status"]),
            current_text, target_text, width, color)
     )
+    if wrap:
+        return "<div class='goal-row'>%s</div>" % inner
+    return inner
 
 
 def pinned_goals_html(day):

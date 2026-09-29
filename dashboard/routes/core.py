@@ -216,7 +216,8 @@ def goals_page():
         ev = goals_mod.evaluate_goal(goal, summary)
         rows.append(
             "<div class='goal-row'>%s<div class='gmeta'>%s</div></div>"
-            % (_goal_progress_html(ev), _goal_manage_buttons(goal)))
+            % (_goal_progress_html(ev, wrap=False),
+               _goal_manage_buttons(goal)))
     goals_html = "".join(rows) or \
         "<p class='note'>No goals yet -- add your first one below.</p>"
 
