@@ -146,6 +146,10 @@ def test_home_page_cold_start_and_active_hero(tmp_path, monkeypatch):
     store.init_db(db)
     # Prevent live ActivityWatch collection during cold-start test
     monkeypatch.setattr(dash_app, "run_day", lambda *a, **kw: None)
+    # Onboarded: / redirects to /welcome without the flag file.
+    flag = tmp_path / ".onboarded"
+    flag.write_text("2026-09-29")
+    monkeypatch.setattr(dash_app, "ONBOARDED_FLAG", flag)
 
     dash_app.app.config["TESTING"] = True
     client = dash_app.app.test_client()
@@ -154,10 +158,13 @@ def test_home_page_cold_start_and_active_hero(tmp_path, monkeypatch):
     res = client.get("/")
     assert res.status_code == 200
     html = res.get_data(as_text=True)
-    assert "Day one &mdash; your focus story starts now." in html
+    # Living Instrument cold-start hero: masked headline lines + subcopy.
+    assert "Day one." in html
+    assert "Your focus story" in html
+    assert "starts now." in html
     assert "Focus Core is learning your rhythm" in html
-    assert "Start a focus session" in html
-    assert "Streak: <b>Day 1</b>" in html
+    assert "Begin focus session" in html
+    assert ">Day 1</span>" in html
 
 
 
@@ -243,8 +250,11 @@ def test_qwen_rv4_report_route_isolation_and_csp(tmp_path, monkeypatch):
     assert "img-src data:" in csp
 
 
-def test_qwen_rv5_dashboard_csp_allows_self():
+def test_qwen_rv5_dashboard_csp_allows_self(monkeypatch, tmp_path):
     """RV-5: Verify dashboard routes permit 'self' for nav.js and local Geist fonts."""
+    flag = tmp_path / ".onboarded"
+    flag.write_text("2026-09-29")
+    monkeypatch.setattr(dash_app, "ONBOARDED_FLAG", flag)
     client = dash_app.app.test_client()
     res = client.get("/")
     assert res.status_code == 200

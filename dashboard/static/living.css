@@ -1,0 +1,1284 @@
+/* ============================================================================
+   Focus Core — The Living Instrument
+   Scoped to body.living (Home + Focus only). Zero impact on other pages.
+
+   NOTE on the selector shape: layout() renders body_class as a boolean
+   attribute (<body living>), not a class — this matches the pre-existing
+   pattern in this codebase (zen-mode/break-mode work the same way).
+   Hence attribute selectors here, not class selectors.
+
+   Slice 0: design tokens + page foundation.
+   Components (nav, pulse card, orb, rings, tab bar) arrive in later slices.
+   Spec: workspace/focus-core-redesign-mockups/alive/design-spec.md
+   ============================================================================ */
+
+body.living {
+  /* ---- color tokens ---- */
+  --bg: #0d0c0a;            /* warm near-black, never pure black */
+  --bg0: #0d0c0a;           /* mobile tab bar base (must exist: .lv-tabs uses it) */
+  --bg2: #141210;           /* raised surfaces */
+  --glass: rgba(255,255,255,.045);
+  --line: rgba(255,255,255,.09);
+  --ink: #f6f2e9;
+  --ink2: #aaa294;
+  --ink3: #8a8172;          /* faintest allowed — 4.9:1 on bg, never darker */
+  --ember: #f2a83d;         /* THE one accent */
+  --ember-deep: #cf8f26;      /* gradient foot */
+  --ember-ink: #1c1305;     /* text on ember fills */
+  --ember-soft: rgba(242,168,61,.13);
+  --warn: #f5b544;          /* break / caution amber */
+
+  /* ---- motion tokens ---- */
+  --spring: cubic-bezier(.16,1,.3,1);
+  --out: cubic-bezier(.23,1,.32,1);
+
+  /* ---- page foundation ---- */
+  background: var(--bg);
+  color: var(--ink);
+  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI",
+               "Helvetica Neue", Arial, sans-serif;
+  -webkit-font-smoothing: antialiased;
+  text-rendering: optimizeLegibility;
+}
+
+/* tabular numerals everywhere numbers appear */
+body.living .tnum,
+body.living [data-tnum] {
+  font-variant-numeric: tabular-nums;
+}
+
+/* reduced motion: first-class, not an afterthought */
+@media (prefers-reduced-motion: reduce) {
+  body.living *,
+  body.living *::before,
+  body.living *::after {
+    animation-duration: .01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: .01ms !important;
+  }
+}
+
+/* film grain + ambient drift (design-spec §2): the page breathes under the
+   content. Grain sits above everything (pointer-events: none); drift washes
+   sit at z-index 0 under .lv-wrap. Reduced-motion kills the drift via the
+   global rule above. */
+body.living::before {
+  content: "";
+  position: fixed; inset: 0; z-index: 80; pointer-events: none; opacity: .05;
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='160' height='160'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.9' numOctaves='2'/%3E%3C/filter%3E%3Crect width='160' height='160' filter='url(%23n)' opacity='0.7'/%3E%3C/svg%3E");
+}
+body.living::after {
+  content: "";
+  position: fixed; inset: -20%; z-index: 0; pointer-events: none;
+  background:
+    radial-gradient(46% 36% at 50% 30%, rgba(242,168,61,.07), transparent 70%),
+    radial-gradient(34% 28% at 82% 78%, rgba(150,100,40,.05), transparent 70%);
+  animation: lv-drift 18s ease-in-out infinite alternate;
+}
+@keyframes lv-drift {
+  from { transform: translate3d(-2%,-1%,0) scale(1); }
+  to   { transform: translate3d(2%,2%,0) scale(1.05); }
+}
+
+/* screen-reader-only live region (design-spec §8) */
+body.living .lv-visually-hidden {
+  position: absolute; width: 1px; height: 1px; margin: -1px; padding: 0;
+  overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; border: 0;
+}
+
+/* ============================================================================
+   Slice 1: Home hero
+   ============================================================================ */
+
+/* hide the legacy chrome on living pages — the living nav replaces it */
+body.living nav.topnav,
+body.living .theme-toggle,
+body.living .page-hero,
+body.living footer.page-footer {
+  display: none;
+}
+
+/* ---- living nav: sticky frosted glass ---- */
+.lv-nav {
+  position: sticky;
+  top: 0;
+  z-index: 50;
+  background: rgba(13, 12, 10, .62);
+  -webkit-backdrop-filter: blur(22px);
+  backdrop-filter: blur(22px);
+  border-bottom: 1px solid var(--line);
+}
+.lv-nav-inner {
+  max-width: 1180px;
+  margin: 0 auto;
+  padding: 0 40px;
+  height: 64px;
+  display: flex;
+  align-items: center;
+  gap: 28px;
+}
+.lv-brand {
+  display: inline-flex;
+  align-items: center;
+  gap: 10px;
+  color: var(--ink);
+  text-decoration: none;
+  font-weight: 650;
+  letter-spacing: -.01em;
+  white-space: nowrap;
+}
+.lv-brand svg { color: var(--ember); display: block; }
+.lv-links { display: flex; gap: 2px; }
+.lv-links a {
+  color: var(--ink2);
+  text-decoration: none;
+  font-size: 14px;
+  padding: 8px 14px;
+  border-radius: 999px;
+  transition: color .25s var(--out), background .25s var(--out);
+}
+.lv-links a:hover { color: var(--ink); background: var(--glass); }
+.lv-links a[aria-current="page"] { color: var(--ink); background: var(--glass); }
+
+/* ---- shield pill ---- */
+.lv-shield {
+  margin-left: auto;
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 15px;
+  border-radius: 999px;
+  font-size: 13px;
+  color: var(--ink2);
+  border: 1px solid var(--line);
+  text-decoration: none;
+  white-space: nowrap;
+  transition: border-color .3s var(--out), background .3s var(--out),
+              color .3s var(--out);
+}
+.lv-shield:hover { color: var(--ink); border-color: rgba(255,255,255,.22); }
+.lv-shield .dot {
+  width: 7px; height: 7px; border-radius: 50%;
+  background: var(--ink3);
+}
+.lv-shield.armed {
+  color: var(--ink);
+  border-color: rgba(242,168,61,.45);
+  background: var(--ember-soft);
+}
+.lv-shield.armed .dot {
+  background: var(--ember);
+  animation: lv-pulse 2.2s ease-in-out infinite;
+}
+@keyframes lv-pulse {
+  0%, 100% { opacity: 1; transform: scale(1); }
+  50%      { opacity: .55; transform: scale(.8); }
+}
+
+/* ---- hero ---- */
+.lv-wrap {
+  max-width: 1180px; margin: 0 auto; padding: 0 40px;
+  position: relative; z-index: 1; /* above the ambient drift layer */
+}
+.lv-hero {
+  display: grid;
+  grid-template-columns: 1.05fr .95fr;
+  gap: 48px;
+  align-items: center;
+  padding: 72px 0 56px;
+}
+.lv-dateline {
+  text-transform: uppercase;
+  letter-spacing: .14em;
+  font-size: 12px;
+  color: var(--ink3);
+  margin: 0 0 20px;
+}
+.lv-h1 {
+  font-size: clamp(44px, 5.2vw, 76px);
+  line-height: 1.02;
+  letter-spacing: -.03em;
+  font-weight: 650;
+  margin: 0 0 20px;
+}
+.lv-h1 .mask { display: block; overflow: hidden; padding-bottom: .08em; margin-bottom: -.08em; }
+.lv-h1 .line {
+  display: block;
+  transform: translateY(110%);
+  animation: lv-unmask .8s var(--spring) forwards;
+  animation-delay: var(--d, 0ms);
+}
+@keyframes lv-unmask { to { transform: none; } }
+.lv-ember-i { color: var(--ember); font-style: italic; }
+.lv-sub {
+  color: var(--ink2);
+  font-size: 17px;
+  line-height: 1.55;
+  max-width: 44ch;
+  margin: 0 0 32px;
+}
+.lv-ctas { display: flex; gap: 14px; flex-wrap: wrap; }
+
+/* ---- buttons ---- */
+.lv-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  background: var(--ember);
+  color: var(--ember-ink);
+  border-radius: 999px;
+  padding: 16px 32px;
+  font-weight: 650;
+  font-size: 16px;
+  text-decoration: none;
+  border: none;
+  cursor: pointer;
+  box-shadow: 0 8px 32px rgba(242,168,61,.22);
+  transition: box-shadow .3s var(--out), transform .18s var(--out);
+  will-change: transform;
+}
+.lv-btn:hover { box-shadow: 0 10px 40px rgba(242,168,61,.32); }
+.lv-btn:active { transform: scale(.965); }
+.lv-ghost {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: 999px;
+  padding: 16px 32px;
+  font-weight: 600;
+  font-size: 16px;
+  color: var(--ink);
+  text-decoration: none;
+  border: 1px solid var(--line);
+  transition: border-color .3s var(--out), background .3s var(--out),
+              transform .18s var(--out);
+  will-change: transform;
+}
+.lv-ghost:hover { border-color: rgba(255,255,255,.22); background: var(--glass); }
+.lv-ghost:active { transform: scale(.965); }
+
+/* ---- pulse card: frosted instrument panel ---- */
+.lv-pulse {
+  position: relative;
+  overflow: hidden;
+  background: var(--glass);
+  border: 1px solid var(--line);
+  border-radius: 28px;
+  padding: 40px 36px;
+  -webkit-backdrop-filter: blur(22px);
+  backdrop-filter: blur(22px);
+}
+.lv-pulse::before { /* cursor spotlight */
+  content: "";
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+  background: radial-gradient(
+    320px circle at var(--mx, 70%) var(--my, 20%),
+    rgba(242,168,61,.09), transparent 65%);
+  opacity: 0;
+  transition: opacity .4s var(--out);
+}
+.lv-pulse:hover::before { opacity: 1; }
+.lv-pulse-label {
+  display: flex;
+  align-items: center;
+  gap: 9px;
+  font-size: 13px;
+  text-transform: uppercase;
+  letter-spacing: .12em;
+  color: var(--ink2);
+  margin: 0 0 14px;
+}
+.lv-live-dot {
+  width: 7px; height: 7px; border-radius: 50%;
+  background: var(--ember);
+  animation: lv-pulse 2.2s ease-in-out infinite;
+}
+.lv-pulse-num {
+  font-size: clamp(72px, 7vw, 108px);
+  font-weight: 650;
+  letter-spacing: -.04em;
+  line-height: 1;
+  font-variant-numeric: tabular-nums;
+  margin: 0 0 14px;
+}
+.lv-pulse-sub { color: var(--ink2); font-size: 15px; margin: 0; }
+
+/* ---- footer strip ---- */
+.lv-foot {
+  border-top: 1px solid var(--line);
+  margin-top: 40px;
+  padding: 28px 0 48px;
+  display: flex;
+  justify-content: space-between;
+  color: var(--ink3);
+  font-size: 13px;
+}
+
+/* ---- entrance stagger (pure CSS: no-JS safe, no flash) ---- */
+.st {
+  opacity: 0;
+  animation: lv-rise .7s var(--spring) both;
+  animation-delay: var(--d, 0ms);
+}
+@keyframes lv-rise {
+  from { opacity: 0; transform: translateY(14px); }
+  to   { opacity: 1; transform: none; }
+}
+
+/* ---- small screens: single column (slice 5 refines mobile natively) ---- */
+@media (max-width: 820px) {
+  .lv-nav-inner { padding: 0 20px; gap: 16px; }
+  .lv-links { display: none; }
+  .lv-wrap { padding: 0 20px; }
+  .lv-hero { grid-template-columns: 1fr; gap: 36px; padding: 48px 0 40px; }
+}
+
+/* ============================================================================
+   Slice 2: rings + targets
+   ============================================================================ */
+
+/* ---- rings inside the pulse card ---- */
+.lv-rings {
+  display: flex;
+  gap: 28px;
+  margin-top: 34px;
+  flex-wrap: wrap;
+}
+.lv-ring { width: 108px; text-align: center; }
+.lv-ring svg {
+  width: 96px;
+  height: 96px;
+  transform: rotate(-90deg);
+  display: block;
+  margin: 0 auto;
+}
+.lv-ring .track {
+  fill: none;
+  stroke: var(--line);
+  stroke-width: 10;
+}
+.lv-ring .fill {
+  fill: none;
+  stroke: var(--ember);
+  stroke-width: 10;
+  stroke-linecap: round;
+  /* closes from empty via `from` keyframe; the inline dashoffset is the truth */
+  animation: lv-ring-close 1.2s var(--spring) both;
+  animation-delay: var(--d, 560ms);
+}
+@keyframes lv-ring-close {
+  from { stroke-dashoffset: 326.7; }
+}
+.lv-ring-name {
+  font-size: 13px;
+  color: var(--ink2);
+  margin: 10px 0 2px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.lv-ring-val {
+  font-size: 12px;
+  color: var(--ink3);
+  margin: 0;
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+
+/* ---- targets section ---- */
+.lv-targets { padding: 4px 0 12px; }
+.lv-sec-title {
+  font-size: 20px;
+  font-weight: 650;
+  letter-spacing: -.01em;
+  margin: 0 0 20px;
+}
+.lv-target-grid {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 16px;
+}
+.lv-target-card {
+  background: var(--glass);
+  border: 1px solid var(--line);
+  border-radius: 20px;
+  padding: 24px;
+  -webkit-backdrop-filter: blur(22px);
+  backdrop-filter: blur(22px);
+  transition: transform .35s var(--spring), border-color .3s var(--out);
+}
+.lv-target-card:hover {
+  transform: translateY(-3px);
+  border-color: rgba(255,255,255,.18);
+}
+.lv-target-label {
+  color: var(--ink2);
+  font-size: 14px;
+  margin: 0 0 8px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.lv-target-val {
+  font-size: 34px;
+  font-weight: 650;
+  letter-spacing: -.02em;
+  margin: 0 0 4px;
+  font-variant-numeric: tabular-nums;
+}
+.lv-target-val span {
+  font-size: 15px;
+  color: var(--ink3);
+  font-weight: 500;
+  letter-spacing: 0;
+}
+.lv-target-note { font-size: 13px; color: var(--ink2); margin: 0 0 16px; }
+.lv-target-note.ok { color: var(--ember); }
+.lv-target-empty { color: var(--ink2); font-size: 15px; margin: 0; }
+.lv-target-empty a { color: var(--ember); }
+
+/* spring bar: fills via scaleX */
+.lv-bar {
+  height: 8px;
+  border-radius: 99px;
+  background: var(--line);
+  overflow: hidden;
+}
+.lv-bar > div {
+  height: 100%;
+  width: var(--w, 0%);
+  border-radius: 99px;
+  background: var(--ember);
+  transform-origin: left center;
+  animation: lv-bar-x 1s var(--spring) both;
+  animation-delay: var(--d, 800ms);
+}
+@keyframes lv-bar-x {
+  from { transform: scaleX(0); }
+}
+
+@media (max-width: 820px) {
+  .lv-target-grid { grid-template-columns: 1fr; }
+  .lv-rings { gap: 20px; }
+}
+
+/* ============================================================================
+   Slice 5: native mobile Home (390x844)
+   Bottom tab bar, compact top bar (brand + shield), full-width CTAs,
+   44px+ touch targets, safe-area support.
+   ============================================================================ */
+.lv-tabs { display: none; }
+
+@media (max-width: 820px) {
+  /* room for the fixed tab bar */
+  body.living { padding-bottom: 88px; }
+
+  /* top bar: safe-area + compact brand/shield (links already hidden) */
+  .lv-nav { padding-top: env(safe-area-inset-top); }
+  .lv-nav-inner { height: 60px; }
+  .lv-brand span { font-size: 16px; }
+  .lv-shield { font-size: 12px; padding: 8px 13px 8px 11px; }
+
+  /* hero: native single-column order, tighter display type */
+  .lv-h1 { font-size: 42px; }
+  .lv-sub { font-size: 16px; }
+  .lv-ctas { flex-direction: column; align-items: stretch; }
+  .lv-btn, .lv-ghost {
+    width: 100%;
+    min-height: 52px;
+    flex: none;
+  }
+
+  /* pulse card */
+  .lv-pulse { padding: 28px 24px; border-radius: 24px; }
+  .lv-pulse-num { font-size: 64px; }
+  .lv-rings { gap: 16px; }
+  .lv-ring { width: 96px; }
+  .lv-ring svg { width: 84px; height: 84px; }
+
+  /* sections */
+  .lv-sec-title { font-size: 18px; }
+  .lv-target-card { padding: 20px; }
+  .lv-target-val { font-size: 30px; }
+  .lv-cal-form { flex-direction: column; }
+  .lv-cal-form button { width: 100%; }
+
+  /* fixed bottom tab bar */
+  .lv-tabs {
+    display: flex;
+    position: fixed;
+    left: 0; right: 0; bottom: 0;
+    z-index: 60;
+    background: color-mix(in srgb, var(--bg0) 80%, transparent);
+    -webkit-backdrop-filter: blur(24px) saturate(1.4);
+    backdrop-filter: blur(24px) saturate(1.4);
+    border-top: 1px solid var(--line);
+    padding: 6px 6px calc(6px + env(safe-area-inset-bottom));
+    margin: 0;
+  }
+  .lv-tabs a {
+    flex: 1;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    gap: 3px;
+    min-height: 52px;
+    border-radius: 14px;
+    color: var(--ink3);
+    font-size: 11px;
+    font-weight: 600;
+    letter-spacing: .02em;
+    text-decoration: none;
+  }
+  .lv-tabs a.on { color: var(--ember); }
+  .lv-tabs a:active { background: var(--glass); }
+}
+
+/* ============================================================================
+   Slice 3: calendar-backed rhythm
+   ============================================================================ */
+.lv-rhythm { padding: 4px 0 12px; }
+.lv-cal {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: grid;
+  gap: 2px;
+  max-width: 640px;
+}
+.lv-cal li {
+  display: flex;
+  gap: 18px;
+  align-items: baseline;
+  padding: 13px 4px;
+  border-bottom: 1px solid var(--line);
+}
+.lv-cal li:last-child { border-bottom: 0; }
+.lv-cal-time {
+  font-variant-numeric: tabular-nums;
+  color: var(--ember);
+  font-weight: 600;
+  font-size: 15px;
+  min-width: 82px;
+  flex: none;
+}
+.lv-cal-name { color: var(--ink); font-size: 16px; }
+.lv-cal-quiet { color: var(--ink3); font-size: 15px; margin: 0 0 16px; }
+.lv-cal-form { display: flex; gap: 10px; margin: 0 0 10px; max-width: 640px; }
+.lv-cal-form input {
+  flex: 1;
+  min-width: 0;
+  background: var(--glass);
+  border: 1px solid var(--line);
+  border-radius: 12px;
+  padding: 12px 14px;
+  color: var(--ink);
+  font-size: 14px;
+  font-family: inherit;
+}
+.lv-cal-form input::placeholder { color: var(--ink3); }
+.lv-cal-form button {
+  background: var(--ember);
+  color: #1a1206;
+  border: 0;
+  border-radius: 12px;
+  padding: 0 22px;
+  min-height: 44px;
+  font-weight: 650;
+  font-size: 14px;
+  font-family: inherit;
+  cursor: pointer;
+  flex: none;
+}
+.lv-cal-hint { color: var(--ink3); font-size: 13px; margin: 0; max-width: 640px; }
+.lv-cal-ev.lv-cal-done { opacity: .55; }
+.lv-cal-ev.lv-cal-now .lv-cal-name { font-weight: 650; }
+.lv-cal-ev.lv-cal-now .lv-cal-time { color: var(--ember-deep); }
+.lv-cal-stale {
+  color: var(--ink3); font-size: 13px; margin: 0 0 10px; max-width: 640px;
+  border-left: 3px solid var(--ember); padding-left: 10px;
+}
+.lv-cal-error {
+  color: #b3261e; font-size: 14px; margin: 0 0 10px; max-width: 640px;
+}
+.lv-linkbtn {
+  background: none;
+  border: 0;
+  color: var(--ink3);
+  font-size: 13px;
+  font-family: inherit;
+  cursor: pointer;
+  padding: 10px 0 0;
+  text-decoration: underline;
+  text-underline-offset: 3px;
+}
+.lv-linkbtn:hover { color: var(--ink2); }
+
+/* ============================================================================
+   Slice 4: light theme — warm paper, same ember accent
+   The ember is deepened one step for contrast on paper; everything else
+   follows the tokens. Covers explicit data-theme="light" and system theme
+   when the OS prefers light.
+   ============================================================================ */
+html[data-theme="light"] body.living {
+  --bg: #faf6ee;
+  --bg2: #f2ebdb;
+  --bg0: #faf6ee;
+  --bg1: #f2ebdb;
+  --ink: #211a12;
+  --ink2: rgba(33,26,18,.72);
+  --ink3: rgba(33,26,18,.52);
+  --line: rgba(33,26,18,.14);
+  --glass: rgba(255,255,255,.62);
+  --ember: #bd7c1b;
+  --ember-deep: #9c6110;
+  --warn: #a86e12;
+}
+@media (prefers-color-scheme: light) {
+  html:not([data-theme]) body.living {
+    --bg: #faf6ee;
+    --bg2: #f2ebdb;
+    --bg0: #faf6ee;
+    --bg1: #f2ebdb;
+    --ink: #211a12;
+    --ink2: rgba(33,26,18,.72);
+    --ink3: rgba(33,26,18,.52);
+    --line: rgba(33,26,18,.14);
+    --glass: rgba(255,255,255,.62);
+    --ember: #bd7c1b;
+    --ember-deep: #9c6110;
+    --warn: #a86e12;
+  }
+}
+/* On paper the frosted surfaces need a soft shadow for definition. */
+html[data-theme="light"] body.living .lv-pulse,
+html[data-theme="light"] body.living .lv-target-card {
+  box-shadow: 0 24px 60px -32px rgba(33,26,18,.28),
+              0 0 90px rgba(189,124,27,.08);
+}
+@media (prefers-color-scheme: light) {
+  html:not([data-theme]) body.living .lv-pulse,
+  html:not([data-theme]) body.living .lv-target-card {
+    box-shadow: 0 24px 60px -32px rgba(33,26,18,.28),
+                0 0 90px rgba(189,124,27,.08);
+  }
+}
+html[data-theme="light"] body.living .lv-nav,
+html[data-theme="light"] body.living .lv-foot {
+  border-color: rgba(33,26,18,.12);
+}
+html[data-theme="light"] body.living .lv-nav {
+  /* frosted warm paper — the dark 62% bar is for the dark theme only;
+     dark-on-dark text fails contrast on paper */
+  background: rgba(250,246,238,.62);
+}
+@media (prefers-color-scheme: light) {
+  html:not([data-theme]) body.living .lv-nav,
+  html:not([data-theme]) body.living .lv-foot {
+    border-color: rgba(33,26,18,.12);
+  }
+  html:not([data-theme]) body.living .lv-nav {
+    background: rgba(250,246,238,.62);
+  }
+}
+
+/* ============================================================================
+   Slice 6: Focus ready state — the instrument
+   ============================================================================ */
+.lv-instrument {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  padding: 56px 0 8px;
+  text-align: center;
+}
+
+/* ---- orb ---- */
+.lv-orb {
+  position: relative;
+  width: 340px;
+  height: 340px;
+  margin: 0 auto;
+}
+.lv-halo {
+  position: absolute;
+  inset: -48px;
+  border-radius: 50%;
+  background: radial-gradient(circle, rgba(232,163,61,.17) 0%,
+              rgba(232,163,61,.05) 45%, transparent 68%);
+  animation: lv-breathe 4.6s ease-in-out infinite;
+  pointer-events: none;
+}
+@keyframes lv-breathe {
+  0%, 100% { transform: scale(1); opacity: .85; }
+  50%      { transform: scale(1.07); opacity: 1; }
+}
+.lv-orb-svg {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  transform: rotate(-90deg);
+}
+.lv-orb-track {
+  fill: none;
+  stroke: var(--line);
+  stroke-width: 10;
+}
+.lv-orb-prog {
+  fill: none;
+  stroke: var(--ember);
+  stroke-width: 10;
+  stroke-linecap: round;
+  stroke-dasharray: 942.48;
+  stroke-dashoffset: 942.48; /* idle: empty ring */
+  transition: stroke-dashoffset 1s linear;
+}
+.lv-orb-core {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  pointer-events: none;
+}
+.lv-orb-time {
+  margin: 0;
+  font-size: 84px;
+  font-weight: 650;
+  letter-spacing: -.02em;
+  font-variant-numeric: tabular-nums;
+  color: var(--ink);
+  line-height: 1;
+}
+.lv-orb-state {
+  margin: 10px 0 0;
+  font-size: 12px;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: .3em;
+  text-indent: .3em;
+  color: var(--ink3);
+  transition: color .3s, filter .3s;
+}
+
+/* ---- quiet shield pill under the orb ---- */
+.lv-orb-shield {
+  display: inline-flex;
+  align-items: center;
+  gap: 9px;
+  margin: 26px 0 0;
+  padding: 10px 18px;
+  border: 1px solid var(--line);
+  border-radius: 999px;
+  background: var(--glass);
+  color: var(--ink2);
+  font-size: 13.5px;
+}
+.lv-orb-shield .dot {
+  width: 8px; height: 8px; border-radius: 50%;
+  background: var(--ink3);
+  flex: none;
+}
+
+/* ---- controls ---- */
+.lv-controls {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  width: 100%;
+  max-width: 420px;
+  margin: 34px auto 0;
+}
+.lv-label-row { width: 100%; text-align: left; }
+.lv-label-row label {
+  display: block;
+  font-size: 12px;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: .14em;
+  color: var(--ink3);
+  margin: 0 0 10px 2px;
+}
+.lv-label-row input {
+  width: 100%;
+  box-sizing: border-box;
+  background: var(--glass);
+  border: 1px solid var(--line);
+  border-radius: 14px;
+  padding: 14px 16px;
+  color: var(--ink);
+  font-size: 16px;
+  font-family: inherit;
+}
+.lv-label-row input:focus {
+  outline: none;
+  border-color: var(--ember);
+}
+
+/* mode chips with gliding ember pill */
+.lv-chips {
+  position: relative;
+  display: inline-flex;
+  margin-top: 22px;
+  padding: 5px;
+  border: 1px solid var(--line);
+  border-radius: 999px;
+  background: var(--glass);
+}
+.lv-glide {
+  position: absolute;
+  top: 5px; bottom: 5px; left: 0;
+  width: 0;
+  border-radius: 999px;
+  background: color-mix(in srgb, var(--ember) 22%, transparent);
+  border: 1px solid color-mix(in srgb, var(--ember) 45%, transparent);
+  transition: transform .45s cubic-bezier(.3,1.4,.4,1), width .45s cubic-bezier(.3,1.4,.4,1);
+  pointer-events: none;
+}
+.lv-chip {
+  position: relative;
+  z-index: 1;
+  border: 0;
+  background: none;
+  color: var(--ink2);
+  font-family: inherit;
+  font-size: 14.5px;
+  font-weight: 600;
+  padding: 11px 22px;
+  min-height: 44px;
+  border-radius: 999px;
+  cursor: pointer;
+  white-space: nowrap;
+  transition: color .3s;
+}
+.lv-chip.on { color: var(--ember); }
+
+/* stepper */
+.lv-stepper {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  margin-top: 22px;
+  padding: 5px;
+  border: 1px solid var(--line);
+  border-radius: 999px;
+  background: var(--glass);
+}
+.lv-stepper button {
+  width: 44px; height: 44px;
+  border: 0;
+  border-radius: 50%;
+  background: transparent;
+  color: var(--ink);
+  font-size: 20px;
+  font-family: inherit;
+  cursor: pointer;
+  display: flex; align-items: center; justify-content: center;
+  transition: background .2s, transform .15s;
+}
+.lv-stepper button:hover { background: color-mix(in srgb, var(--ember) 14%, transparent); }
+.lv-stepper button:active { transform: scale(.92); }
+.lv-step-val {
+  min-width: 92px;
+  text-align: center;
+  font-size: 15px;
+  color: var(--ink2);
+  font-variant-numeric: tabular-nums;
+}
+.lv-step-val b {
+  color: var(--ink);
+  font-size: 20px;
+  font-weight: 700;
+  display: inline-block;
+  transition: filter .18s, opacity .18s;
+}
+.lv-step-val b.lv-swap { filter: blur(5px); opacity: 0; }
+.lv-step-note {
+  margin: 12px 0 0;
+  font-size: 13.5px;
+  color: var(--ink3);
+}
+.lv-stepper.small { margin-top: 0; }
+.lv-stepper.small button { width: 38px; height: 38px; }
+.lv-stepper.small .lv-step-val { min-width: 52px; }
+
+/* pomodoro work-block stepper */
+.lv-cycles {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  margin-top: 18px;
+  font-size: 14px;
+  color: var(--ink2);
+}
+.lv-cycles[hidden] { display: none; }
+
+/* shield settings disclosure */
+.lv-shield-more {
+  width: 100%;
+  margin-top: 22px;
+  text-align: left;
+  border: 1px solid var(--line);
+  border-radius: 14px;
+  background: var(--glass);
+  padding: 4px 16px;
+}
+.lv-shield-more summary {
+  cursor: pointer;
+  padding: 12px 0;
+  font-size: 14px;
+  font-weight: 600;
+  color: var(--ink2);
+  min-height: 44px;
+  box-sizing: border-box;
+}
+.lv-shield-row {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  padding: 10px 0 2px;
+  font-size: 14px;
+  color: var(--ink2);
+}
+.lv-shield-row > span { min-width: 92px; color: var(--ink3); font-size: 13px; }
+.lv-shield-row label {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  cursor: pointer;
+  min-height: 44px;
+}
+.lv-shield-row input[type="radio"] { accent-color: var(--ember); width: 17px; height: 17px; }
+.lv-note {
+  margin: 2px 0 10px;
+  font-size: 12.5px;
+  color: var(--ink3);
+}
+
+/* begin */
+.lv-begin {
+  margin-top: 30px;
+  width: 100%;
+  min-height: 58px;
+  border: 0;
+  border-radius: 999px;
+  background: linear-gradient(180deg, var(--ember), var(--ember-deep));
+  color: #1a1206;
+  font-family: inherit;
+  font-size: 17px;
+  font-weight: 700;
+  letter-spacing: .01em;
+  cursor: pointer;
+  box-shadow: 0 14px 40px -12px color-mix(in srgb, var(--ember) 55%, transparent);
+  transition: transform .14s, box-shadow .2s;
+}
+.lv-begin:hover { transform: translateY(-1px) scale(1.01); }
+.lv-begin:active { transform: scale(.965); }
+
+/* suggestion line */
+.lv-suggest {
+  margin: 26px 0 0;
+  font-size: 14.5px;
+  color: var(--ink2);
+  max-width: 420px;
+}
+.lv-suggest b { color: var(--ember); }
+.lv-tired {
+  margin: 8px 0 0;
+  font-size: 13.5px;
+  color: var(--ink3);
+  max-width: 420px;
+}
+
+/* recent sessions: quiet rows */
+.lv-recent { padding: 10px 0 4px; }
+.lv-quiet { color: var(--ink3); font-size: 15px; margin: 0; }
+.lv-sessions { list-style: none; margin: 0; padding: 0; max-width: 640px; }
+.lv-sessions li { padding: 14px 2px; border-bottom: 1px solid var(--line); }
+.lv-sessions li:last-child { border-bottom: 0; }
+.lv-sess-main {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 16px;
+  margin-bottom: 10px;
+}
+.lv-sess-label { color: var(--ink); font-size: 15.5px; font-weight: 600; }
+.lv-sess-meta { color: var(--ink3); font-size: 13px; white-space: nowrap; font-variant-numeric: tabular-nums; }
+.lv-sess-bar {
+  height: 6px;
+  border-radius: 999px;
+  background: var(--line);
+  overflow: hidden;
+}
+.lv-sess-bar span {
+  display: block;
+  height: 100%;
+  border-radius: 999px;
+  background: linear-gradient(90deg, var(--ember-deep), var(--ember));
+  transform-origin: left;
+  animation: lv-bar-in 1s cubic-bezier(.2,.9,.25,1) both;
+}
+@keyframes lv-bar-in { from { transform: scaleX(0); } to { transform: scaleX(1); } }
+
+/* legacy cards below the instrument */
+.lv-legacy { padding: 26px 0 8px; display: grid; gap: 18px; }
+
+/* ---- begin morph: button becomes the timer ---- */
+.lv-beginning .lv-dissolve {
+  opacity: 0;
+  transform: translateY(14px);
+  transition: opacity .45s ease, transform .45s ease;
+  pointer-events: none;
+}
+.lv-beginning .lv-begin { transform: scale(.965); }
+.lv-beginning #lv-orb { animation: lv-inhale .7s cubic-bezier(.2,.9,.25,1.15); }
+@keyframes lv-inhale {
+  0% { transform: scale(1); }
+  55% { transform: scale(1.045); }
+  100% { transform: scale(1.02); }
+}
+.lv-beginning #lv-orb-state { color: var(--ember); }
+
+/* ============================================================================
+   Slice 7: in-session orb — the instrument at work
+   ============================================================================ */
+.lv-active { padding-top: 44px; }
+.lv-sess-title {
+  margin: 0 0 6px;
+  font-size: 22px;
+  font-weight: 650;
+  letter-spacing: -.01em;
+  color: var(--ink);
+}
+/* the orb breathes a little faster while a session runs */
+.lv-orb-live .lv-halo { animation-duration: 3.4s; }
+
+/* ---- depth glow: the halo answers the depth gauge ---- */
+#lv-orb[data-depth="surface"] .lv-halo { opacity: .55; }
+#lv-orb[data-depth="deep"] .lv-halo {
+  opacity: 1;
+  background: radial-gradient(circle, rgba(232,163,61,.30) 0%,
+              rgba(232,163,61,.10) 45%, transparent 68%);
+}
+#lv-orb[data-depth="flow"] .lv-halo {
+  opacity: 1;
+  background: radial-gradient(circle, rgba(255,196,110,.42) 0%,
+              rgba(232,163,61,.14) 48%, transparent 70%);
+  animation-duration: 2.6s;
+}
+#lv-orb[data-depth="unmeasured"] .lv-halo { opacity: .35; }
+
+/* ---- break phase: everything softens to amber ---- */
+#lv-orb[data-phase="break"] .lv-orb-prog { stroke: var(--warn); }
+#lv-orb[data-phase="break"] .lv-halo {
+  background: radial-gradient(circle, rgba(245,181,68,.22) 0%,
+              rgba(245,181,68,.07) 45%, transparent 68%);
+}
+#lv-orb[data-phase="break"] #lv-orb-state { color: var(--warn); }
+/* ---- time-up: the orb asks for attention, gently ---- */
+#lv-orb.lv-done #lv-orb-time {
+  animation: lv-done-pulse 2s ease-in-out infinite;
+}
+@keyframes lv-done-pulse {
+  0%, 100% { opacity: 1; }
+  50% { opacity: .55; }
+}
+#lv-orb.lv-done #lv-orb-state { color: var(--ember); }
+
+/* ---- armed shield pill ---- */
+.lv-orb-shield.lv-armed .dot {
+  background: var(--ember);
+  animation: lv-dot-pulse 2s ease-in-out infinite;
+}
+@keyframes lv-dot-pulse {
+  0%, 100% { box-shadow: 0 0 0 0 rgba(242,168,61,.5); }
+  50% { box-shadow: 0 0 0 6px rgba(242,168,61,0); }
+}
+
+/* ---- session action buttons ---- */
+.lv-act-row {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: center;
+  gap: 12px;
+  margin-top: 30px;
+  width: 100%;
+  max-width: 480px;
+}
+.lv-act-row form { margin: 0; }
+.lv-act-btn {
+  min-height: 48px;
+  padding: 0 26px;
+  border: 1px solid var(--line);
+  border-radius: 999px;
+  background: var(--glass);
+  color: var(--ink);
+  font-family: inherit;
+  font-size: 15px;
+  font-weight: 600;
+  cursor: pointer;
+  transition: transform .14s, background .2s, border-color .2s;
+  white-space: nowrap;
+}
+.lv-act-btn:hover { transform: translateY(-1px); border-color: var(--ember); }
+.lv-act-btn:active { transform: scale(.96); }
+.lv-act-btn.primary {
+  border: 0;
+  background: linear-gradient(180deg, var(--ember), var(--ember-deep));
+  color: var(--ember-ink);
+  box-shadow: 0 10px 28px -10px color-mix(in srgb, var(--ember) 55%, transparent);
+}
+.lv-act-btn.ghost { background: transparent; color: var(--ink2); }
+
+/* ---- depth readout under the orb ---- */
+.lv-depth {
+  width: 100%;
+  max-width: 420px;
+  margin-top: 26px;
+  text-align: center;
+}
+.lv-depth .fc-depth-meter-track {
+  height: 6px;
+  border-radius: 999px;
+  background: var(--line);
+  overflow: hidden;
+  margin-top: 10px;
+}
+.lv-depth .fc-depth-meter-track > div { height: 100%; border-radius: 999px; }
+.lv-depth .note { color: var(--ink3); font-size: 13px; margin: 8px 0 0; }
+#fc-depth-pill {
+  display: inline-block;
+  padding: 8px 16px;
+  border: 1px solid var(--line);
+  border-radius: 999px;
+  font-size: 13.5px;
+  font-weight: 600;
+  /* text color comes from --depth-c (set inline per state); light theme
+     overrides it to ink because the state colors are too light for paper */
+  color: var(--depth-c, inherit);
+}
+html[data-theme="light"] body.living #fc-depth-pill {
+  /* !important: beats the inline --depth-c set per state */
+  --depth-c: var(--ink2) !important;
+}
+@media (prefers-color-scheme: light) {
+  html:not([data-theme]) body.living #fc-depth-pill {
+    --depth-c: var(--ink2) !important;
+  }
+}
+.lv-subnote {
+  margin: 18px 0 0;
+  color: var(--ink3);
+  font-size: 14px;
+  max-width: 440px;
+}
+
+/* pomodoro cycle dots, living pass */
+.lv-dots { margin-top: 22px; }
+.lv-dots .fc-cycle-dots { display: flex; gap: 10px; justify-content: center; }
+.lv-dots .fc-cycle-dots .dot {
+  width: 12px; height: 12px;
+  border-radius: 50%;
+  border: 1px solid var(--line);
+  background: transparent;
+}
+.lv-dots .fc-cycle-dots .dot.done {
+  background: var(--ember);
+  border-color: var(--ember);
+}
+.lv-dots .fc-cycle-dots .dot.now {
+  border-color: var(--ember);
+  animation: lv-dot-pulse 2s ease-in-out infinite;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .lv-orb-live .lv-halo,
+  #lv-orb.lv-done #lv-orb-time,
+  .lv-orb-shield.lv-armed .dot,
+  .lv-dots .fc-cycle-dots .dot.now {
+    animation: none;
+  }
+  #lv-orb .lv-orb-prog { transition: none; }
+}
+
+
+/* ============================================================================
+   Slice 8: native mobile Focus (390x844)
+   The instrument scales down as one unit, actions go full-width, and the
+   tab bar never covers the content. 480px is the phone cutoff; tablets keep
+   the desktop layout.
+   ============================================================================ */
+@media (max-width: 480px) {
+  .lv-instrument { padding: 28px 20px 32px; border-radius: 24px; margin-bottom: 12px; }
+
+  /* the orb shrinks as one unit; keep the viewBox, just render smaller */
+  .lv-orb, .lv-orb-live { width: 240px; height: 240px; }
+  .lv-orb-time { font-size: 56px; letter-spacing: -1px; }
+  .lv-orb-state { font-size: 14px; }
+  .lv-orb-shield { font-size: 13px; }
+
+  /* ready: chips stay thumb-reachable, begin already full-width */
+  .lv-chips { gap: 8px; }
+  .lv-chip { font-size: 13px; padding: 9px 14px; }
+
+  /* active: end/abort stack full-width, 48px+ targets */
+  .lv-act-row { flex-direction: column; align-items: stretch; }
+  .lv-act-row form { flex: 1 1 100%; display: flex; }
+  .lv-act-btn { flex: 1 1 auto; min-height: 52px; font-size: 16px; }
+
+  /* steppers keep their horizontal row; buttons stay thumb-sized */
+  .lv-stepper { flex-wrap: nowrap; }
+  .lv-stepper button { width: 48px; height: 48px; }
+
+  /* recent sessions card stacks cleanly */
+  .lv-recent { padding: 20px; }
+}
+
+
+/* ============================================================================
+   Slice 9: accessibility — focus visibility + reduced motion
+   ============================================================================ */
+
+/* keyboard focus must always be visible: ember ring, never removed */
+.lv-chip:focus-visible,
+.lv-begin:focus-visible,
+.lv-act-btn:focus-visible,
+.lv-stepper button:focus-visible,
+.lv-tabs a:focus-visible,
+.lv-shield:focus-visible,
+.lv-ctas a:focus-visible {
+  outline: 2px solid var(--ember);
+  outline-offset: 3px;
+}
+.lv-chip:focus:not(:focus-visible),
+.lv-begin:focus:not(:focus-visible),
+.lv-act-btn:focus:not(:focus-visible) {
+  outline: none;
+}
+
+/* reduced motion: stillness everywhere, not just slice 7's orb.
+   Entrance animations resolve instantly; infinite loops stop. */
+@media (prefers-reduced-motion: reduce) {
+  .lv-orb-live,
+  .lv-orb-live .lv-halo,
+  .lv-halo,
+  .lv-orb-shield.lv-armed .dot,
+  .lv-dots .fc-cycle-dots .dot.now,
+  #lv-orb.lv-done #lv-orb-time {
+    animation: none;
+  }
+  .st,
+  #lv-orb .lv-orb-prog {
+    animation: none;
+    transition: none;
+  }
+  /* .st starts at opacity 0 and the entrance animation reveals it —
+     with the animation off it must be visible immediately */
+  .st { opacity: 1; animation-delay: 0ms; }
+}

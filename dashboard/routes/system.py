@@ -40,6 +40,24 @@ def settings_theme():
     return redirect(referrer)
 
 
+@app.route("/settings/calendar", methods=["POST"])
+def settings_calendar():
+    """Save or clear the Google Calendar secret iCal URL.
+
+    The URL is entered once (Home -> Rhythm section) and stored in the
+    settings table; Focus Core fetches and caches the ICS locally.
+    An empty value disconnects the calendar.
+    """
+    from focuscore import calendar_feed as cal_mod
+    url = request.form.get("ical_url", "")
+    try:
+        cal_mod.set_ical_url(url)
+    except ValueError:
+        # Tell Home why the URL was rejected instead of failing silently.
+        return redirect("/?cal_error=1")
+    return redirect("/")
+
+
 @app.route("/backup")
 def backup_page():
     from focuscore import backup as backup_mod

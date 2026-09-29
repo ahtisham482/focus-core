@@ -517,7 +517,7 @@ def test_report_has_css_bar_charts(monkeypatch, env):
     assert "Pulse through the week" in html
 
 
-def test_home_pulse_band_colors(monkeypatch, env, tmp_path):
+def test_home_pulse_hero_stat(monkeypatch, env, tmp_path):
     db, _ = env
     flag = tmp_path / ".onboarded"
     flag.write_text("2026-09-24")
@@ -530,10 +530,184 @@ def test_home_pulse_band_colors(monkeypatch, env, tmp_path):
     # ActivityWatch is live and would overwrite the seed with real data.)
     monkeypatch.setattr(dash_app, "run_day", lambda day: None)
     day = datetime.now().date().isoformat()
-    # All +2: Pulse 100 -> green band.
+    # One completed 60-minute focus session -> pulse H:MM is 1:00.
+    start = datetime.fromisoformat(day + "T09:00:00")
+    focus_mod.start_session("Maths", 60, db_path=db, now=start)
+    focus_mod.end_session(db_path=db, now=start + timedelta(minutes=60))
+    # Activity must NOT feed the pulse: 2h of +2 activity stays invisible.
+    _seed_day(db, day, [_event(day + "T14:00:00", 7200)])
+    html = dash_app.app.test_client().get("/").data.decode()
+    # Living Instrument: pulse renders as a count-up H:MM in the pulse card.
+    assert "data-countup" in html
+    assert "data-seconds='3600'" in html
+    assert "data-seconds='7200'" not in html
+    assert ">1:00</p>" in html
+    assert "Deep focus today" in html
+    assert "lv-shield" in html
+
+
+def test_home_shield_pill_reflects_daemon_not_session(monkeypatch, env,
+                                                     tmp_path):
+    """Home Shield pill must not infer 'armed' from an active focus session.
+
+    Invariant I-1: the pill reads the authoritative daemon mutex (in-memory
+    OS state), never SQLite session rows.
+    """
+    db, _ = env
+    flag = tmp_path / ".onboarded"
+    flag.write_text("2026-09-24")
+    import dashboard.app as dash_app
+    monkeypatch.setattr(store, "DEFAULT_DB_PATH", db)
+    monkeypatch.setattr(dash_app, "ONBOARDED_FLAG", flag)
+    monkeypatch.setattr(backup, "newest_backup", lambda dest_dir=None: None)
+    monkeypatch.setattr(dash_app, "run_day", lambda day: None)
+    day = datetime.now().date().isoformat()
+    # Active session, but no Shield daemon enforcing (Linux CI/test env).
+    focus_mod.start_session("Maths", 60, db_path=db,
+                            now=datetime.fromisoformat(day + "T09:00:00"))
+    html = dash_app.app.test_client().get("/").data.decode()
+    assert "lv-shield ready" in html
+    assert "Shield ready" in html
+    assert "lv-shield armed" not in html
+
+
+def test_home_calendar_stale_note(monkeypatch, env, tmp_path):
+    """Home Rhythm: a failed refresh shows the stale-data note, not silence."""
+    import time as _time
+    from focuscore import calendar_feed as cal_mod
+    db, _ = env
+    flag = tmp_path / ".onboarded"
+    flag.write_text("2026-09-24")
+    import dashboard.app as dash_app
+    monkeypatch.setattr(store, "DEFAULT_DB_PATH", db)
+    monkeypatch.setattr(dash_app, "ONBOARDED_FLAG", flag)
+    monkeypatch.setattr(backup, "newest_backup", lambda dest_dir=None: None)
+    monkeypatch.setattr(dash_app, "run_day", lambda day: None)
+    monkeypatch.setattr(cal_mod, "_fetch",
+                        lambda url: "BEGIN:VCALENDAR\n"
+                                    "BEGIN:VEVENT\n"
+                                    "UID:s1\n"
+                                    "DTSTART:20260929T090000\n"
+                                    "DTEND:20260929T093000\n"
+                                    "SUMMARY:Standup\n"
+                                    "END:VEVENT\n"
+                                    "END:VCALENDAR")
+    cal_mod.set_ical_url("https://example.com/cal.ics", db_path=db)
+    dash_app.app.test_client().get("/")  # prime the cache
+    store.set_setting(cal_mod.SETTING_CACHED_AT,
+                      str(_time.time() - cal_mod.CACHE_TTL - 1), path=db)
+    monkeypatch.setattr(cal_mod, "_fetch", lambda url: (_ for _ in ()).throw(
+        OSError("network down")))
+    html = dash_app.app.test_client().get("/").data.decode()
+    assert "last synced data" in html
+    assert "lv-cal-stale" in html
+
+
+def test_home_calendar_event_state_classes(monkeypatch, env, tmp_path):
+    """Home Rhythm rows carry done/now/next/allday state classes."""
+    from focuscore import calendar_feed as cal_mod
+    db, _ = env
+    flag = tmp_path / ".onboarded"
+    flag.write_text("2026-09-24")
+    import dashboard.app as dash_app
+    monkeypatch.setattr(store, "DEFAULT_DB_PATH", db)
+    monkeypatch.setattr(dash_app, "ONBOARDED_FLAG", flag)
+    monkeypatch.setattr(backup, "newest_backup", lambda dest_dir=None: None)
+    monkeypatch.setattr(dash_app, "run_day", lambda day: None)
+    monkeypatch.setattr(cal_mod, "_fetch",
+                        lambda url: "BEGIN:VCALENDAR\n"
+                                    "BEGIN:VEVENT\n"
+                                    "UID:s1\n"
+                                    "DTSTART:20260929T090000\n"
+                                    "DTEND:20260929T093000\n"
+                                    "SUMMARY:Standup\n"
+                                    "END:VEVENT\n"
+                                    "END:VCALENDAR")
+    cal_mod.set_ical_url("https://example.com/cal.ics", db_path=db)
+    html = dash_app.app.test_client().get("/").data.decode()
+    assert "lv-cal-ev lv-cal-" in html
+
+
+def test_home_rings_and_targets_from_pinned_goals(env, tmp_path, monkeypatch):
+    """Living Instrument: rings bind the Focus daily ring + pinned goals;
+    the Targets section renders pinned goals as spring-bar cards."""
+    db, _ = env
+    store.init_db(db)
+    flag = tmp_path / ".onboarded"
+    flag.write_text("2026-09-29")
+    dash_app = _dash(monkeypatch, db, flag)
+    monkeypatch.setattr(dash_app, "run_day", lambda day: None)
+    day = datetime.now().date().isoformat()
+    _seed_day(db, day, [_event(day + "T09:00:00", 3600,
+                               category="Reference & Learning")])
+    goals_mod.add_goal("Learn maths", "more_than", "category",
+                       target_name="Reference & Learning",
+                       threshold_minutes=30, pinned=True, db_path=db)
+    html = dash_app.app.test_client().get("/").data.decode()
+    # Two rings: Focus daily ring + the pinned goal ring.
+    assert html.count("class='lv-ring'") == 2
+    assert ">Learn maths</p>" in html
+    assert "60 / 30 min" in html
+    # Targets section with the pinned goal as a spring-bar card.
+    assert ">Targets</h2>" in html
+    assert "class='lv-target-card'" in html
+    assert "lv-bar" in html
+    assert "Achieved" in html
+
+
+def test_home_light_theme_tokens(env, tmp_path, monkeypatch):
+    """Living Instrument: light theme renders data-theme + warm-paper tokens."""
+    db, _ = env
+    store.init_db(db)
+    store.set_setting("ui_theme", "light", path=db)
+    flag = tmp_path / ".onboarded"
+    flag.write_text("2026-09-29")
+    dash_app = _dash(monkeypatch, db, flag)
+    monkeypatch.setattr(dash_app, "run_day", lambda day: None)
+    html = dash_app.app.test_client().get("/").data.decode()
+    assert "data-theme='light'" in html
+    assert '<body class=\'living\'>' in html
+    css = open("dashboard/static/living.css").read()
+    assert 'html[data-theme="light"] body.living' in css
+    assert "--bg0: #faf6ee" in css
+
+
+def test_home_mobile_tabs(env, tmp_path, monkeypatch):
+    """Living Instrument: mobile tab bar renders with inline SVG icons."""
+    db, _ = env
+    store.init_db(db)
+    flag = tmp_path / ".onboarded"
+    flag.write_text("2026-09-29")
+    dash_app = _dash(monkeypatch, db, flag)
+    monkeypatch.setattr(dash_app, "run_day", lambda day: None)
+    html = dash_app.app.test_client().get("/").data.decode()
+    assert "class='lv-tabs'" in html
+    assert "aria-current='page'" in html
+    for label in ("Home", "Focus", "Goals"):
+        assert (">%s</span>" % label) in html
+    # Inline SVG only — no icon-font dependency.
+    assert "viewBox='0 0 24 24'" in html
+    assert "material-symbols" not in html.lower()
+    css = open("dashboard/static/living.css").read()
+    assert "env(safe-area-inset-bottom)" in css
+
+
+def test_home_targets_empty_state(env, tmp_path, monkeypatch):
+    """Living Instrument: no pinned goals -> quiet Targets empty state."""
+    db, _ = env
+    store.init_db(db)
+    flag = tmp_path / ".onboarded"
+    flag.write_text("2026-09-29")
+    dash_app = _dash(monkeypatch, db, flag)
+    monkeypatch.setattr(dash_app, "run_day", lambda day: None)
+    day = datetime.now().date().isoformat()
     _seed_day(db, day, [_event(day + "T09:00:00", 3600)])
     html = dash_app.app.test_client().get("/").data.decode()
-    assert 'pulse good' in html
+    # Only the Focus ring, and the Targets empty state.
+    assert html.count("class='lv-ring'") == 1
+    assert ">Targets</h2>" in html
+    assert "Pin your first goal" in html
+    assert "class='lv-target-card'" not in html
 
 
 # ------------------------------------------------- Phase 3: one-click ---
@@ -609,3 +783,335 @@ def test_tray_apply_pending_update_spawns_and_quits(monkeypatch):
     assert spawned == ["C:\\T\\setup.exe"]
     assert popped and "u.bat" in str(popped[0][-1])
     assert quit_called == [True]
+
+
+# ---------------------------------------------------------------------------
+# Living Instrument slice 6: Focus ready state
+
+
+def _focus_ready_html(env, tmp_path, monkeypatch):
+    db, _ = env
+    store.init_db(db)
+    flag = tmp_path / ".onboarded"
+    flag.write_text("2026-09-29")
+    dash_app = _dash(monkeypatch, db, flag)
+    monkeypatch.setattr(dash_app, "run_day", lambda day: None)
+    resp = dash_app.app.test_client().get("/focus")
+    assert resp.status_code == 200
+    return resp.data.decode()
+
+
+def test_focus_ready_orb_and_controls(env, tmp_path, monkeypatch):
+    """Ready state: orb, quiet shield, chips, stepper, Begin form."""
+    html = _focus_ready_html(env, tmp_path, monkeypatch)
+    for needle in ("id='lv-orb'", "lv-halo", "id='lv-orb-time'",
+                   "id='lv-orb-state'>Ready",
+                   "Shield arms automatically when you begin",
+                   "id='lv-begin-form'", "action='/focus/start'",
+                   "lv-chips", "data-mode='classic'",
+                   "data-mode='pomodoro'", "data-mode='flowtime'",
+                   "lv-glide", "id='lv-minus'", "id='lv-plus'",
+                   "id='lv-step-note'", "id='lv-cycles' hidden",
+                   "id='lv-begin'>Begin session", "lv-suggest",
+                   "Recent sessions", "living-focus.js"):
+        assert needle in html, needle
+    # The shared living nav marks Focus active.
+    assert "aria-current='page'>Focus" in html
+
+
+def test_focus_ready_form_fields(env, tmp_path, monkeypatch):
+    """Begin form carries every field /focus/start needs."""
+    html = _focus_ready_html(env, tmp_path, monkeypatch)
+    for needle in ("name='label'", "id='lv-mode' value='classic'",
+                   "name='preset' value='custom'",
+                   "id='lv-minutes'", "name='target_cycles'",
+                   "name='block_level' value='strict'",
+                   "name='block_level' value='lenient'",
+                   "name='enforcement_mode' value='strict'",
+                   "name='enforcement_mode' value='hardcore'"):
+        assert needle in html, needle
+
+
+def test_focus_ready_begin_starts_session(env, tmp_path, monkeypatch):
+    """Posting the living form starts a real session per mode."""
+    db, _ = env
+    store.init_db(db)
+    flag = tmp_path / ".onboarded"
+    flag.write_text("2026-09-29")
+    dash_app = _dash(monkeypatch, db, flag)
+    monkeypatch.setattr(dash_app, "run_day", lambda day: None)
+    client = dash_app.app.test_client()
+    for mode, minutes in (("classic", "50"), ("pomodoro", "25"),
+                          ("flowtime", "90")):
+        resp = client.post("/focus/start", data={
+            "label": "Deep work", "mode": mode, "preset": "custom",
+            "custom_minutes": minutes, "target_cycles": "4",
+            "block_level": "strict", "enforcement_mode": "strict"})
+        assert resp.status_code == 302
+        active = focus_mod.get_active_session(db_path=db)
+        assert active["session_type"] == mode, mode
+        client.post("/focus/abort")
+
+
+def test_focus_ready_shows_seeded_session_row(env, tmp_path, monkeypatch):
+    """Recent sessions render as quiet rows with duration bars."""
+    db, _ = env
+    store.init_db(db)
+    from datetime import datetime
+    focus_mod.start_session("Morning pages", 30, db_path=db,
+                            now=datetime(2026, 9, 29, 9, 0, 0))
+    focus_mod.end_session(db_path=db, now=datetime(2026, 9, 29, 9, 30, 0))
+    flag = tmp_path / ".onboarded"
+    flag.write_text("2026-09-29")
+    dash_app = _dash(monkeypatch, db, flag)
+    monkeypatch.setattr(dash_app, "run_day", lambda day: None)
+    html = dash_app.app.test_client().get("/focus").data.decode()
+    assert "Morning pages" in html
+    assert "lv-sess-bar" in html
+
+
+# ---------------------------------------------------------------------------
+# Living Instrument slice 7: in-session orb
+
+
+def _focus_start(monkeypatch, db, flag_path, mode, minutes="25", cycles="4"):
+    dash_app = _dash(monkeypatch, db, flag_path)
+    monkeypatch.setattr(dash_app, "run_day", lambda day: None)
+    client = dash_app.app.test_client()
+    resp = client.post("/focus/start", data={
+        "label": "Deep work", "mode": mode, "preset": "custom",
+        "custom_minutes": minutes, "target_cycles": cycles,
+        "block_level": "strict", "enforcement_mode": "strict"})
+    assert resp.status_code == 302
+    return dash_app, client
+
+
+def test_focus_active_orb_classic(env, tmp_path, monkeypatch):
+    """Active Classic: living orb with countdown, end/abort actions."""
+    db, _ = env
+    store.init_db(db)
+    flag = tmp_path / ".onboarded"
+    flag.write_text("2026-09-29")
+    dash_app, client = _focus_start(monkeypatch, db, flag, "classic", "50")
+    html = client.get("/focus").data.decode()
+    for needle in ("data-lv-orb", "data-ring-mode='remaining'",
+                   "data-phase='work'", "id='lv-orb-time'", ">In session<",
+                   "Shield armed", "action='/focus/end'",
+                   "action='/focus/abort'", "aria-current='page'>Focus",
+                   "living-focus.js"):
+        assert needle in html, needle
+    client.post("/focus/abort")
+
+
+def test_focus_active_orb_pomodoro_work_and_break(env, tmp_path, monkeypatch):
+    """Pomodoro: work caption + break phase render the living orb."""
+    db, _ = env
+    store.init_db(db)
+    flag = tmp_path / ".onboarded"
+    flag.write_text("2026-09-29")
+    dash_app, client = _focus_start(monkeypatch, db, flag, "pomodoro",
+                                    "25", "4")
+    work_html = client.get("/focus").data.decode()
+    for needle in ("Work block 1 of 4", "data-ring-mode='remaining'",
+                   "data-phase='work'", "action='/focus/cycle/break/start'",
+                   "fc-cycle-dots"):
+        assert needle in work_html, needle
+    client.post("/focus/cycle/break/start")
+    break_html = client.get("/focus").data.decode()
+    for needle in ("data-phase='break'", "Break",
+                   "action='/focus/cycle/break/end'",
+                   "action='/focus/cycle/break/skip'", "Shield resting"):
+        assert needle in break_html, needle
+    client.post("/focus/abort")
+
+
+def test_focus_active_orb_flowtime(env, tmp_path, monkeypatch):
+    """Flowtime: orb counts up toward the soft target."""
+    db, _ = env
+    store.init_db(db)
+    flag = tmp_path / ".onboarded"
+    flag.write_text("2026-09-29")
+    dash_app, client = _focus_start(monkeypatch, db, flag, "flowtime", "90")
+    html = client.get("/focus").data.decode()
+    for needle in ("data-lv-orb", "data-ring-mode='elapsed'", ">Flowing<",
+                   "Soft target 90 min (no alarm)", "action='/focus/end'"):
+        assert needle in html, needle
+    client.post("/focus/abort")
+
+
+def test_focus_active_orb_pomodoro_done(env, tmp_path, monkeypatch):
+    """Pomodoro target reached: static celebration orb, no tick."""
+    db, _ = env
+    store.init_db(db)
+    flag = tmp_path / ".onboarded"
+    flag.write_text("2026-09-29")
+    dash_app, client = _focus_start(monkeypatch, db, flag, "pomodoro",
+                                    "25", "1")
+    client.post("/focus/cycle/break/start")
+    client.post("/focus/cycle/break/end")
+    html = client.get("/focus").data.decode()
+    for needle in ("data-lv-static", "data-phase='done'", "Target reached",
+                   "action='/focus/end'"):
+        assert needle in html, needle
+    client.post("/focus/abort")
+
+
+def test_focus_active_orb_time_up(env, tmp_path, monkeypatch):
+    """Classic past its planned end: orb shows the time-up state."""
+    from datetime import datetime, timedelta
+    db, _ = env
+    store.init_db(db)
+    focus_mod.start_session("Overdue", 1, db_path=db,
+                            now=datetime.now() - timedelta(minutes=2))
+    flag = tmp_path / ".onboarded"
+    flag.write_text("2026-09-29")
+    dash_app = _dash(monkeypatch, db, flag)
+    monkeypatch.setattr(dash_app, "run_day", lambda day: None)
+    client = dash_app.app.test_client()
+    html = client.get("/focus").data.decode()
+    assert "lv-done" in html
+    assert ">Time is up<" in html
+    client.post("/focus/abort")
+
+
+# ---------------------------------------------------------------------------
+# Living Instrument slice 8: native mobile Focus
+
+
+def test_focus_mobile_css_rules():
+    """The 480px media query carries the Focus phone layout."""
+    css = open("dashboard/static/living.css").read()
+    assert "@media (max-width: 480px)" in css
+    for needle in (".lv-orb, .lv-orb-live { width: 240px; height: 240px; }",
+                   ".lv-orb-time { font-size: 56px;",
+                   ".lv-act-row { flex-direction: column;",
+                   ".lv-stepper { flex-wrap: nowrap; }"):
+        assert needle in css, needle
+
+
+# ---------------------------------------------------------------------------
+# Living Instrument slice 9: accessibility
+
+
+def test_focus_focus_visible_rules():
+    """Keyboard focus is always visible on Living Focus controls."""
+    css = open("dashboard/static/living.css").read()
+    assert ".lv-chip:focus-visible" in css
+    assert ".lv-begin:focus-visible" in css
+    assert ".lv-act-btn:focus-visible" in css
+    assert "outline: 2px solid var(--ember);" in css
+
+
+def test_focus_reduced_motion_covers_entrances():
+    """Reduced motion stills entrance/breathing animations, keeps .st visible."""
+    css = open("dashboard/static/living.css").read()
+    idx = css.rfind("Slice 9: accessibility")
+    block = css[idx:]
+    assert "@media (prefers-reduced-motion: reduce)" in block
+    assert ".st { opacity: 1;" in block
+
+
+def test_focus_chip_radiogroup_keyboard_js():
+    """Mode chips handle arrow keys like a real radiogroup."""
+    js = open("dashboard/static/living-focus.js").read()
+    assert "ArrowRight" in js and "ArrowLeft" in js
+    assert "selectChip(next, false)" in js
+    assert "next.focus()" in js
+
+
+def test_focus_orb_aria_label_refresh_js():
+    """The in-session orb refreshes its aria-label per minute, not per tick."""
+    js = open("dashboard/static/living-focus.js").read()
+    assert "refreshAria" in js
+    assert "setAttribute('aria-label'" in js
+    assert "lastMinute" in js
+
+
+def test_living_light_theme_defines_page_background_tokens():
+    """Regression: light theme must define --bg/--bg2 (the page uses them).
+
+    Found by real browser rendering: the light block only set --bg0/--bg1
+    while the page background uses --bg/--bg2, which stayed near-black under
+    dark --ink text -> unreadable warm-paper theme.
+    """
+    css = open("dashboard/static/living.css").read()
+    # explicit data-theme="light" block
+    light_block = css.split('html[data-theme="light"] body.living {')[1]
+    light_block = light_block.split("}")[0]
+    assert "--bg: #faf6ee" in light_block
+    assert "--bg2: #f2ebdb" in light_block
+    # system light block
+    assert "@media (prefers-color-scheme: light)" in css
+    sys_block = css.split("@media (prefers-color-scheme: light)")[1]
+    assert "--bg: #faf6ee" in sys_block
+    assert "--bg2: #f2ebdb" in sys_block
+
+
+def test_living_dark_theme_defines_bg0_for_tabs():
+    """Regression: .lv-tabs uses var(--bg0); dark tokens must define it."""
+    css = open("dashboard/static/living.css").read()
+    assert ".lv-tabs" in css
+    assert "--bg0: #0d0c0a" in css
+
+
+def test_living_pages_hide_legacy_page_hero():
+    """Regression: living pages hide legacy chrome incl. .page-hero."""
+    css = open("dashboard/static/living.css").read()
+    assert "body.living .page-hero" in css
+
+
+def test_living_light_theme_nav_uses_paper_not_dark_bar():
+    """Regression: the dark 62% nav bar is dark-theme-only.
+
+    Found by real browser rendering: in the light theme the nav kept its
+    dark frosted background under dark --ink text -> muddy, poor contrast.
+    """
+    css = open("dashboard/static/living.css").read()
+    assert "html[data-theme=\"light\"] body.living .lv-nav" in css
+    assert "rgba(250,246,238,.62)" in css
+
+
+def test_living_depth_pill_readable_on_paper():
+    """Regression: depth-pill text must not use the raw state color on paper.
+
+    Found by real browser rendering: the "surface" state color (#94a3b8)
+    as pill text on warm paper fails contrast. The pill now carries the
+    state color in --depth-c (border/meter keep it) and the light theme
+    overrides the text to ink.
+    """
+    css = open("dashboard/static/living.css").read()
+    assert "color: var(--depth-c, inherit)" in css
+    # !important is load-bearing: it beats the inline --depth-c per state
+    assert "--depth-c: var(--ink2) !important" in css
+    py = open("dashboard/routes/focus.py").read()
+    assert "--depth-c:%s" in py
+
+
+def test_living_film_grain_overlay_present():
+    """Spec §2: fixed SVG-noise grain at 5% over living pages."""
+    css = open("dashboard/static/living.css").read()
+    assert "body.living::before" in css
+    assert "feTurbulence" in css
+    assert "opacity: .05" in css
+    assert "pointer-events: none" in css
+
+
+def test_living_ambient_drift_present():
+    """Spec §2: ambient ember drift washes on an 18s alternate loop."""
+    css = open("dashboard/static/living.css").read()
+    assert "body.living::after" in css
+    assert "@keyframes lv-drift" in css
+    assert "18s ease-in-out infinite alternate" in css
+
+
+def test_living_screen_reader_timer_announcements():
+    """Spec §8: ticking timer is aria-live=off; a role=status region
+    announces every 5 minutes for screen-reader users."""
+    py = open("dashboard/routes/focus.py").read()
+    assert "id='lv-orb-time' aria-live='off'" in py
+    assert "role='status' id='lv-orb-status'" in py
+    css = open("dashboard/static/living.css").read()
+    assert ".lv-visually-hidden" in css
+    js = open("dashboard/static/living-focus.js").read()
+    assert "lv-orb-status" in js
+    assert "5 * 60 * 1000" in js

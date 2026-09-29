@@ -85,7 +85,7 @@ def _parse_day(value):
 
 
 def layout(title, body, day=None, refresh=300, active="home",
-           help_key=None, hero=None, body_class=""):
+           help_key=None, hero=None, body_class="", extra_css="", extra_js=""):
     """Page shell: nav bar, design-system stylesheet, footer.
 
     hero: optional HTML string for the context-aware page header.
@@ -157,7 +157,10 @@ def layout(title, body, day=None, refresh=300, active="home",
     else:
         hero_html = hero
 
-    bc = "body" + (" " + body_class if body_class else "")
+    if body_class:
+        body_tag = "<body class='%s'>" % escape(body_class)
+    else:
+        body_tag = "<body>"
     return (
         "<!doctype html><html lang='en'%s><head><meta charset='utf-8'>"
         "<meta name='viewport' content='width=device-width, initial-scale=1'>"
@@ -166,13 +169,15 @@ def layout(title, body, day=None, refresh=300, active="home",
         "<link rel='preload' href='/static/fonts/GeistVF.woff2' "
         "as='font' type='font/woff2' crossorigin>"
         "<link rel='stylesheet' href='/static/style.css'>"
+        "%s"
         "<link rel='icon' href='/static/icon.png'>"
         "</head>"
-        "<%s>%s<main class='page-main'>%s%s</main>%s"
+        "%s%s<main class='page-main'>%s%s</main>%s"
         "<script src='/static/nav.js'></script>"
+        "%s"
         "</body></html>"
-        % (theme_attr, refresh, escape(title),
-           bc, nav, hero_html, body, footer)
+        % (theme_attr, refresh, escape(title), extra_css,
+           body_tag, nav, hero_html, body, footer, extra_js)
     )
 
 
@@ -408,7 +413,11 @@ def _reject_loopback_csrf():
 def _add_security_headers(response):
     response.headers["X-Content-Type-Options"] = "nosniff"
     response.headers["X-Frame-Options"] = "DENY"
-    response.headers["Referrer-Policy"] = "no-referrer"
+    # same-origin (not no-referrer): Chromium sends "Origin: null" on form
+    # POSTs from no-referrer pages, which our own _reject_loopback_csrf
+    # would reject with 403 — breaking every form in a real browser.
+    # same-origin still never leaks a Referer off this machine.
+    response.headers["Referrer-Policy"] = "same-origin"
     # 'unsafe-inline' is needed because the dashboard is a server-rendered
     # single-file app (no template files to split): it uses inline
     # onsubmit="return confirm(...)" handlers on the delete/abort/restore
@@ -429,6 +438,70 @@ def _add_security_headers(response):
             "img-src 'self' data:"
         )
     return response
+
+
+_TARGET_SVG = (
+    "<svg width='26' height='26' viewBox='0 0 26 26' fill='none' "
+    "stroke='currentColor' stroke-width='2' aria-hidden='true'>"
+    "<circle cx='13' cy='13' r='9'/>"
+    "<circle cx='13' cy='13' r='3.5' fill='currentColor' stroke='none'/>"
+    "<path d='M13 1v5M13 20v5M1 13h5M20 13h5'/></svg>"
+)
+"""Brand mark for the Living Instrument nav: an inline SVG target."""
+
+
+_LIVING_TAB_ICONS = {
+    "home": ("<svg width='22' height='22' viewBox='0 0 24 24' fill='none' "
+             "stroke='currentColor' stroke-width='1.8' stroke-linecap='round' "
+             "stroke-linejoin='round' aria-hidden='true'>"
+             "<path d='M4 11.5 12 4l8 7.5'/><path d='M6 10.5V20h12v-9.5'/>"
+             "</svg>"),
+    "focus": ("<svg width='22' height='22' viewBox='0 0 24 24' fill='none' "
+              "stroke='currentColor' stroke-width='1.8' aria-hidden='true'>"
+              "<circle cx='12' cy='12' r='8'/>"
+              "<circle cx='12' cy='12' r='2.6' fill='currentColor' "
+              "stroke='none'/></svg>"),
+    "goals": ("<svg width='22' height='22' viewBox='0 0 24 24' fill='none' "
+              "stroke='currentColor' stroke-width='1.8' stroke-linecap='round' "
+              "stroke-linejoin='round' aria-hidden='true'>"
+              "<path d='M6 21V4'/><path d='M6 5h11l-2.6 3.5L17 12H6'/></svg>"),
+}
+"""Inline SVG icons for the mobile tab bar (zero icon-font dependency)."""
+
+
+def _living_nav(active, shield_cls, shield_label):
+    """Shared living top bar: brand, Home/Focus/Goals, shield pill."""
+    links = []
+    for key, label, href in (("home", "Home", "/"),
+                             ("focus", "Focus", "/focus"),
+                             ("goals", "Goals", "/goals")):
+        cur = " aria-current='page'" if key == active else ""
+        links.append("<a href='%s'%s>%s</a>" % (href, cur, label))
+    return (
+        "<nav class='lv-nav st' style='--d:0ms' aria-label='Primary'>"
+        "<div class='lv-nav-inner'>"
+        "<a class='lv-brand' href='/' aria-label='Focus Core home'>%s"
+        "<span>Focus Core</span></a>"
+        "<div class='lv-links'>%s</div>"
+        "<a class='lv-shield %s' href='/shield'>"
+        "<span class='dot' aria-hidden='true'></span>%s</a>"
+        "</div></nav>" % (_TARGET_SVG, "".join(links), shield_cls,
+                          shield_label))
+
+
+def _living_tabs(active):
+    """Fixed bottom tab bar for living pages (mobile only; CSS-gated)."""
+    items = []
+    for key, label, href in (("home", "Home", "/"),
+                             ("focus", "Focus", "/focus"),
+                             ("goals", "Goals", "/goals")):
+        cur = " aria-current='page'" if key == active else ""
+        cls = " class='on'" if key == active else ""
+        items.append(
+            "<a href='%s'%s%s>%s<span>%s</span></a>"
+            % (href, cur, cls, _LIVING_TAB_ICONS[key], label))
+    return ("<nav class='lv-tabs' aria-label='Primary'>%s</nav>"
+            % "".join(items))
 
 
 def home_page():
@@ -456,103 +529,276 @@ def home_page():
     streak = focus_mod.current_streak()
     peak_lbl = chronotype.window_label()
 
-    # ── Context-aware Hero Header (Merlin Cold-start & Active spec) ──
-    if total <= 0 and streak == 0:
-        # Merlin's Cold-Start Hero specification (Day 1 / zero data)
+    # ── Living Instrument hero (slice 1) ──
+    # Pulse card data: today's completed focus sessions.
+    # H:MM is summed completed session time (spec), not tracked activity.
+    day_sessions = store.get_day_sessions(today)
+    n_sessions = len(day_sessions)
+    longest_min = 0
+    focus_seconds = 0
+    for _s in day_sessions:
+        try:
+            _secs = (datetime.fromisoformat(_s["ended_at"])
+                     - datetime.fromisoformat(_s["started_at"])).total_seconds()
+        except Exception:
+            _secs = ((_s.get("planned_minutes") or 0) * 60)
+        longest_min = max(longest_min, _secs / 60)
+        focus_seconds += int(max(0, _secs))
+    pulse_hmm = "%d:%02d" % (focus_seconds // 3600, (focus_seconds % 3600) // 60)
+    if n_sessions:
+        pulse_sub = ("%d %s &middot; longest %d min"
+                     % (n_sessions, "session" if n_sessions == 1 else "sessions",
+                        int(round(longest_min))))
+    else:
+        pulse_sub = "No sessions yet &mdash; your first one starts the story."
 
-        hero_html = (
-            "<div class='page-hero'>"
-            "<div class='page-hero-text'>"
-            "<h1 class='page-title'>Day one &mdash; your focus story starts now.</h1>"
-            "<p class='page-sub'>Work normally today. Focus Core is learning your "
-            "rhythm &mdash; tomorrow you'll see your first Flow Index, your peak "
-            "hours, and your streak.</p>"
-            "<p class='page-sub' style='margin-top:8px'>"
-            "<span>Flow Index: <b style='color:var(--ink-muted)'>"
-            "&mdash; (tracking begins now)</b></span>"
-            "<span class='page-sub-dot'>&middot;</span>"
-            "<span>Streak: <b>Day 1</b></span>"
-            "<span class='page-sub-dot'>&middot;</span>"
-            "<span>Peak: <b>%s</b></span>"
-            "</p>"
+    # Shield pill: armed exactly when Shield enforcement is actually on.
+    # The authoritative signal is the daemon mutex (in-memory/OS state, no
+    # SQLite — Invariant I-1), the same source the /shield page uses. An
+    # active focus session alone does not prove the Shield is armed.
+    from focuscore import shield as shield_mod
+    _shield_armed = (shield_mod.shield_daemon_running()
+                     and not shield_mod.shield_killswitch_on())
+    shield_cls = "armed" if _shield_armed else "ready"
+    shield_label = "Shield armed" if _shield_armed else "Shield ready"
+
+    # ── Living rings + targets (slice 2) ──
+    # Rings: the real Focus daily ring + the user's own pinned goals.
+    # (No movement ring: Focus Core doesn't track movement — nothing invented.)
+    from focuscore import gamification as gam_mod
+    from focuscore import goals as goals_mod
+    _ring = gam_mod.daily_ring(today)
+    _evals = goals_mod.evaluate_all(summary)
+    _pinned = [g for g in _evals if g["pinned"]]
+    _num = lambda v: "%.0f" % (v or 0)
+    rings = [("Focus", _ring["minutes"], _ring["target"], "min",
+              _ring["fraction"])]
+    for _g in _pinned[:2]:
+        rings.append((_g["name"], _g["current"], _g["target"], _g["unit"],
+                      min(1.0, (_g["pct"] or 0) / 100.0)))
+    rings_html = "".join(
+        "<div class='lv-ring'>"
+        "<svg viewBox='0 0 120 120' role='img' aria-label='%s'>"
+        "<circle class='track' cx='60' cy='60' r='52'></circle>"
+        "<circle class='fill' cx='60' cy='60' r='52' "
+        "style='stroke-dasharray:326.7;stroke-dashoffset:%.1f;--d:%dms'></circle>"
+        "</svg>"
+        "<p class='lv-ring-name'>%s</p>"
+        "<p class='lv-ring-val'>%s</p>"
+        "</div>"
+        % (escape("%s: %s of %s %s" % (name, _num(cur), _num(tgt), unit)),
+           326.7 * (1 - min(max(frac, 0.0), 1.0)), 560 + i * 150,
+           escape(name), escape("%s / %s %s" % (_num(cur), _num(tgt), unit)))
+        for i, (name, cur, tgt, unit, frac) in enumerate(rings)
+    )
+
+    # Targets section: pinned goals as living cards (replaces the old card).
+    _STATUS_WORD = {"on_track": "On track", "behind": "Behind pace",
+                    "achieved": "Achieved", "missed": "Missed"}
+    if _pinned[:3]:
+        _cards = "".join(
+            "<div class='lv-target-card'>"
+            "<p class='lv-target-label'>%s</p>"
+            "<p class='lv-target-val'>%s <span>/ %s %s</span></p>"
+            "<p class='lv-target-note%s'>%s</p>"
+            "<div class='lv-bar'><div style='--w:%.1f%%;--d:%dms'></div></div>"
             "</div>"
-            "<div class='page-hero-actions'>"
-            "<a class='btn' href='/focus'>Start a focus session</a>"
-            "</div>"
-            "</div>" % escape(peak_lbl)
+            % (escape(_g["name"]), _num(_g["current"]),
+               _num(_g["target"]), _g["unit"],
+               " ok" if _g["status"] in ("on_track", "achieved") else "",
+               _STATUS_WORD.get(_g["status"], _g["status"]),
+               min(100.0, _g["pct"] or 0), 800 + i * 120)
+            for i, _g in enumerate(_pinned[:3])
+        )
+        targets_html = (
+            "<section class='lv-wrap' aria-label='Targets'>"
+            "<div class='lv-targets st' style='--d:700ms'>"
+            "<h2 class='lv-sec-title'>Targets</h2>"
+            "<div class='lv-target-grid'>%s</div>"
+            "</div></section>" % _cards
         )
     else:
-        # Active state context-aware hero
-        hr = datetime.now().hour
-        greeting = (
-            "Good morning" if hr < 12
-            else ("Good afternoon" if hr < 18 else "Good evening")
-        )
-        peak_status_text = (
-            "\u26a1 Peak now" if chronotype.is_peak_now()
-            else ("Peak: %s" % peak_lbl)
-        )
-        pulse_val_str = "%.1f" % pulse if pulse is not None else "--"
-        hero_html = (
-            "<div class='page-hero'>"
-            "<div class='page-hero-text'>"
-            "<h1 class='page-title'>%s</h1>"
-            "<p class='page-sub'>"
-            "<span>Pulse: <b data-live>%s</b></span>"
-            "<span class='page-sub-dot'>&middot;</span>"
-            "<span>&#128293; %d-day streak</span>"
-            "<span class='page-sub-dot'>&middot;</span>"
-            "<span>%s</span>"
-            "</p>"
-            "</div>"
-            "<div class='page-hero-actions'>"
-            "<a class='btn' href='/focus'>Start focus session</a>"
-            "</div>"
-            "</div>" % (greeting, pulse_val_str, streak, escape(peak_status_text))
+        targets_html = (
+            "<section class='lv-wrap' aria-label='Targets'>"
+            "<div class='lv-targets st' style='--d:700ms'>"
+            "<h2 class='lv-sec-title'>Targets</h2>"
+            "<p class='lv-target-empty'>No targets yet. "
+            "<a href='/goals'>Pin your first goal</a> and it will live here.</p>"
+            "</div></section>"
         )
 
-
-    if total > 0 and pulse is not None:
-        band = home_mod.pulse_band(pulse)
-        pulse_html = ("<div class='card stat'><div class='lbl'>Today's "
-                      "Pulse</div><div class='pulse %s' data-live>%.1f</div>"
-                      "<div class='note'>0-100. Green 60+, amber 40-59, "
-                      "red below 40.</div></div>" % (band, pulse))
+    # ── Living rhythm (slice 3): today's calendar events ──
+    from focuscore import calendar_feed as cal_mod
+    try:
+        _cal_events, _cal_state = cal_mod.today_events(today)
+    except Exception:
+        _cal_events, _cal_state = [], "unreachable"
+    _cal_note = ""
+    if request.args.get("cal_error"):
+        _cal_note = ("<p class='lv-cal-error'>That URL doesn't look right "
+                     "&mdash; it must start with http:// or https://.</p>")
+    if _cal_state == "unconfigured":
+        rhythm_inner = (
+            "%s"
+            "<p class='lv-cal-quiet'>Connect your calendar to see "
+            "today's rhythm here.</p>"
+            "<form class='lv-cal-form' method='post' "
+            "action='/settings/calendar'>"
+            "<input type='url' name='ical_url' required "
+            "placeholder='Paste your Google Calendar secret iCal URL' "
+            "autocomplete='off'>"
+            "<button type='submit'>Connect</button>"
+            "</form>"
+            "<p class='lv-cal-hint'>Google Calendar &rarr; Settings &rarr; "
+            "Integrate calendar &rarr; Secret address in iCal format. "
+            "It never leaves this PC.</p>" % _cal_note
+        )
     else:
-        pulse_html = ("<div class='card stat'><div class='lbl'>Today's "
-                      "Pulse</div><div class='pulse none'>--</div>"
-                      "<div class='note'>No tracked time yet today.</div>"
-                      "</div>")
+        if _cal_state == "unreachable":
+            _cal_list = ("<p class='lv-cal-quiet'>Couldn't reach your "
+                         "calendar right now.</p>")
+        elif _cal_events:
+            _cal_list = ("<ul class='lv-cal'>%s</ul>" % "".join(
+                "<li class='lv-cal-ev lv-cal-%s'>"
+                "<span class='lv-cal-time'>%s</span>"
+                "<span class='lv-cal-name'>%s</span></li>"
+                % (e.get("state", "next"), escape(e["time"]),
+                   escape(e["summary"]))
+                for e in _cal_events[:3]))
+        else:
+            _cal_list = ("<p class='lv-cal-quiet'>Nothing on the calendar "
+                         "today.</p>")
+        if _cal_state == "stale":
+            _cal_list = ("<p class='lv-cal-stale'>Couldn't refresh your "
+                         "calendar &mdash; showing last synced data.</p>"
+                         + _cal_list)
+        rhythm_inner = (
+            _cal_note + "%s"
+            "<form class='lv-cal-change' method='post' "
+            "action='/settings/calendar'>"
+            "<input type='hidden' name='ical_url' value=''>"
+            "<button type='submit' class='lv-linkbtn'>"
+            "Disconnect calendar</button>"
+            "</form>" % _cal_list
+        )
+    rhythm_html = (
+        "<section class='lv-wrap' aria-label='Rhythm'>"
+        "<div class='lv-rhythm st' style='--d:640ms'>"
+        "<h2 class='lv-sec-title'>Rhythm</h2>%s"
+        "</div></section>" % rhythm_inner
+    )
 
-    stats_html = (
-        "<div class='grid'>"
-        "<div class='card stat'><div class='num' data-live data-tabular>%.1f</div>"
+    cold_start = total <= 0 and streak == 0
+    dateline = date.today().strftime("%A, %B") + " %d" % date.today().day
+    if cold_start:
+        h1_lines = (
+            "<span class='mask'><span class='line' style='--d:120ms'>Day one.</span></span>"
+            "<span class='mask'><span class='line' style='--d:200ms'>Your focus story</span></span>"
+            "<span class='mask'><span class='line' style='--d:280ms'>starts now.</span></span>"
+        )
+        subcopy = ("Work normally today. Focus Core is learning your rhythm "
+                   "&mdash; tomorrow you'll see your first Flow Index, your peak "
+                   "hours, and your streak.")
+    else:
+        h1_lines = (
+            "<span class='mask'><span class='line' style='--d:120ms'>Your day,</span></span>"
+            "<span class='mask'><span class='line' style='--d:200ms'>in "
+            "<em class='lv-ember-i'>focus</em>.</span></span>"
+        )
+        if chronotype.is_peak_now():
+            subcopy = ("You're in your peak window (%s) &mdash; a good moment "
+                       "to begin." % escape(peak_lbl))
+        else:
+            subcopy = ("Your peak window is %s &mdash; your hardest work "
+                       "belongs there." % escape(peak_lbl))
+
+    nav_html = _living_nav("home", shield_cls, shield_label)
+    hero_html = (
+        "<section class='lv-wrap' aria-label='Today at a glance'><div class='lv-hero'>"
+        "<div>"
+        "<p class='lv-dateline st' style='--d:60ms'>%s</p>"
+        "<h1 class='lv-h1'>%s</h1>"
+        "<p class='lv-sub st' style='--d:340ms'>%s</p>"
+        "<div class='lv-ctas st' style='--d:420ms'>"
+        "<a class='lv-btn lv-magnet' href='/focus'>Begin focus session</a>"
+        "<a class='lv-ghost lv-magnet' href='/day/%s'>Today's plan</a>"
+        "</div>"
+        "</div>"
+        "<div class='lv-pulse st' style='--d:500ms'>"
+        "<p class='lv-pulse-label'><span class='lv-live-dot' aria-hidden='true'></span>"
+        "Deep focus today</p>"
+        "<p class='lv-pulse-num' data-countup data-seconds='%d'>%s</p>"
+        "<p class='lv-pulse-sub'>%s</p>"
+        "<div class='lv-rings'>%s</div>"
+        "</div>"
+        "</div></section>"
+        % (dateline, h1_lines, subcopy, today,
+           focus_seconds, pulse_hmm, pulse_sub, rings_html)
+    )
+    foot_html = (
+        "<footer class='lv-wrap'><div class='lv-foot st' style='--d:900ms'>"
+        "<span>Focus Core</span><span>%s</span>"
+        "</div></footer>" % (("%d-day streak" % streak) if streak else "Day 1")
+    )
+
+
+    if total > 0:
+        mix_html = bucket_bar(seconds_by_level, total) + legend(seconds_by_level)
+    else:
+        mix_html = ("<p class='note'>No tracked time yet today -- your "
+                    "productivity mix will appear here.</p>")
+    today_html = (
+        "<div class='card st' style='--d:660ms'><h3>Today</h3>"
+        "<div class='grid today-grid'>"
+        "<div class='stat'><div class='num' data-live data-tabular>%.1f</div>"
         "<div class='lbl'>tracked hours</div></div>"
-        "<div class='card stat'><div class='num' data-live data-tabular>%.1f</div>"
+        "<div class='stat'><div class='num' data-live data-tabular>%.1f</div>"
         "<div class='lbl'>focused hours</div></div>"
-        "</div>" % (_hours(total), focus_hours))
+        "</div>%s</div>"
+        % (_hours(total), focus_hours, mix_html))
 
     cards = home_mod.attention_cards(aw_state=aw_state)
     if cards:
-        card_html = "".join(
-            "<div class='card attention'><h3>%s</h3><p>%s</p>"
-            "<p><a class='btn' href='%s'>%s</a></p></div>"
+        banner_rows = "".join(
+            "<li><b>%s</b> -- %s "
+            "<a class='btn btn-sm' href='%s'>%s</a></li>"
             % (escape(c["title"]), escape(c["detail"]),
                escape(c["button_href"]), escape(c["button_text"]))
             for c in cards)
-        attention_html = "<h2>What needs your attention</h2>" + card_html
+        attention_html = (
+            "<div class='card attention-banner st' style='--d:600ms'>"
+            "<h3>What needs your attention</h3><ul>%s</ul></div>"
+            % banner_rows)
     else:
         attention_html = (
-            "<div class='card attention ok'><h3>All clear -- you're on "
+            "<div class='card attention ok st' style='--d:600ms'><h3>All clear -- you're on "
             "track.</h3><p class='note'>Nothing needs you right now.</p>"
             "</div>")
 
-    body = (pulse_html + stats_html + attention_html
-            + pinned_goals_html(today)
-            + "<div class='card'><p><a href='/day/%s'>See today's full "
-              "details</a> &middot; <a href='/timesheet?day=%s'>Today's "
-              "timesheet</a></p></div>" % (today, today))
-    return layout("Home", body, day=today, active="home", hero=hero_html)
+    # targets_html (Living section) replaced the old pinned-goals card above.
+    if chronotype.is_peak_now():
+        insight_text = ("&#9889; You're in your peak window (%s) -- "
+                        "a good moment to start a session."
+                        % escape(peak_lbl))
+    else:
+        insight_text = ("Your peak window is %s -- your hardest work "
+                        "belongs there." % escape(peak_lbl))
+    insight_html = (
+        "<div class='card st' style='--d:780ms'><h3>Insight</h3><p>%s</p>"
+        "<p><a href='/coaching'>More in Coaching &rarr;</a></p></div>"
+        % insight_text)
+
+    legacy_html = (attention_html + today_html + insight_html
+                   + "<div class='card st' style='--d:840ms'><p><a href='/day/%s'>See today's full "
+                     "details</a> &middot; <a href='/timesheet?day=%s'>Today's "
+                     "timesheet</a></p></div>" % (today, today))
+    body = (nav_html + hero_html + rhythm_html + targets_html
+            + "<div class='lv-wrap'>" + legacy_html + "</div>"
+            + foot_html + _living_tabs("home"))
+    return layout("Home", body, day=today, active="home",
+                  body_class="living",
+                  extra_css="<link rel='stylesheet' href='/static/living.css'>",
+                  extra_js="<script src='/static/living-home.js'></script>")
 
 
 

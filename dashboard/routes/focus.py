@@ -12,9 +12,16 @@ from flask import jsonify, redirect, request
 from dashboard.app import app
 from dashboard.app import (
     _fmt_countdown,
+    _living_nav,
+    _living_tabs,
     layout,
 )
 
+
+# Living Instrument redesign: per-page assets, scoped by body.living.
+# Only the Focus pages opt in via layout(extra_css=..., extra_js=...).
+_LIVING_CSS = "<link rel='stylesheet' href='/static/living.css'>"
+_LIVING_JS = "<script src='/static/living-focus.js'></script>"
 
 # ------------------------------------------------------- SVG ring helper ---
 
@@ -182,7 +189,7 @@ def _depth_pill(session_id, depth, on_break=False):
     return (
         "<div>"
         "<span id='fc-depth-pill' data-session-id='%s' "
-        "style='border-color:%s;color:%s'>%s</span>"
+        "style='border-color:%s;--depth-c:%s'>%s</span>"
         "<div class='fc-depth-meter-track'>"
         "<div id='fc-depth-meter' style='width:%s;background:%s'></div>"
         "</div>"
@@ -197,6 +204,90 @@ def _depth_pill(session_id, depth, on_break=False):
     )
 
 
+
+
+_LV_ORB_CIRC = 942.48  # 2*pi*150: the living orb ring
+
+
+def _lv_active_orb(*, phase, ring_mode, total, value, caption, depth,
+                   session_id, static=False, time_up=False):
+    """Living in-session orb (slice 7).
+
+    phase: 'work' | 'break' | 'done'. ring_mode: 'remaining' | 'elapsed'.
+    The JS tick in living-focus.js reads data-total / data-value /
+    data-ring-mode; data-depth drives the halo glow (polled live).
+    """
+    total = max(1.0, float(total or 1))
+    value = max(0.0, float(value or 0))
+    frac = max(0.0, min(1.0, value / total))
+    # remaining: full -> empty; elapsed: empty -> full. Same formula.
+    offset = _LV_ORB_CIRC * (1.0 - frac)
+    t0 = "Done" if static else _fmt_countdown(value)
+    aria = "%s, %s" % (caption, t0)
+    cls = "lv-orb lv-orb-live st"
+    if time_up:
+        cls += " lv-done"
+    data_static = " data-lv-static" if static else ""
+    return (
+        "<div class='%s' style='--d:80ms' id='lv-orb' data-lv-orb "
+        "data-ring-mode='%s' data-total='%.0f' data-value='%.0f' "
+        "data-depth='%s' data-phase='%s' data-session-id='%s'%s "
+        "role='img' aria-label='%s'>"
+        "<div class='lv-halo' aria-hidden='true'></div>"
+        "<svg class='lv-orb-svg' viewBox='0 0 340 340' aria-hidden='true'>"
+        "<circle class='lv-orb-track' cx='170' cy='170' r='150'/>"
+        "<circle class='lv-orb-prog' id='lv-orb-prog' cx='170' cy='170' "
+        "r='150' style='stroke-dashoffset:%.2f'/>"
+        "</svg>"
+        "<div class='lv-orb-core'>"
+        "<p class='lv-orb-time' id='lv-orb-time' aria-live='off'>%s</p>"
+        "<p class='lv-orb-state' id='lv-orb-state'>%s</p>"
+        "</div></div>"
+        "<p class='lv-visually-hidden' role='status' id='lv-orb-status'></p>"
+        % (cls, ring_mode, total, value, depth, phase, session_id,
+           data_static, escape(aria), offset, t0, escape(caption)))
+
+
+def _lv_form_btn(action, label, cls="", confirm_abort=False):
+    """One living-styled POST button."""
+    extra = ""
+    if confirm_abort:
+        extra = (" onsubmit=\"return confirm('Abort this session? "
+                 "It will not count toward your streak.');\"")
+    return (
+        "<form class='lv-act-form' method='post' action='%s'%s>"
+        "<button type='submit' class='lv-act-btn%s'>%s</button></form>"
+        % (action, extra, (" " + cls) if cls else "", label))
+
+
+def _lv_end_abort(primary_label="End session"):
+    return (_lv_form_btn("/focus/end", primary_label, "primary")
+            + _lv_form_btn("/focus/abort", "Abort", "ghost",
+                           confirm_abort=True))
+
+
+def _lv_active_shell(title, orb_html, shield_text, buttons_html, mid_html,
+                     subnote, legacy_html):
+    """Shared skeleton for the three in-session pages."""
+    return (
+        _living_nav("focus", "armed", "Shield armed")
+        + "<div class='lv-wrap'>"
+        + "<section class='lv-instrument lv-active' "
+          "aria-label='Focus session in progress'>"
+        + "<h1 class='lv-sess-title st' style='--d:40ms'>%s</h1>"
+          % escape(title)
+        + orb_html
+        + "<p class='lv-orb-shield lv-armed st' style='--d:160ms'>"
+          "<span class='dot' aria-hidden='true'></span>%s</p>"
+          % escape(shield_text)
+        + "<div class='lv-act-row st' style='--d:220ms'>%s</div>"
+          % buttons_html
+        + mid_html
+        + "<p class='lv-subnote st' style='--d:300ms'>%s</p>" % subnote
+        + "</section>"
+        + "<div class='lv-legacy'>%s</div>" % legacy_html
+        + "</div>"
+        + _living_tabs("focus"))
 
 
 def _soundscape_controls():
@@ -353,111 +444,85 @@ def focus_page():
                      "uninterrupted_min": 0.0}
         status_line = ("Time is up -- finish the session to see your summary."
                        if remaining <= 0 else "Stay focused.")
-        body = (
-            "<div class='card zen-visible'>"
-            "<div class='focus-label'>%s</div>"
-            "<div class='fc-ring-wrap'>"
-            "%s"
-            "<div>%s<p class='note'>%s</p></div>"
-            "</div>"
-            "<p class='note'>%.0f planned minutes &middot; %s blocking</p>"
-            "<p>%s</p>"
-            "<form class='inline' method='post' action='/focus/end'>"
-            "<button type='submit'>End session</button></form> "
-            "<form class='inline' method='post' action='/focus/abort' "
-            "onsubmit=\"return confirm('Abort this session? "
-            "It will not count toward your streak.');\">"
-            "<button type='submit'>Abort</button></form> "
-            "<span class='zen-only'><br><br></span>"
-            "</div>"
-            "<div class='card'><h3>Preferences</h3><p>%s</p><p>%s</p></div>"
-            "%s"
-            "%s"
-            % (escape(active["label"]),
-               _svg_ring(remaining, active["planned_minutes"] * 60,
-                         depth=depth["state"]),
-               _depth_pill(active["id"], depth), status_line,
-               active["planned_minutes"], escape(active["block_level"]),
-               _zen_button(), cues_form, streak_html, _soundscape_controls(),
-               _focus_scripts())
-        )
-        return layout("Focus session", body, active="focus")
+        caption = ("Time is up" if remaining <= 0 else "In session")
+        orb_html = _lv_active_orb(
+            phase="work", ring_mode="remaining",
+            total=active["planned_minutes"] * 60,
+            value=max(0, remaining), caption=caption,
+            depth=depth["state"], session_id=active["id"],
+            time_up=remaining <= 0)
+        mid_html = (
+            "<div class='lv-depth st' style='--d:260ms'>%s</div>"
+            % _depth_pill(active["id"], depth))
+        subnote = ("%s &middot; %.0f planned minutes &middot; %s blocking"
+                   % (status_line, active["planned_minutes"],
+                      escape(active["block_level"])))
+        legacy_html = (
+            "<div class='card'><h3>Session</h3><p>%s</p><p>%s</p>%s</div>"
+            % (_zen_button(), cues_form, streak_html)
+            + _soundscape_controls())
+        body = _lv_active_shell(
+            active["label"], orb_html, "Shield armed \u2014 blocking is on",
+            _lv_end_abort(), mid_html, subnote,
+            legacy_html + _focus_scripts())
+        return layout("Focus session", body, active="focus",
+                      body_class="living",
+                      extra_css=_LIVING_CSS, extra_js=_LIVING_JS)
 
-    past_rows = []
-    for session in focus_mod.list_sessions(limit=10):
+    # ── Living instrument: recent sessions as quiet rows ──
+    _sess_data = []
+    _max_focus = 0.0
+    for session in focus_mod.list_sessions(limit=8):
         summary = focus_mod.session_summary(session["id"])
-        past_rows.append(
-            "<tr><td>%s<br><span class='note'>%s</span></td>"
-            "<td>%s</td><td>%.0f / %.1f min</td><td>%.1f min</td>"
-            "<td>%d</td><td>%.1f</td></tr>"
-            % (escape(session["label"]), escape(session["started_at"][:16]),
-               escape(session["status"]),
-               summary["planned_minutes"], summary["actual_minutes"],
-               summary["focus_minutes"], summary["blocks_count"],
-               summary["pulse"]))
-    past_table = (
-        "<table><tr><th>Session</th><th>Status</th><th>Planned / Actual</th>"
-        "<th>Focus work</th><th>Blocks</th><th>Pulse</th></tr>%s</table>"
-        % ("".join(past_rows)
-           or "<tr><td colspan='6' class='note'>No sessions yet.</td></tr>"))
+        _sess_data.append((session, summary))
+        _max_focus = max(_max_focus, summary["focus_minutes"])
+    sess_rows = []
+    for session, summary in _sess_data:
+        _frac = (summary["focus_minutes"] / _max_focus) if _max_focus else 0
+        sess_rows.append(
+            "<li><div class='lv-sess-main'>"
+            "<span class='lv-sess-label'>%s</span>"
+            "<span class='lv-sess-meta'>%s &middot; %.0f min focus</span>"
+            "</div>"
+            "<div class='lv-sess-bar' aria-hidden='true'>"
+            "<span style='width:%.0f%%'></span></div></li>"
+            % (escape(session["label"] or "Untitled"),
+               escape(session["started_at"][:10]),
+               summary["focus_minutes"], _frac * 100))
+    recent_html = (
+        "<section class='lv-wrap' aria-label='Recent sessions'>"
+        "<div class='lv-recent st' style='--d:560ms'>"
+        "<h2 class='lv-sec-title'>Recent sessions</h2>"
+        "%s</div></section>"
+        % ("<ul class='lv-sessions'>%s</ul>" % "".join(sess_rows)
+           if sess_rows else
+           "<p class='lv-quiet'>No sessions yet &mdash; your first one "
+           "starts the story.</p>"))
 
     try:
         work_min, work_reason = adaptive.suggest_work_minutes()
-        flow_min, flow_reason = adaptive.suggest_flow_target()
         tired, tired_msg = adaptive.fatigue_check()
     except Exception:
         work_min, work_reason = 25, ""
-        flow_min, flow_reason = 50, ""
         tired, tired_msg = False, ""
-    suggestion_card = (
-        "<div class='card'><h3>Suggestion for today</h3>"
-        "<p>Pomodoro work block: <b>%d min</b> -- %s</p>"
-        "<p>Flowtime soft target: <b>%d min</b> -- %s</p>"
-        "%s</div>"
-        % (work_min, escape(work_reason), flow_min, escape(flow_reason),
-           ("<p><b>%s</b></p>" % escape(tired_msg)) if tired else ""))
 
-    body = (
-        "%s"
-        "%s"
-        "%s"
-        "<div class='card'><h3>Start a focus session</h3>"
-        "<form method='post' action='/focus/start'>"
-        "<p><label>Label <input type='text' name='label' required "
-        "placeholder='e.g. Deep work' size='28'></label></p>"
-        "<p><label><input type='radio' name='mode' value='classic' "
-        "checked> Classic -- fixed timer</label><br>"
-        "<label><input type='radio' name='mode' value='flowtime'> "
-        "Flowtime -- no fixed end, work until a natural break</label><br>"
-        "<label><input type='radio' name='mode' value='pomodoro'> "
-        "Smart Pomodoro -- work/break cycles that adapt to you</label></p>"
-        "<p><label><input type='radio' name='preset' value='25'> 25 min</label> "
-        "<label><input type='radio' name='preset' value='50' checked> 50 min</label> "
-        "<label><input type='radio' name='preset' value='90'> 90 min</label> "
-        "<label><input type='radio' name='preset' value='custom'> custom "
-        "<input type='number' name='custom_minutes' min='1' max='480' "
-        "style='width:70px' placeholder='min'></label>"
-        "<span class='note'>For Pomodoro this is the work-block length; "
-        "for Flowtime it is a soft target, not an alarm.</span></p>"
-        "<p><label>Work blocks (Pomodoro): "
-        "<input type='number' name='target_cycles' value='4' min='1' "
-        "max='24' style='width:60px'></label></p>"
-        "<p><label><input type='radio' name='block_level' value='strict' "
-        "checked> Strict -- block Personal (-1) and Distracting (-2)</label><br>"
-        "<label><input type='radio' name='block_level' value='lenient'> "
-        "Lenient -- block only Distracting (-2)</label></p>"
-        "<p><label><input type='radio' name='enforcement_mode' "
-        "value='strict' checked> Standard -- pop-up reminder and a "
-        "dismissible full-screen note</label><br>"
-        "<label><input type='radio' name='enforcement_mode' "
-        "value='hardcore'> Hardcore -- minimize the window and lock the "
-        "note for 30 seconds (no Alt+Tab). Choose this only if you mean "
-        "it.</label></p>"
-        "<p><button type='submit'>Start session</button></p>"
-        "</form>"
-        "<p class='note'>Blocking starts automatically when the session "
-        "starts -- no extra step needed.</p></div>"
-        "%s"
+    # ── Living instrument (slice 6): the adaptive suggestion IS the default
+    # action — stepper starts at the suggested minutes, one click begins.
+    # Field names must stay in sync with /focus/start.
+    _sug_min = max(15, min(120, int(round(work_min / 5.0) * 5)))
+    _orb_time = "%d:00" % _sug_min
+
+    tired_line = (("<p class='lv-tired'>%s</p>" % escape(tired_msg))
+                  if tired else "")
+    suggest_html = (
+        "<p class='lv-suggest st lv-dissolve' style='--d:480ms'>"
+        "<span aria-hidden='true'>&#10022;</span> Suggested "
+        "<b>%d min</b>%s</p>%s"
+        % (_sug_min,
+           (" &mdash; %s" % escape(work_reason)) if work_reason else "",
+           tired_line))
+
+    prefs_card = (
         "<div class='card'><h3>Preferences</h3><p>%s</p>"
         "<p><label>Daily focus target (min) "
         "<input type='number' name='daily_target' value='%d' min='15' "
@@ -471,12 +536,110 @@ def focus_page():
         "<form id='peak-form' class='inline' method='post' "
         "action='/focus/peak'><button type='submit'>Save</button></form>"
         "</div>"
-        "<div class='card'><h3>Past sessions</h3>%s</div>"
-        % (streak_html, _daily_ring_card(), _peak_launch_card(),
-           suggestion_card, cues_form, _daily_target_value(),
-           _peak_start_value(), _peak_end_value(), past_table)
+        % (cues_form, _daily_target_value(),
+           _peak_start_value(), _peak_end_value()))
+
+    instrument_html = (
+        _living_nav("focus", "ready", "Shield ready")
+        + "<div class='lv-wrap'><section class='lv-instrument' "
+          "aria-label='Start a focus session'>"
+        "<div class='lv-orb st' style='--d:80ms' id='lv-orb'>"
+        "<div class='lv-halo' aria-hidden='true'></div>"
+        "<svg class='lv-orb-svg' viewBox='0 0 340 340' aria-hidden='true'>"
+        "<circle class='lv-orb-track' cx='170' cy='170' r='150'/>"
+        "<circle class='lv-orb-prog' cx='170' cy='170' r='150'/>"
+        "</svg>"
+        "<div class='lv-orb-core'>"
+        "<p class='lv-orb-time' id='lv-orb-time'>%s</p>"
+        "<p class='lv-orb-state' id='lv-orb-state'>Ready</p>"
+        "</div></div>"
+        "<p class='lv-orb-shield st' style='--d:160ms'>"
+        "<span class='dot' aria-hidden='true'></span>"
+        "Shield arms automatically when you begin</p>"
+        "<form method='post' action='/focus/start' id='lv-begin-form' "
+        "class='lv-controls'>"
+        "<div class='lv-label-row st lv-dissolve' style='--d:220ms'>"
+        "<label for='lv-label'>What are you working on?</label>"
+        "<input type='text' id='lv-label' name='label' value='Deep work' "
+        "maxlength='80' autocomplete='off'>"
+        "</div>"
+        "<div class='lv-chips st lv-dissolve' style='--d:280ms' "
+        "role='radiogroup' aria-label='Session mode'>"
+        "<span class='lv-glide' aria-hidden='true'></span>"
+        "<button type='button' class='lv-chip on' data-mode='classic' "
+        "role='radio' aria-checked='true'>Classic</button>"
+        "<button type='button' class='lv-chip' data-mode='pomodoro' "
+        "role='radio' aria-checked='false'>Pomodoro</button>"
+        "<button type='button' class='lv-chip' data-mode='flowtime' "
+        "role='radio' aria-checked='false'>Flowtime</button>"
+        "</div>"
+        "<input type='hidden' name='mode' id='lv-mode' value='classic'>"
+        "<input type='hidden' name='preset' value='custom'>"
+        "<input type='hidden' name='custom_minutes' id='lv-minutes' "
+        "value='%d'>"
+        "<div class='lv-stepper st lv-dissolve' style='--d:340ms'>"
+        "<button type='button' id='lv-minus' "
+        "aria-label='Shorter session'>&minus;</button>"
+        "<span class='lv-step-val'><b id='lv-step-num'>%d</b> min</span>"
+        "<button type='button' id='lv-plus' "
+        "aria-label='Longer session'>+</button>"
+        "</div>"
+        "<p class='lv-step-note st lv-dissolve' style='--d:380ms' "
+        "id='lv-step-note'>Fixed timer.</p>"
+        "<div class='lv-cycles st lv-dissolve' id='lv-cycles' hidden>"
+        "<span id='lv-cycles-label'>Work blocks</span>"
+        "<div class='lv-stepper small'>"
+        "<button type='button' id='lv-cminus' "
+        "aria-label='Fewer work blocks'>&minus;</button>"
+        "<span class='lv-step-val'><b id='lv-cnum'>4</b></span>"
+        "<button type='button' id='lv-cplus' "
+        "aria-label='More work blocks'>+</button>"
+        "</div>"
+        "<input type='hidden' name='target_cycles' id='lv-cycles-val' "
+        "value='4'>"
+        "</div>"
+        "<details class='lv-shield-more st lv-dissolve' style='--d:400ms'>"
+        "<summary>Shield settings</summary>"
+        "<div class='lv-shield-row'>"
+        "<span>Blocking</span>"
+        "<label><input type='radio' name='block_level' value='strict' "
+        "checked> Strict</label>"
+        "<label><input type='radio' name='block_level' value='lenient'> "
+        "Lenient</label>"
+        "</div>"
+        "<p class='lv-note'>Strict blocks Personal and Distracting apps; "
+        "Lenient blocks only Distracting.</p>"
+        "<div class='lv-shield-row'>"
+        "<span>Enforcement</span>"
+        "<label><input type='radio' name='enforcement_mode' value='strict' "
+        "checked> Standard</label>"
+        "<label><input type='radio' name='enforcement_mode' "
+        "value='hardcore'> Hardcore</label>"
+        "</div>"
+        "<p class='lv-note'>Hardcore minimizes the window and locks the "
+        "note for 30 seconds.</p>"
+        "</details>"
+        "<button type='submit' class='lv-begin lv-magnet st' "
+        "style='--d:440ms' id='lv-begin'>Begin session</button>"
+        "</form>"
+        "%s"
+        "</section></div>"
+        % (_orb_time, _sug_min, _sug_min, suggest_html))
+
+    body = (
+        instrument_html
+        + recent_html
+        + "<div class='lv-wrap'><div class='lv-legacy'>"
+        + streak_html
+        + "<div class='rhythm-row'>" + _daily_ring_card()
+        + _peak_launch_card() + "</div>"
+        + prefs_card
+        + "</div></div>"
+        + _living_tabs("focus")
     )
-    return layout("Focus sessions", body, active="focus")
+    return layout("Focus sessions", body, active="focus",
+                  body_class="living",
+                  extra_css=_LIVING_CSS, extra_js=_LIVING_JS)
 
 
 def _daily_target_value(db_path=None):
@@ -507,57 +670,62 @@ def _pomodoro_active_page_v11(active, streak_html, cues_form, focus_mod):
     except Exception:
         depth = {"state": "surface", "switches_15m": 0,
                  "uninterrupted_min": 0.0}
+    legacy_html = (
+        "<div class='card'><h3>Session</h3><p>%s</p><p>%s</p>%s</div>"
+        % (_zen_button(), cues_form, streak_html)
+        + _soundscape_controls() + _focus_scripts())
     if cycle:
         remaining = focus_mod.cycle_remaining_seconds(cycle)
         total = (cycle.get("planned_seconds") or remaining or 1)
-        if cycle["kind"] == "work":
-            headline = "Work block %d of %d" % (done + 1, target)
-            controls = (
-                "<form class='inline' method='post' "
-                "action='/focus/cycle/break/start'>"
-                "<button type='submit'>Start break</button></form> ")
-            note = "Blocking is on."
-        else:
-            headline = "Break -- relax"
-            controls = (
-                "<form class='inline' method='post' "
-                "action='/focus/cycle/break/end'>"
-                "<button type='submit' class='btn' "
-                "style='background:var(--ink);color:var(--ink-inverted)'>"
-                "End break early</button></form> "
-                "<form class='inline' method='post' "
-                "action='/focus/cycle/break/skip'>"
-                "<button type='submit' class='btn secondary'>"
-                "Skip break</button></form> ")
-            note = "Blocking is resting too."
-        depth_val = "surface" if cycle["kind"] == "work" else "unmeasured"
         on_brk = (cycle["kind"] != "work")
-        ring_html = (
-            "<div class='fc-ring-wrap'>%s<div>"
-            "<p><b>%s</b></p><p class='note'>%s</p>%s</div></div>"
-            "%s"
-            % (_svg_ring(remaining, total, depth=depth_val),
-               headline, note, _depth_pill(active["id"], depth, on_break=on_brk),
-               _cycle_dots(done, target, on_break=on_brk)))
-        controls_html = "<p>%s</p>" % (controls + _session_buttons_v11())
+        if not on_brk:
+            caption = "Work block %d of %d" % (done + 1, target)
+            buttons = (_lv_form_btn("/focus/cycle/break/start",
+                                    "Start break", "primary")
+                       + _lv_end_abort())
+            shield_text = "Shield armed \u2014 blocking is on"
+            note = "Blocking is on."
+            depth_state = depth["state"]
+        else:
+            caption = "Break \u2014 relax"
+            buttons = (_lv_form_btn("/focus/cycle/break/end",
+                                    "End break early", "primary")
+                       + _lv_form_btn("/focus/cycle/break/skip",
+                                      "Skip break")
+                       + _lv_end_abort())
+            shield_text = "Shield resting \u2014 blocking paused"
+            note = "Blocking is resting too."
+            depth_state = "surface"
+        orb_html = _lv_active_orb(
+            phase=("break" if on_brk else "work"), ring_mode="remaining",
+            total=total, value=max(0, remaining), caption=caption,
+            depth=depth_state, session_id=active["id"],
+            time_up=(remaining <= 0 and not on_brk))
+        mid_html = (
+            "<div class='lv-dots st' style='--d:240ms'>%s</div>"
+            % _cycle_dots(done, target, on_break=on_brk)
+            + "<div class='lv-depth st' style='--d:260ms'>%s</div>"
+            % _depth_pill(active["id"], depth, on_break=on_brk))
+        subnote = "%s &middot; work block %d of %d" % (note, done + 1, target)
+        body = _lv_active_shell(active["label"], orb_html, shield_text,
+                                buttons, mid_html, subnote, legacy_html)
     else:
-        ring_html = (
-            "<p><b>Target reached: %d work blocks.</b> End the session "
-            "whenever you are ready -- well done.</p>"
-            "%s" % _cycle_dots(done, target))
-        controls_html = "<p>%s</p>" % _session_buttons_v11()
-    body = (
-        "<div class='card zen-visible'><div class='focus-label'>%s</div>"
-        "%s%s<p>%s</p></div>"
-        "%s"
-        "<div class='card'><h3>Preferences</h3><p>%s</p></div>"
-        "%s%s"
-        % (escape(active["label"]), ring_html, controls_html,
-           _zen_button(), _soundscape_controls(), cues_form, streak_html,
-           _focus_scripts())
-    )
-    b_cls = "break-mode" if (cycle and cycle["kind"] != "work") else ""
-    return layout("Focus session", body, active="focus", body_class=b_cls)
+        orb_html = _lv_active_orb(
+            phase="done", ring_mode="remaining", total=1, value=1,
+            caption="Target reached", depth="surface",
+            session_id=active["id"], static=True)
+        mid_html = (
+            "<div class='lv-dots st' style='--d:240ms'>%s</div>"
+            % _cycle_dots(done, target))
+        subnote = ("Target reached: %d work blocks. End the session "
+                   "whenever you are ready \u2014 well done." % target)
+        body = _lv_active_shell(active["label"], orb_html,
+                                "Shield armed \u2014 blocking is on",
+                                _lv_end_abort(), mid_html, subnote,
+                                legacy_html)
+    return layout("Focus session", body, active="focus",
+                  body_class="living",
+                  extra_css=_LIVING_CSS, extra_js=_LIVING_JS)
 
 
 
@@ -573,23 +741,24 @@ def _flowtime_active_page_v11(active, streak_html, cues_form, focus_mod):
     except Exception:
         depth = {"state": "surface", "switches_15m": 0,
                  "uninterrupted_min": 0.0}
-    body = (
-        "<div class='card zen-visible'><div class='focus-label'>%s</div>"
-        "<div class='fc-ring-wrap'>%s<div>%s"
-        "<p class='note'>Soft target %.0f min (no alarm) &middot; %s "
-        "blocking</p></div></div>"
-        "<p>%s</p><p>%s</p></div>"
-        "%s"
-        "<div class='card'><h3>Preferences</h3><p>%s</p></div>"
-        "%s%s"
-        % (escape(active["label"]),
-           _svg_ring(elapsed, target, mode="elapsed", depth=depth["state"]),
-           _depth_pill(active["id"], depth), target / 60,
-           escape(active["block_level"]), _session_buttons_v11(),
-           _zen_button(), _soundscape_controls(), cues_form, streak_html,
-           _focus_scripts())
-    )
-    return layout("Focus session", body, active="focus")
+    orb_html = _lv_active_orb(
+        phase="work", ring_mode="elapsed", total=target, value=elapsed,
+        caption="Flowing", depth=depth["state"], session_id=active["id"])
+    mid_html = (
+        "<div class='lv-depth st' style='--d:260ms'>%s</div>"
+        % _depth_pill(active["id"], depth))
+    subnote = ("Soft target %.0f min (no alarm) &middot; %s blocking"
+               % (target / 60, escape(active["block_level"])))
+    legacy_html = (
+        "<div class='card'><h3>Session</h3><p>%s</p><p>%s</p>%s</div>"
+        % (_zen_button(), cues_form, streak_html)
+        + _soundscape_controls() + _focus_scripts())
+    body = _lv_active_shell(
+        active["label"], orb_html, "Shield armed \u2014 blocking is on",
+        _lv_end_abort(), mid_html, subnote, legacy_html)
+    return layout("Focus session", body, active="focus",
+                  body_class="living",
+                  extra_css=_LIVING_CSS, extra_js=_LIVING_JS)
 
 
 def _session_buttons_v11():

@@ -175,7 +175,11 @@ def test_origin_is_loopback(origin, expected):
 def _assert_secure_headers(response):
     assert response.headers["X-Content-Type-Options"] == "nosniff"
     assert response.headers["X-Frame-Options"] == "DENY"
-    assert response.headers["Referrer-Policy"] == "no-referrer"
+    # same-origin, not no-referrer: Chromium sends "Origin: null" on form
+    # POSTs from no-referrer pages, which _reject_loopback_csrf rejects
+    # with 403 — breaking every form in a real browser. same-origin still
+    # never leaks a Referer off this machine.
+    assert response.headers["Referrer-Policy"] == "same-origin"
     csp = response.headers["Content-Security-Policy"]
     assert csp and "default-src 'self'" in csp
 

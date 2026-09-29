@@ -300,7 +300,6 @@ def budget_status(project_id, period_type, ref_day=None, path=None):
         project_id, start_day.isoformat(), end_day.isoformat(), path=path
     )
     working = get_working_days(path=path)
-    today = date.today()
     result = {
         "project_id": project_id,
         "period_type": period_type,
@@ -338,14 +337,14 @@ def budget_status(project_id, period_type, ref_day=None, path=None):
     # -- pacing projection (working-day aware, M3.1-M3.4) ----------------
     if cap["cap_seconds"]:
         total_wd = working_days_between(start_day, end_day, working)
-        elapsed_end = min(today, end_day)
+        elapsed_end = min(ref_day, end_day)
         elapsed_wd = (
             working_days_between(start_day, elapsed_end, working)
             if elapsed_end >= start_day
             else 0
         )
         remaining_wd = total_wd - elapsed_wd
-        is_working_day = today.weekday() in working
+        is_working_day = ref_day.weekday() in working
         pacing = {
             "suppressed": False,
             "suppress_reason": "",

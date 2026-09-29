@@ -340,7 +340,9 @@ def test_focus_routes_200(tmp_path, monkeypatch):
     _session(db)
     html = client.get("/focus").data.decode()
     assert "soundscapes.js" in html
-    assert "data-fc-ring" in html
+    # Living Instrument (slice 7): the in-session orb replaced the
+    # legacy SVG progress ring.
+    assert "data-lv-orb" in html
     assert "fc-depth-pill" in html
     assert "zen-mode" in html or "data-fc-zen" in html
 
