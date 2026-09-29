@@ -70,4 +70,31 @@ jobs:
         uses: softprops/action-gh-release@v2
         with:
           files: installer/FocusCore-Setup-*.exe
-          generate_release_notes: true
+          # Professional release page: one obvious download, no confusion
+          # with GitHub's auto-attached "Source code (zip)" (raw code only).
+          body: |
+            ## Download
+
+            **Get `FocusCore-Setup-${{ env.VERSION }}.exe` below — that is the installer.**
+            Do NOT download "Source code (zip)"; that is the raw code, for developers only.
+
+            ## Install (about 2 minutes)
+
+            1. Download and double-click `FocusCore-Setup-${{ env.VERSION }}.exe`.
+            2. If Windows SmartScreen warns about an unknown publisher, click
+               **More info → Run anyway**. (The installer is not code-signed yet;
+               it touches nothing outside its own folder.)
+            3. Click Next → Next. A Focus Core icon appears on your desktop —
+               double-click it. No other software needed.
+
+            **You need:** 64-bit Windows 10 or 11. Python and every component
+            are bundled inside the setup — nothing to install first.
+
+            ## What's new
+
+            Full changelog: https://github.com/ahtisham482/focus-core/releases
+
+            ## Help
+
+            Inside the app: the Help menu (plain-English guides). Something wrong?
+            https://github.com/ahtisham482/focus-core/issues

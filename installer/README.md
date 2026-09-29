@@ -35,7 +35,7 @@ Download → Next → Next → desktop icon.
    python installer\build.py --version 1.3.0
    "C:\Program Files (x86)\Inno Setup 6\ISCC.exe" installer\installer.iss /DAppVersion="1.3.0"
    ```
-3. The exe appears as `installer\FocusCore-Setup-1.3.0.exe` (~60–90 MB).
+3. The exe appears as `installer\FocusCore-Setup-1.3.0.exe` (~25 MB).
 
 ## CI build
 
