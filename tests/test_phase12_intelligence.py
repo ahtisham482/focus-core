@@ -198,8 +198,12 @@ def test_day_hourly_depth_single_bounded_query(tmp_path, monkeypatch):
     monkeypatch.setattr(store, "get_activities_range", counting)
     hours = intel_mod.day_hourly_depth(day, db_path=db)
     assert len(calls) == 1
-    assert calls[0][0] == day + "T00:00:00"
-    assert calls[0][1] == day + "T23:59:59"
+    # Wide bounds: one day each side, so offset-carrying timestamps near
+    # midnight are fetched and then filtered by local date in Python.
+    wide_start = (date.fromisoformat(day) - timedelta(days=1)).isoformat()
+    wide_end = (date.fromisoformat(day) + timedelta(days=1)).isoformat()
+    assert calls[0][0] == wide_start + "T00:00:00"
+    assert calls[0][1] == wide_end + "T23:59:59"
     assert hours[9][2] == 3600.0
 
 

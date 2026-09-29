@@ -582,7 +582,6 @@ def today_events(day=None, db_path=None, now=None):
         return [], "unconfigured"
     try:
         text, fresh = _fetch_fresh(db_path)
-        events = parse_ical(text) if text else []
     except Exception:
         return [], "unreachable"
     if not text:

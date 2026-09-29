@@ -516,9 +516,19 @@ FLOW_BASELINE_DAYS = 7      # week-over-week delta baseline window
 FLOW_TREND_WEEKS = 3        # trailing baseline for week trends
 
 
-def _day_bounds(day_str):
-    """(start_iso, end_iso) bounding one local day for range queries."""
-    return ("%sT00:00:00" % day_str, "%sT23:59:59" % day_str)
+def _wide_day_bounds(day_from_str, day_to_str):
+    """Naive ISO bounds covering [day_from, day_to] plus one day each side.
+
+    Stored timestamps may carry timezone offsets (ActivityWatch UTC "Z"
+    stamps, or wall times like "+05:00"), so a plain lexicographic SQL
+    comparison against naive local-day bounds silently drops events near
+    midnight. Callers query wide, then keep only events whose LOCAL date
+    (via _parse_local) falls inside [day_from, day_to].
+    """
+    d0 = date.fromisoformat(day_from_str) - timedelta(days=1)
+    d1 = date.fromisoformat(day_to_str) + timedelta(days=1)
+    return ("%sT00:00:00" % d0.isoformat(),
+            "%sT23:59:59" % d1.isoformat())
 
 
 def day_hourly_depth(day_str, db_path=None):
@@ -529,12 +539,15 @@ def day_hourly_depth(day_str, db_path=None):
     {hour 0..23: {2: s, 1: s, 0: s, -1: s, -2: s}}.
     """
     hours = {h: {s: 0.0 for s in VALID_SCORES} for h in range(24)}
-    start_iso, end_iso = _day_bounds(day_str)
+    start_iso, end_iso = _wide_day_bounds(day_str, day_str)
+    want = date.fromisoformat(day_str)
     for event in store.get_activities_range(start_iso, end_iso,
                                             path=db_path):
         try:
             start = _parse_local(event.get("ts"))
         except (ValueError, TypeError):
+            continue
+        if start.date() != want:
             continue
         duration = float(event.get("duration") or 0)
         if duration <= 0:
@@ -661,13 +674,16 @@ def flow_index(day_str, db_path=None):
 
 def _distraction_blocks(day_str, db_path=None):
     """Contiguous -1/-2 runs for one day: [(start, end, minutes)]."""
-    start_iso, end_iso = _day_bounds(day_str)
+    start_iso, end_iso = _wide_day_bounds(day_str, day_str)
+    want = date.fromisoformat(day_str)
     events = []
     for event in store.get_activities_range(start_iso, end_iso,
                                             path=db_path):
         try:
             start = _parse_local(event.get("ts"))
         except (ValueError, TypeError):
+            continue
+        if start.date() != want:
             continue
         duration = float(event.get("duration") or 0)
         if duration > 0:
@@ -843,13 +859,15 @@ def switch_heatmap_7x24(day_from, day_to, db_path=None):
     day = day_from
     while day <= day_to:
         ds = day.isoformat()
-        start_iso, end_iso = _day_bounds(ds)
+        start_iso, end_iso = _wide_day_bounds(ds, ds)
         events = []
         for event in store.get_activities_range(start_iso, end_iso,
                                                 path=db_path):
             try:
                 start = _parse_local(event.get("ts"))
             except (ValueError, TypeError):
+                continue
+            if start.date() != day:
                 continue
             if float(event.get("duration") or 0) > 0:
                 events.append((start, event.get("app") or ""))

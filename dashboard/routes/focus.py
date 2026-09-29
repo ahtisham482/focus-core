@@ -16,6 +16,7 @@ from dashboard.app import (
     _living_tabs,
     layout,
 )
+import math as _math
 
 
 # Living Instrument redesign: per-page assets, scoped by body.living.
@@ -24,8 +25,6 @@ _LIVING_CSS = "<link rel='stylesheet' href='/static/living.css'>"
 _LIVING_JS = "<script src='/static/living-focus.js'></script>"
 
 # ------------------------------------------------------- SVG ring helper ---
-
-import math as _math
 
 # UI-10: Depth state → (hue color, luminance-boosted color for dual-encoding)
 # Dual-encode: hue AND luminance so depth is never hue-only (deuteranopia guard).

@@ -521,7 +521,6 @@ def home_page():
     aw_state = aw_mod.detection_state(status=aw_status)
 
     summary = store.get_day_summary(today)
-    pulse = productivity_pulse(summary["seconds_by_level"])
     total = summary["total_seconds"]
     seconds_by_level = summary["seconds_by_level"]
     focus_hours = _hours(seconds_by_level.get(2, 0)
@@ -570,7 +569,9 @@ def home_page():
     _ring = gam_mod.daily_ring(today)
     _evals = goals_mod.evaluate_all(summary)
     _pinned = [g for g in _evals if g["pinned"]]
-    _num = lambda v: "%.0f" % (v or 0)
+
+    def _num(v):
+        return "%.0f" % (v or 0)
     rings = [("Focus", _ring["minutes"], _ring["target"], "min",
               _ring["fraction"])]
     for _g in _pinned[:2]:
@@ -692,16 +693,20 @@ def home_page():
     dateline = date.today().strftime("%A, %B") + " %d" % date.today().day
     if cold_start:
         h1_lines = (
-            "<span class='mask'><span class='line' style='--d:120ms'>Day one.</span></span>"
-            "<span class='mask'><span class='line' style='--d:200ms'>Your focus story</span></span>"
-            "<span class='mask'><span class='line' style='--d:280ms'>starts now.</span></span>"
+            "<span class='mask'><span class='line' style='--d:120ms'>"
+            "Day one.</span></span>"
+            "<span class='mask'><span class='line' style='--d:200ms'>"
+            "Your focus story</span></span>"
+            "<span class='mask'><span class='line' style='--d:280ms'>"
+            "starts now.</span></span>"
         )
         subcopy = ("Work normally today. Focus Core is learning your rhythm "
                    "&mdash; tomorrow you'll see your first Flow Index, your peak "
                    "hours, and your streak.")
     else:
         h1_lines = (
-            "<span class='mask'><span class='line' style='--d:120ms'>Your day,</span></span>"
+            "<span class='mask'><span class='line' style='--d:120ms'>"
+            "Your day,</span></span>"
             "<span class='mask'><span class='line' style='--d:200ms'>in "
             "<em class='lv-ember-i'>focus</em>.</span></span>"
         )
@@ -771,8 +776,9 @@ def home_page():
             % banner_rows)
     else:
         attention_html = (
-            "<div class='card attention ok st' style='--d:600ms'><h3>All clear -- you're on "
-            "track.</h3><p class='note'>Nothing needs you right now.</p>"
+            "<div class='card attention ok st' style='--d:600ms'>"
+            "<h3>All clear -- you're on track.</h3>"
+            "<p class='note'>Nothing needs you right now.</p>"
             "</div>")
 
     # targets_html (Living section) replaced the old pinned-goals card above.
@@ -789,9 +795,10 @@ def home_page():
         % insight_text)
 
     legacy_html = (attention_html + today_html + insight_html
-                   + "<div class='card st' style='--d:840ms'><p><a href='/day/%s'>See today's full "
-                     "details</a> &middot; <a href='/timesheet?day=%s'>Today's "
-                     "timesheet</a></p></div>" % (today, today))
+                   + "<div class='card st' style='--d:840ms'>"
+                     "<p><a href='/day/%s'>See today's full details</a> &middot; "
+                     "<a href='/timesheet?day=%s'>Today's timesheet</a></p></div>"
+                     % (today, today))
     body = (nav_html + hero_html + rhythm_html + targets_html
             + "<div class='lv-wrap'>" + legacy_html + "</div>"
             + foot_html + _living_tabs("home"))

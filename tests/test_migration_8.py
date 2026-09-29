@@ -182,7 +182,7 @@ def test_migration_8_failure_leaves_version_at_7(tmp_path, monkeypatch):
 
     patched = [
         mig_mod.Migration(m.version, m.name,
-                          boom if m.version == 9 else m.apply)
+                          boom if m.version == 8 else m.apply)
         for m in mig_mod.MIGRATIONS
     ]
     monkeypatch.setattr(mig_mod, "MIGRATIONS", patched)

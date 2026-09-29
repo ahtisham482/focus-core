@@ -45,6 +45,10 @@ jobs:
           Get-ChildItem installer\FocusCore-Setup-*.exe
 
       - name: Silent-install the product
+        # Fail fast if the installer hangs: a healthy silent install takes
+        # a few minutes. Without this, a hang burns the whole 30-minute
+        # job timeout and the run shows "cancelled" with no installer log.
+        timeout-minutes: 15
         shell: pwsh
         run: |
           # NOTE: do NOT use `& $exe ...` + $LASTEXITCODE here. On 2026-09-29
@@ -216,7 +220,9 @@ jobs:
           Write-Host "Server alive after restore"
 
       - name: Upload install log on failure
-        if: failure()
+        # Include cancelled(): a hung installer hits the step timeout above
+        # and the job is cancelled -- the log is the only way to see why.
+        if: failure() || cancelled()
         uses: actions/upload-artifact@v4
         with:
           name: smoke-install-log
