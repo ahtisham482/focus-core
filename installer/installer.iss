@@ -22,6 +22,8 @@ AppSupportURL=https://github.com/ahtisham482/focus-core/issues
 AppUpdatesURL=https://github.com/ahtisham482/focus-core/releases
 AppCopyright=Copyright (C) 2026 Focus Core
 UninstallDisplayIcon={app}\icon.ico
+; MIT license shown as a proper license page during setup.
+LicenseFile={#SourcePath}\..\LICENSE
 DefaultDirName={localappdata}\Programs\Focus Core
 DefaultGroupName=Focus Core
 DisableProgramGroupPage=yes
