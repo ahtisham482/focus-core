@@ -55,7 +55,12 @@ jobs:
           # the call operator returned while the installer was still
           # starting (empty $LASTEXITCODE, and $null -ne 0 is $true), so the
           # step failed even though the installer was copying files fine.
-          # Start-Process -Wait -PassThru is the reliable pattern.
+          # NOTE 2 (2026-09-29): do NOT use Start-Process -Wait either. The
+          # silent [Run] entry auto-launches the app (by design, for silent
+          # updates) and -Wait holds the step open until that app exits --
+          # run 36531531947 showed Setup finished ("Log closed") yet the
+          # step burned the whole 15-minute timeout. Poll for Setup's own
+          # exit instead, then stop the auto-launched app below.
           $ErrorActionPreference = 'Stop'
           $exe = Get-ChildItem installer\FocusCore-Setup-*.exe |
                  Select-Object -First 1
@@ -64,7 +69,14 @@ jobs:
           $proc = Start-Process -FilePath $exe.FullName `
                     -ArgumentList "/VERYSILENT", "/SUPPRESSMSGBOXES", `
                       "/NORESTART", "/LOG=$log" `
-                    -Wait -PassThru
+                    -PassThru
+          $deadline = (Get-Date).AddMinutes(10)
+          while (-not $proc.HasExited) {
+            if ((Get-Date) -gt $deadline) {
+              throw "installer hung (setup.exe never exited)"
+            }
+            Start-Sleep -Seconds 5
+          }
           if ($proc.ExitCode -ne 0) {
             throw "Installer exited with code $($proc.ExitCode)"
           }
@@ -83,6 +95,28 @@ jobs:
             throw "Installer exited 0 but the desktop shortcut never appeared"
           }
           Write-Host "Installed: $($exe.Name)"
+          # The silent [Run] entry auto-launched the app. Prove it fired,
+          # then stop that copy: a running app pins this step's process
+          # tree open, and the next step starts the app itself from a
+          # known-clean state.
+          $launched = Get-CimInstance Win32_Process `
+                         -Filter "Name = 'pythonw.exe'" |
+            Where-Object { $_.CommandLine -like "*focuscore.launcher*" }
+          if (-not $launched) {
+            throw "silent install did not auto-launch the app"
+          }
+          $launched | ForEach-Object {
+            Stop-Process -Id $_.ProcessId -Force -ErrorAction SilentlyContinue
+          }
+          $deadline = (Get-Date).AddSeconds(30)
+          while ((Get-Date) -lt $deadline) {
+            $left = Get-CimInstance Win32_Process `
+                       -Filter "Name = 'pythonw.exe'" |
+              Where-Object { $_.CommandLine -like "*focuscore.launcher*" }
+            if (-not $left) { break }
+            Start-Sleep -Seconds 2
+          }
+          Write-Host "Auto-launch verified; app stopped"
 
       - name: Verify install layout
         shell: pwsh
@@ -100,8 +134,13 @@ jobs:
       - name: Wait for the installed app to serve
         shell: pwsh
         run: |
-          # Silent install auto-launches the app ([Run] skipifnotsilent);
-          # the launcher starts the dashboard server on 127.0.0.1:5000.
+          # The install step stops the auto-launched copy so its step can
+          # end; start the app ourselves here (no -Wait: the server runs
+          # until the job ends) and wait for it to answer.
+          $appDir = "$env:LOCALAPPDATA\Programs\Focus Core"
+          Start-Process -FilePath "$appDir\python\pythonw.exe" `
+            -ArgumentList "-m", "focuscore.launcher" `
+            -WorkingDirectory $appDir
           $deadline = (Get-Date).AddSeconds(120)
           $r = $null
           do {
