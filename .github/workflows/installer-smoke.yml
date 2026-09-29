@@ -170,6 +170,55 @@ jobs:
             Write-Host "$p OK ($($r.RawContentLength) bytes)"
           }
 
+      - name: Screenshot the running app (visual check)
+        # I review this screenshot myself after the run: it shows the real
+        # app window AND the taskbar, so the Windows app-identity work
+        # (own taskbar icon/name instead of Python's) is verified by eye on
+        # a real Windows machine -- no human PC needed. Best-effort: never
+        # fails the job; a missing window still uploads the desktop capture
+        # for debugging.
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Continue'
+          Add-Type -AssemblyName System.Windows.Forms
+          Add-Type -AssemblyName System.Drawing
+          $shot = "$env:RUNNER_TEMP\focuscore-window.png"
+          # Wait for the native window, then bring it to the front.
+          $deadline = (Get-Date).AddSeconds(60)
+          $found = $false
+          while ((Get-Date) -lt $deadline) {
+            $w = Get-Process -ErrorAction SilentlyContinue |
+              Where-Object { $_.MainWindowTitle -eq "Focus Core" }
+            if ($w) { $found = $true; break }
+            Start-Sleep -Seconds 2
+          }
+          if ($found) {
+            Write-Host "Focus Core window found; bringing to front"
+            (New-Object -ComObject wscript.shell).AppActivate("Focus Core") | Out-Null
+            Start-Sleep -Seconds 2
+          } else {
+            Write-Host "##[warning]No 'Focus Core' window appeared; capturing desktop anyway"
+          }
+          $bounds = [System.Windows.Forms.Screen]::PrimaryScreen.Bounds
+          $bmp = New-Object System.Drawing.Bitmap($bounds.Width, $bounds.Height)
+          $g = [System.Drawing.Graphics]::FromImage($bmp)
+          try {
+            $g.CopyFromScreen($bounds.Location,
+              [System.Drawing.Point]::Empty, $bounds.Size)
+            $bmp.Save($shot, [System.Drawing.Imaging.ImageFormat]::Png)
+            Write-Host "Screenshot saved: $shot ($($bounds.Width)x$($bounds.Height))"
+          } finally {
+            $g.Dispose(); $bmp.Dispose()
+          }
+
+      - name: Upload app screenshot
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: smoke-app-screenshot
+          path: ${{ runner.temp }}/focuscore-window.png
+          if-no-files-found: warn
+
       - name: Restore a dev backup into the installed copy
         shell: pwsh
         run: |
