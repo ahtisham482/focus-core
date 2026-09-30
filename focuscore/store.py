@@ -9,6 +9,7 @@ import sqlite3
 import logging
 from datetime import date, datetime, timedelta
 from pathlib import Path
+from urllib.request import pathname2url
 
 from . import columncrypto, paths
 
@@ -183,7 +184,8 @@ def run_integrity_check(path=None):
             return False, ["no database file to check (in-memory)"]
         if not Path(str(target)).exists():
             return False, ["database file missing: %s" % target]
-        conn = sqlite3.connect("file:%s?mode=ro" % target, uri=True)
+        conn = sqlite3.connect(
+            "file:%s?mode=ro" % pathname2url(str(target)), uri=True)
         try:
             problems = []
             for row in conn.execute("PRAGMA integrity_check"):

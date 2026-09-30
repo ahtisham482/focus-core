@@ -249,18 +249,23 @@ class TrayApp:
             logger.warning(
                 "nightly WAL checkpoint failed for %s",
                 self.db_path, exc_info=True)
-        ok, problems = store.run_integrity_check(self.db_path)
-        if ok:
-            logger.debug("nightly integrity check ok for %s",
-                         self.db_path)
-            return
-        logger.error(
-            "nightly integrity check FAILED for %s: %s",
-            self.db_path, "; ".join(problems))
-        self._notify(
-            "Database check failed. Open Backup and restore the "
-            "latest backup.",
-            title="Focus Core")
+        try:
+            ok, problems = store.run_integrity_check(self.db_path)
+            if ok:
+                logger.debug("nightly integrity check ok for %s",
+                             self.db_path)
+                return
+            logger.error(
+                "nightly integrity check FAILED for %s: %s",
+                self.db_path, "; ".join(problems))
+            self._notify(
+                "Database check failed. Open Backup and restore the "
+                "latest backup.",
+                title="Focus Core")
+        except Exception:  # helper must never kill the loop
+            logger.warning(
+                "nightly integrity check raised for %s",
+                self.db_path, exc_info=True)
 
     def _nightly_wal_checkpoint(self):
         """Sprint 4 (Qwen item 10): TRUNCATE-checkpoint the WAL once a

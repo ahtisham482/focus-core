@@ -27,6 +27,7 @@ import sys
 import zipfile
 from datetime import datetime
 from pathlib import Path
+from urllib.request import pathname2url
 
 from . import __version__ as APP_VERSION
 
@@ -168,7 +169,8 @@ def _integrity(db_path):
     if not db_path or not os.path.exists(str(db_path)):
         return "no database file yet"
     try:
-        conn = sqlite3.connect("file:%s?mode=ro" % db_path, uri=True)
+        conn = sqlite3.connect(
+            "file:%s?mode=ro" % pathname2url(str(db_path)), uri=True)
         try:
             rows = conn.execute("PRAGMA integrity_check").fetchall()
         finally:
