@@ -4,8 +4,9 @@ What it does:
   1. Downloads the Python embeddable zip and extracts it to staging/python.
   2. Enables site-packages (uncomments `import site` in python3XX._pth).
   3. Bootstraps pip with get-pip.py.
-  4. Installs requirements.txt into the embedded Python (dev-only
-     packages like pytest are skipped).
+  4. Installs requirements-lock.txt into the embedded Python (exact pins
+     with SHA-256 hashes; dev-only packages like pytest are not in the
+     lock and are never shipped).
   5. Copies the focuscore/ and dashboard/ packages into staging/.
   6. Writes the .installed marker (tells the app to use the per-user
      data folder instead of writing next to the code).
@@ -24,6 +25,8 @@ Only the standard library is used, except Pillow for the icon step.
 """
 
 import argparse
+import hashlib
+import hmac
 import json
 import shutil
 import subprocess
@@ -33,9 +36,29 @@ import zipfile
 from pathlib import Path
 
 DEFAULT_PYTHON_VERSION = "3.12.7"  # must exist on python.org FTP
+# SHA-256 of python-<version>-embed-amd64.zip from python.org. Refuse to
+# build with an embedded Python we cannot verify byte-for-byte.
+PYTHON_EMBED_SHA256 = {
+    "3.12.7": "0d57bb6cb078b74d23dbfe91f77d6780d45bed328911609f1f7ee2ba1606bf44",
+}
 GET_PIP_URL = "https://bootstrap.pypa.io/get-pip.py"
+# SHA-256 of the get-pip.py served by GET_PIP_URL when this pin was made.
+# get-pip.py is unversioned upstream, so when PyPA publishes a new one this
+# build fails closed until the new file is reviewed and this hash refreshed.
+GET_PIP_SHA256 = "fb24e693bab954209a063d90953621412ccad4a500905a726286e038f508ddf6"
+# Build tools are installed before the runtime lock: the embeddable Python
+# ships without setuptools/wheel, and the one source-only lock entry
+# (proxy-tools) must build with these pinned tools, not floating latest.
+BOOTSTRAP_REQUIREMENTS = (
+    ("setuptools==84.0.0 "
+     "--hash=sha256:51a52592b3b99e102b609654876bd65f19f999935166d1352678931132b0c670"),
+    ("wheel==0.48.0 "
+     "--hash=sha256:3217dcc807155e45db462d7ef2431f5ddda0d7273b700d05a67b271ceb1287ab"),
+    ("packaging==26.3 "
+     "--hash=sha256:d7193f7c8e4e93f444fde0262bf90af30e16fa0ad0ad44cb553c87339b23cd1c"),
+)
+LOCK_FILE_NAME = "requirements-lock.txt"
 WEBVIEW2_BOOTSTRAPPER_URL = "https://go.microsoft.com/fwlink/p/?LinkId=2124703"
-DEV_ONLY_PACKAGES = ("pytest",)  # never shipped inside the installer
 
 
 def download(url, dest):
@@ -43,6 +66,48 @@ def download(url, dest):
     dest.parent.mkdir(parents=True, exist_ok=True)
     urllib.request.urlretrieve(url, dest)
     print("  -> %s (%d bytes)" % (dest, dest.stat().st_size))
+
+
+def verify_sha256(path, expected_sha256, label):
+    """Return the file's SHA-256, or delete it and raise on mismatch."""
+    digest = hashlib.sha256()
+    with path.open("rb") as f:
+        for chunk in iter(lambda: f.read(1024 * 1024), b""):
+            digest.update(chunk)
+    actual = digest.hexdigest()
+    if not hmac.compare_digest(actual, expected_sha256.lower()):
+        path.unlink(missing_ok=True)
+        raise RuntimeError(
+            "SHA-256 mismatch for %s: expected %s, got %s; "
+            "deleted the download" % (label, expected_sha256, actual))
+    print("Verified %s SHA-256" % label)
+    return actual
+
+
+def download_verified(url, dest, expected_sha256, label):
+    download(url, dest)
+    verify_sha256(dest, expected_sha256, label)
+
+
+def install_locked_dependencies(python_dir, repo_root, staging):
+    """Install the pinned bootstrap tools, then the locked runtime deps."""
+    lock_path = repo_root / LOCK_FILE_NAME
+    if not lock_path.is_file():
+        raise RuntimeError("Missing installer lock file: %s" % lock_path)
+
+    bootstrap_path = staging / "_bootstrap-requirements.txt"
+    bootstrap_path.write_text("\n".join(BOOTSTRAP_REQUIREMENTS) + "\n")
+    try:
+        run_embedded_python(python_dir, "-m", "pip", "install", "--quiet",
+                            "--require-hashes", "-r", str(bootstrap_path))
+    finally:
+        bootstrap_path.unlink(missing_ok=True)
+
+    # --no-build-isolation: the one source-only lock entry (proxy-tools)
+    # builds with the pinned setuptools/wheel installed just above.
+    run_embedded_python(python_dir, "-m", "pip", "install", "--quiet",
+                        "--require-hashes", "--no-build-isolation",
+                        "-r", str(lock_path))
 
 
 def enable_site_packages(python_dir):
@@ -88,7 +153,8 @@ def build_icon(repo_root, staging_dir):
         from PIL import Image
     except ImportError:
         raise RuntimeError(
-            "Pillow is needed on the build machine: pip install pillow")
+            "Pillow is needed on the build machine: "
+            "python -m pip install --require-hashes -r requirements-lock.txt")
     src = repo_root / "dashboard" / "static" / "icon.png"
     dest = staging_dir / "icon.ico"
     img = Image.open(src)
@@ -116,16 +182,24 @@ def main():
                else repo_root / "installer" / "staging")
     python_dir = staging / "python"
 
+    pyver = args.python_version
+    if pyver not in PYTHON_EMBED_SHA256:
+        raise RuntimeError(
+            "No pinned SHA-256 for the Python %s embed zip; add its "
+            "official python.org hash to PYTHON_EMBED_SHA256 before "
+            "building" % pyver)
+    embed_sha256 = PYTHON_EMBED_SHA256[pyver]
+
     if staging.exists():
         print("Removing old staging dir %s" % staging)
         shutil.rmtree(staging)
     staging.mkdir(parents=True)
 
-    pyver = args.python_version
     embed_url = ("https://www.python.org/ftp/python/%s/"
                  "python-%s-embed-amd64.zip" % (pyver, pyver))
     embed_zip = staging / "_embed.zip"
-    download(embed_url, embed_zip)
+    download_verified(embed_url, embed_zip, embed_sha256,
+                      "Python %s embed zip" % pyver)
     print("Extracting embedded Python ...")
     with zipfile.ZipFile(embed_zip) as zf:
         zf.extractall(python_dir)
@@ -134,26 +208,11 @@ def main():
     enable_site_packages(python_dir)
 
     get_pip = staging / "_get-pip.py"
-    download(GET_PIP_URL, get_pip)
+    download_verified(GET_PIP_URL, get_pip, GET_PIP_SHA256, "get-pip.py")
     run_embedded_python(python_dir, str(get_pip))
     get_pip.unlink()
 
-    # The embeddable Python ships without setuptools/wheel; packages that
-    # have no wheel for this Python need them at install time.
-    run_embedded_python(python_dir, "-m", "pip", "install", "--quiet",
-                        "setuptools", "wheel")
-
-    # Install runtime deps (skip dev-only packages).
-    req_src = repo_root / "requirements.txt"
-    req_tmp = staging / "_requirements.txt"
-    kept = [ln for ln in req_src.read_text().splitlines()
-            if ln.strip() and not ln.strip().startswith("#")
-            and not any(ln.strip().lower().startswith(p)
-                        for p in DEV_ONLY_PACKAGES)]
-    req_tmp.write_text("\n".join(kept) + "\n")
-    run_embedded_python(python_dir, "-m", "pip", "install", "--quiet",
-                        "-r", str(req_tmp))
-    req_tmp.unlink()
+    install_locked_dependencies(python_dir, repo_root, staging)
 
     for pkg in ("focuscore", "dashboard"):
         src = repo_root / pkg

@@ -44,7 +44,21 @@ jobs:
           python-version: "3.12"
 
       - name: Install build deps
-        run: pip install pillow
+        shell: python
+        run: |
+          import pathlib
+          import subprocess
+          import sys
+
+          lock = pathlib.Path("requirements-lock.txt").read_text()
+          line = next(
+              line.strip() for line in lock.splitlines()
+              if line.lower().startswith("pillow==")
+          )
+          subprocess.check_call(
+              [sys.executable, "-m", "pip", "install", "--require-hashes",
+               *line.split()]
+          )
 
       - name: Stage the app (embedded Python + code)
         run: python installer/build.py --version "${{ env.VERSION }}" --repo "${{ github.repository }}"

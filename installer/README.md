@@ -11,7 +11,7 @@ Download → Next → Next → desktop icon.
 
 | staging/… | what it is |
 |---|---|
-| `python/` | Embedded Python 3.12 + pip + all of `requirements.txt` (dev-only packages like pytest are skipped) |
+| `python/` | Embedded Python 3.12 + pip + all of `requirements-lock.txt` (exact pins with SHA-256 hashes; dev-only packages like pytest are not in the lock) |
 | `focuscore/`, `dashboard/` | The app code |
 | `.installed` | Marker: tells the app to keep user data in `%LOCALAPPDATA%\Focus Core` instead of next to the code |
 | `webview2bootstrapper.exe` | Runs only if WebView2 is missing (most PCs already have it) |
@@ -31,11 +31,32 @@ Download → Next → Next → desktop icon.
 1. Install [Inno Setup 6](https://jrsoftware.org/isdl.php) (free).
 2. From the repo root:
    ```
-   pip install pillow
+   python -m pip install --require-hashes -r requirements-lock.txt
    python installer\build.py --version 1.3.0
    "C:\Program Files (x86)\Inno Setup 6\ISCC.exe" installer\installer.iss /DAppVersion="1.3.0"
    ```
 3. The exe appears as `installer\FocusCore-Setup-1.3.0.exe` (~25 MB).
+
+## Locked installer inputs
+
+Installer builds do not float on latest upstream releases:
+
+- `requirements-lock.txt` pins every Python package installed into the
+  embedded Python, with the SHA-256 of the CPython 3.12 / Windows x64
+  artifact pip must download. (`requirements.txt` keeps the floating ranges
+  for normal CI test runs.)
+- `installer/build.py` verifies the Python embed zip and `get-pip.py`
+  against pinned SHA-256 constants before using either, and deletes a
+  download whose hash does not match.
+
+To refresh the lock at release time, resolve the runtime requirements
+(`requirements.txt` minus pytest) for CPython 3.12 / Windows x64, download
+the selected artifacts, and replace each pin's version and hash with the
+downloaded artifact's. The one source-only package is `proxy-tools` (a
+pywebview dependency); the build installs pinned setuptools/wheel first so
+it builds with those, not with floating latest. If `get-pip.py` changes
+upstream, the build fails closed until `GET_PIP_SHA256` in
+`installer/build.py` is refreshed after reviewing the new file.
 
 ## CI build
 
