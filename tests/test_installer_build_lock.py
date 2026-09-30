@@ -438,8 +438,10 @@ def test_install_locked_pin_main_maps_failures_to_exit_codes(monkeypatch, capsys
     assert "no pinned entry" in capsys.readouterr().err
 
     # pip failure: the pip exit code comes back, not a traceback.
+    # (7, deliberately unlike the lock-error code 2 above, so the two
+    # exit paths cannot be confused.)
     def bad_check_call(cmd):
-        raise subprocess.CalledProcessError(2, cmd)
+        raise subprocess.CalledProcessError(7, cmd)
 
     monkeypatch.setattr(mod.subprocess, "check_call", bad_check_call)
-    assert mod.main(["Pillow"]) == 2
+    assert mod.main(["Pillow"]) == 7
