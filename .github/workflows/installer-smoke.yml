@@ -29,7 +29,21 @@ jobs:
           python-version: "3.12"
 
       - name: Install build deps
-        run: pip install pillow
+        shell: python
+        run: |
+          import subprocess
+          import sys
+
+          # Same locked Pillow pin as the release workflow, via the one
+          # tested helper (installer/extract_lock_pin.py).
+          line = subprocess.check_output(
+              [sys.executable, "installer/extract_lock_pin.py", "Pillow"],
+              text=True,
+          ).strip()
+          subprocess.check_call(
+              [sys.executable, "-m", "pip", "install", "--require-hashes",
+               *line.split()]
+          )
 
       - name: Stage the app (embedded Python + code)
         run: python installer/build.py --version "0.0.0.${{ github.run_number }}" --repo "${{ github.repository }}"

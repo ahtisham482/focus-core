@@ -10,10 +10,10 @@ What it does:
   5. Copies the focuscore/ and dashboard/ packages into staging/.
   6. Writes the .installed marker (tells the app to use the per-user
      data folder instead of writing next to the code).
-  7. Downloads the WebView2 Evergreen bootstrapper (run by the installer
-     only when WebView2 is missing).
+  7. Downloads the WebView2 Evergreen bootstrapper (SHA-256 verified;
+     run by the installer only when WebView2 is missing).
   8. Builds icon.ico from the app icon (needs Pillow on the BUILD machine:
-     `pip install pillow`).
+     `python -m pip install --require-hashes -r requirements-lock.txt`).
 
 Run from the repo root:
     python installer/build.py --version 1.3.0
@@ -59,6 +59,12 @@ BOOTSTRAP_REQUIREMENTS = (
 )
 LOCK_FILE_NAME = "requirements-lock.txt"
 WEBVIEW2_BOOTSTRAPPER_URL = "https://go.microsoft.com/fwlink/p/?LinkId=2124703"
+# SHA-256 of the WebView2 bootstrapper served by WEBVIEW2_BOOTSTRAPPER_URL
+# when this pin was made. The bootstrapper is evergreen upstream, so when
+# Microsoft publishes a new one this build fails closed until the new file
+# is reviewed and this hash refreshed.
+WEBVIEW2_BOOTSTRAPPER_SHA256 = (
+    "81c01751c8cc385a5991abb104205d42ac70094350ee8fb9e8ea580b51bb9554")
 
 
 def download(url, dest):
@@ -231,8 +237,9 @@ def main():
         (staging / "update-info.json").write_text(json.dumps(info) + "\n")
         print("Wrote update-info.json (repo %s)" % args.repo)
 
-    download(WEBVIEW2_BOOTSTRAPPER_URL,
-             staging / "webview2bootstrapper.exe")
+    download_verified(WEBVIEW2_BOOTSTRAPPER_URL,
+                      staging / "webview2bootstrapper.exe",
+                      WEBVIEW2_BOOTSTRAPPER_SHA256, "WebView2 bootstrapper")
 
     build_icon(repo_root, staging)
 

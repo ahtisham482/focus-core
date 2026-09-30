@@ -45,9 +45,9 @@ Installer builds do not float on latest upstream releases:
   embedded Python, with the SHA-256 of the CPython 3.12 / Windows x64
   artifact pip must download. (`requirements.txt` keeps the floating ranges
   for normal CI test runs.)
-- `installer/build.py` verifies the Python embed zip and `get-pip.py`
-  against pinned SHA-256 constants before using either, and deletes a
-  download whose hash does not match.
+- `installer/build.py` verifies the Python embed zip, `get-pip.py`, and
+  the WebView2 bootstrapper against pinned SHA-256 constants before using
+  any of them, and deletes a download whose hash does not match.
 
 To refresh the lock at release time, resolve the runtime requirements
 (`requirements.txt` minus pytest) for CPython 3.12 / Windows x64, download
@@ -56,7 +56,10 @@ downloaded artifact's. The one source-only package is `proxy-tools` (a
 pywebview dependency); the build installs pinned setuptools/wheel first so
 it builds with those, not with floating latest. If `get-pip.py` changes
 upstream, the build fails closed until `GET_PIP_SHA256` in
-`installer/build.py` is refreshed after reviewing the new file.
+`installer/build.py` is refreshed after reviewing the new file. The same
+fail-closed rule applies to the evergreen WebView2 bootstrapper: if
+Microsoft publishes a new one, the build fails until
+`WEBVIEW2_BOOTSTRAPPER_SHA256` is refreshed after reviewing the new file.
 
 ## CI build
 
