@@ -15,6 +15,7 @@ All DBs live under tmp_path (suite tmp-only discipline).
 
 import os
 import sqlite3
+import sys
 
 import pytest
 
@@ -59,7 +60,12 @@ def _seed_orphan(db):
         conn.close()
 
 
-@pytest.mark.parametrize("name", ["my db #1.db", "what?db.db"])
+@pytest.mark.parametrize("name", [
+    "my db #1.db",
+    pytest.param("what?db.db", marks=pytest.mark.skipif(
+        sys.platform == "win32",
+        reason="'?' is not a legal filename character on Windows")),
+])
 def test_integrity_check_orphan_at_uri_special_path(tmp_path, name):
     db = str(tmp_path / name)
     store.init_db(db)
@@ -72,7 +78,12 @@ def test_integrity_check_orphan_at_uri_special_path(tmp_path, name):
     _assert_no_stray_dbs(tmp_path, name, before)
 
 
-@pytest.mark.parametrize("name", ["my db #1.db", "what?db.db"])
+@pytest.mark.parametrize("name", [
+    "my db #1.db",
+    pytest.param("what?db.db", marks=pytest.mark.skipif(
+        sys.platform == "win32",
+        reason="'?' is not a legal filename character on Windows")),
+])
 def test_integrity_check_healthy_at_uri_special_path(tmp_path, name):
     db = str(tmp_path / name)
     store.init_db(db)
@@ -82,7 +93,12 @@ def test_integrity_check_healthy_at_uri_special_path(tmp_path, name):
     _assert_no_stray_dbs(tmp_path, name, before)
 
 
-@pytest.mark.parametrize("name", ["my db #1.db", "what?db.db"])
+@pytest.mark.parametrize("name", [
+    "my db #1.db",
+    pytest.param("what?db.db", marks=pytest.mark.skipif(
+        sys.platform == "win32",
+        reason="'?' is not a legal filename character on Windows")),
+])
 def test_diagnostics_integrity_at_uri_special_path(tmp_path, name):
     db = str(tmp_path / name)
     store.init_db(db)
