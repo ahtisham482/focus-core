@@ -482,3 +482,149 @@ def test_route_restore_wrong_passphrase_no_change(dash_env):
     )
     assert resp.status_code == 400
     assert dash_env["db"].read_bytes() == before
+
+
+# ------------------------------------------- 1.5b repair (critic notes) ----
+
+@pytest.mark.parametrize("verifier", [
+    "pbkdf2$0$00$00",
+    "pbkdf2$-3$00$00",
+    "pbkdf2$2000000000$00$00",
+    "pbkdf2$10000001$00$00",
+    "pbkdf2$abc$00$00",
+    "pbkdf2$100$zz$00",
+    "pbkdf2$100$00$zz",
+    "pbkdf2$100$00",
+    "pbkdf2$100$00$00$extra",
+    "sha256$100$00$00",
+    "",
+    "not-a-verifier",
+], ids=["zero-iters", "negative-iters", "huge-iters", "over-cap-iters",
+        "bad-int", "bad-salt-hex", "bad-digest-hex", "too-few-fields",
+        "too-many-fields", "wrong-scheme", "empty", "garbage"])
+def test_verify_passphrase_malformed_returns_false_fast(verifier):
+    # Critic obj.1: a malformed verifier must fail closed -- return
+    # False, never raise, never hang on an absurd iteration count.
+    import time
+
+    start = time.monotonic()
+    assert backupcrypto.verify_passphrase(PASSPHRASE, verifier) is False
+    assert time.monotonic() - start < 5
+
+
+@pytest.mark.parametrize("verifier", [
+    None, 123, b"pbkdf2$1$00$00", ["pbkdf2$1$00$00"], {"v": 1},
+], ids=["none", "int", "bytes", "list", "dict"])
+def test_verify_passphrase_nonstring_verifier_returns_false(verifier):
+    assert backupcrypto.verify_passphrase(PASSPHRASE, verifier) is False
+
+
+def test_verify_passphrase_bad_passphrase_types_return_false():
+    verifier = backupcrypto.make_passphrase_verifier(PASSPHRASE)
+    assert backupcrypto.verify_passphrase(None, verifier) is False
+    assert backupcrypto.verify_passphrase(123, verifier) is False
+
+
+def test_malformed_verifier_engine_fails_closed(env):
+    # Critic obj.1 at engine level: with a malformed verifier stored in
+    # settings and a cache file present, "locked" must surface as
+    # locked -- is_locked returns True and create writes nothing.
+    db, bdir = env["db"], env["bdir"]
+    store.set_setting("backup_encryption_enabled", "1", path=str(db))
+    store.set_setting(
+        "backup_passphrase_verifier", "pbkdf2$0$00$00", path=str(db))
+    # A cache file must exist for the verifier to be consulted at all.
+    cache = backup.cache_path()
+    cache.parent.mkdir(parents=True, exist_ok=True)
+    cache.write_bytes(columncrypto.protect_bytes(PASSPHRASE.encode("utf-8")))
+    assert backup.is_locked(db_path=db) is True
+    with pytest.raises(backup.BackupLockedError):
+        backup.create_backup(db_path=db, dest_dir=bdir)
+    with pytest.raises(backup.BackupLockedError):
+        backup.create_backup(db_path=db, dest_dir=bdir, passphrase=PASSPHRASE)
+    assert list(bdir.iterdir()) == []
+
+
+def test_create_roundtrip_verify_fault_injection(env, monkeypatch):
+    # Critic obj.2a: if the in-memory encrypt->decrypt round-trip in
+    # create_backup reproduced the wrong bytes, publishing must not
+    # happen -- no backup file, no sidecar.
+    db, bdir = env["db"], env["bdir"]
+    _enable_encryption(db)
+    monkeypatch.setattr(
+        backupcrypto, "decrypt_bytes",
+        lambda blob, passphrase: b"not the plaintext")
+    with pytest.raises(backupcrypto.BackupCryptoError):
+        backup.create_backup(db_path=db, dest_dir=bdir, passphrase=PASSPHRASE)
+    assert list(bdir.iterdir()) == []
+    assert backup.list_backups(dest_dir=bdir) == []
+
+
+def test_restore_checksum_gate_runs_before_decrypt(env, monkeypatch):
+    # Critic obj.2b: a corrupted sidecar must stop the restore at the
+    # checksum gate -- decryption is never attempted.
+    db, bdir = env["db"], env["bdir"]
+    _enable_encryption(db)
+    path = backup.create_backup(db_path=db, dest_dir=bdir, passphrase=PASSPHRASE)
+    sidecar = path.parent / (path.name + ".sha256")
+    sidecar.write_text("0" * 64 + "\n", encoding="utf-8")
+    calls = []
+    real_decrypt = backupcrypto.decrypt_bytes
+
+    def recording_decrypt(blob, passphrase):
+        calls.append(1)
+        return real_decrypt(blob, passphrase)
+
+    monkeypatch.setattr(backupcrypto, "decrypt_bytes", recording_decrypt)
+    before = db.read_bytes()
+    with pytest.raises(ValueError, match="safety check"):
+        backup.restore_backup(
+            path.name, db_path=db, dest_dir=bdir, passphrase=PASSPHRASE)
+    assert calls == []
+    assert db.read_bytes() == before
+
+
+def test_crypto_tampered_nonce_raises():
+    # Critic obj.2c: the nonce lives in the authenticated header
+    # region; flipping one byte must make decrypt fail closed.
+    blob = bytearray(backupcrypto.encrypt_bytes(b"secret data", PASSPHRASE))
+    nonce_offset = len(backupcrypto.MAGIC) + 4 + 16
+    blob[nonce_offset] ^= 0x01
+    with pytest.raises(backupcrypto.BackupCryptoError):
+        backupcrypto.decrypt_bytes(bytes(blob), PASSPHRASE)
+
+
+def test_encrypt_empty_passphrase_rejected():
+    # Critic obj.3: the engine itself refuses an empty passphrase.
+    with pytest.raises(backupcrypto.BackupCryptoError):
+        backupcrypto.encrypt_bytes(b"data", "")
+    with pytest.raises(backupcrypto.BackupCryptoError):
+        backupcrypto.encrypt_bytes(b"data", b"")
+
+
+def test_create_with_empty_passphrase_publishes_nothing(env):
+    db, bdir = env["db"], env["bdir"]
+    with pytest.raises(backupcrypto.BackupCryptoError):
+        backup.create_backup(db_path=db, dest_dir=bdir, passphrase="")
+    assert list(bdir.iterdir()) == []
+
+
+def test_enable_cache_write_failure_lands_on_backup_locked(dash_env, monkeypatch):
+    # Critic obj.5: if the cache write fails after the flags flip, the
+    # enable request must not 500 -- encryption is on, the state is
+    # the coherent locked state, and /backup renders it.
+    def boom(passphrase, db_path=None):
+        raise OSError("disk full")
+
+    monkeypatch.setattr(backup, "write_cached_passphrase", boom)
+    client = dash_env["client"]
+    resp = client.post(
+        "/backup/encryption/enable",
+        data={"passphrase": PASSPHRASE, "passphrase_confirm": PASSPHRASE},
+    )
+    assert resp.status_code == 302
+    assert resp.headers["Location"].endswith("/backup")
+    assert _setting(dash_env["db"], "backup_encryption_enabled") == "1"
+    assert backup.is_locked(db_path=dash_env["db"]) is True
+    html = client.get("/backup").data.decode()
+    assert "unlock" in html.lower()

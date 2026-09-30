@@ -290,7 +290,13 @@ def backup_encryption_enable():
     store.set_setting(backup_mod.SETTING_PASSPHRASE_VERIFIER, verifier)
     store.set_setting(backup_mod.SETTING_ENCRYPTION_ENABLED, "1")
     # Cache only after the verifier is stored (write re-checks it).
-    backup_mod.write_cached_passphrase(passphrase)
+    # A cache-write failure must not 500: encryption is already on
+    # and the state is coherent (locked), so land on /backup, which
+    # renders the locked card with the unlock form.
+    try:
+        backup_mod.write_cached_passphrase(passphrase)
+    except Exception:
+        app.logger.exception("could not cache the backup passphrase")
     return redirect("/backup")
 
 

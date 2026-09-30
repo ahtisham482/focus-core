@@ -80,11 +80,12 @@ Google account.
   new backups; older backups stay as they are. If you forget the
   passphrase, encrypted backups cannot be recovered — there is no
   recovery, not even by us. To let automatic backups keep running on
-  this PC, Focus Core keeps a check-value plus a copy of the passphrase
-  protected by your Windows user account on this PC only; it is never
-  put inside the database or a backup. The small safety copy Focus
-  Core makes on this PC before a database upgrade stays on this PC
-  and is not passphrase-encrypted.
+  this PC, Focus Core keeps a check-value (stored, by design, in the
+  settings table inside the database) plus a copy of the passphrase
+  protected by your Windows user account on this PC only; the
+  passphrase copy is never put inside the database or a backup. The
+  small safety copy Focus Core makes on this PC before a database
+  upgrade stays on this PC and is not passphrase-encrypted.
 - **Your account only.** It is your Drive, your account, your folder. We have
   no access to it and never request access.
 - **Turning it off.** Because the copies are automatic whenever Drive is

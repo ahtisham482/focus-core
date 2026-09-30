@@ -55,6 +55,9 @@ def encrypt_bytes(plaintext: bytes, passphrase,
     """Encrypt ``plaintext`` with a passphrase-derived key."""
     from cryptography.hazmat.primitives.ciphers.aead import AESGCM
 
+    if not _passphrase_bytes(passphrase):
+        raise BackupCryptoError(
+            "A backup cannot be encrypted with an empty passphrase.")
     salt = os.urandom(_SALT_SIZE)
     nonce = os.urandom(_NONCE_SIZE)
     header = MAGIC + struct.pack(">I", iterations) + salt + nonce
@@ -122,7 +125,13 @@ def make_passphrase_verifier(passphrase,
 
 
 def verify_passphrase(passphrase, verifier) -> bool:
-    """True when ``passphrase`` matches the stored verifier."""
+    """True when ``passphrase`` matches the stored verifier.
+
+    Malformed verifiers fail closed: this returns False (never
+    raises, never hangs) for bad field counts, bad hex, non-string
+    input, or an iteration count outside 1..10,000,000 -- the same
+    bound :func:`decrypt_bytes` applies to backup file headers.
+    """
     if not verifier or not isinstance(verifier, str):
         return False
     try:
@@ -130,11 +139,13 @@ def verify_passphrase(passphrase, verifier) -> bool:
         if scheme != "pbkdf2":
             return False
         iterations = int(iters_s)
+        if iterations < 1 or iterations > 10_000_000:
+            return False
         salt = bytes.fromhex(salt_hex)
         expected = bytes.fromhex(digest_hex)
-    except (ValueError, TypeError):
+        actual = hashlib.pbkdf2_hmac(
+            "sha256", _passphrase_bytes(passphrase), salt, iterations,
+            dklen=len(expected) or _KEY_SIZE)
+    except (ValueError, TypeError, BackupCryptoError):
         return False
-    actual = hashlib.pbkdf2_hmac(
-        "sha256", _passphrase_bytes(passphrase), salt, iterations,
-        dklen=len(expected) or _KEY_SIZE)
     return hmac.compare_digest(actual, expected)
