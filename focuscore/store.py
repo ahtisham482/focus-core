@@ -8,13 +8,41 @@ wherever the folder is placed -- no absolute paths anywhere.
 import sqlite3
 import logging
 from datetime import date, datetime, timedelta
+from pathlib import Path
 
 from . import columncrypto, paths
 
 # Roadmap 0.3: log failures that used to be swallowed silently.
 logger = logging.getLogger(__name__)
 
-DEFAULT_DB_PATH = paths.db_path()
+
+def __getattr__(name):
+    # Roadmap 1.7 (PEP 562, the 1.6 pattern): DEFAULT_DB_PATH is
+    # resolved lazily on each access instead of being frozen at
+    # import, so paths.data_dir() grandfathering (an existing
+    # focuscore.db next to the code) is evaluated when the path is
+    # actually needed, not when this module happened to be imported.
+    # Anything that assigns store.DEFAULT_DB_PATH (tests monkeypatch
+    # it) lands in the module dict and wins over this fallback.
+    if name == "DEFAULT_DB_PATH":
+        return paths.db_path()
+    raise AttributeError(
+        "module %r has no attribute %r" % (__name__, name))
+
+
+def __dir__():
+    return sorted(set(globals()) | {"DEFAULT_DB_PATH"})
+
+
+def _resolve_db_path(path=None):
+    """The DB path for this call: explicit arg, else an assigned
+    DEFAULT_DB_PATH (monkeypatched), else paths.db_path() now."""
+    if path is not None:
+        return path
+    assigned = globals().get("DEFAULT_DB_PATH")
+    if assigned is not None:
+        return assigned
+    return paths.db_path()
 
 SCHEMA = """
 CREATE TABLE IF NOT EXISTS activities (
@@ -132,10 +160,44 @@ CREATE INDEX IF NOT EXISTS idx_ts_entries_day ON timesheet_entries(day);
 
 
 def get_db(path=None):
-    conn = sqlite3.connect(str(path or DEFAULT_DB_PATH))
+    conn = sqlite3.connect(str(_resolve_db_path(path)))
+    # Roadmap 1.7: FK enforcement is per-connection in SQLite. Safe
+    # because migration 0011 (orphan quarantine) always runs via
+    # init_db/apply_migrations before any write through here.
+    conn.execute("PRAGMA foreign_keys = ON")
     conn.row_factory = sqlite3.Row
     conn.execute("PRAGMA busy_timeout = 5000")
     return conn
+
+
+def run_integrity_check(path=None):
+    """Nightly integrity probe (roadmap 1.7): ``(ok, problems)``.
+
+    Runs PRAGMA integrity_check + foreign_key_check on a read-only
+    connection. Never raises: any failure (missing/corrupt file,
+    driver error) comes back as ``(False, [problem, ...])``.
+    """
+    try:
+        target = _resolve_db_path(path)
+        if str(target) == ":memory:":
+            return False, ["no database file to check (in-memory)"]
+        if not Path(str(target)).exists():
+            return False, ["database file missing: %s" % target]
+        conn = sqlite3.connect("file:%s?mode=ro" % target, uri=True)
+        try:
+            problems = []
+            for row in conn.execute("PRAGMA integrity_check"):
+                if str(row[0]).lower() != "ok":
+                    problems.append("integrity_check: %s" % row[0])
+            for row in conn.execute("PRAGMA foreign_key_check"):
+                problems.append(
+                    "foreign_key_check: %s row %s references "
+                    "missing %s" % (row[0], row[1], row[2]))
+            return (not problems), problems
+        finally:
+            conn.close()
+    except Exception as exc:  # noqa: BLE001 -- probe must never raise
+        return False, ["integrity check failed: %s" % exc]
 
 
 def checkpoint_wal(path=None):
@@ -162,13 +224,19 @@ def checkpoint_wal(path=None):
 def init_db(path=None):
     from . import migrations
 
-    migrations.apply_migrations(path)
+    resolved = _resolve_db_path(path)
+    # Roadmap 1.7: when the migrations-applied flag says this process
+    # already migrated this exact file, skip everything below --
+    # nothing opens a connection just to re-check.
+    _version, opened = migrations.apply_migrations_with_status(resolved)
+    if not opened:
+        return
     # Sprint 4 (Qwen item 12): idempotent index for the invoice_lines
     # -> timesheet_entries FK. No user_version bump (indexes don't
     # change semantics); IF NOT EXISTS makes it safe to run on every
     # startup.
     try:
-        conn = get_db(path)
+        conn = get_db(resolved)
         try:
             conn.execute(
                 "CREATE INDEX IF NOT EXISTS idx_invoice_lines_entry "

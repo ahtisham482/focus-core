@@ -7,19 +7,22 @@ auto-rollback on failure.
 
 from __future__ import annotations
 
+import json
 import logging
+import os
 import sqlite3
+import threading
 import time
 from dataclasses import dataclass
 from datetime import datetime
 from pathlib import Path
 from typing import Callable, List, Optional, Set
 
-from . import backup, columncrypto, paths, store
+from . import backup, columncrypto, money, paths, store
 
 logger = logging.getLogger(__name__)
 
-LATEST_VERSION = 10
+LATEST_VERSION = 11
 
 
 class MigrationError(Exception):
@@ -875,6 +878,167 @@ def _migration_0010_encrypt_title_columns(conn: sqlite3.Connection) -> None:
                 "%d left plaintext", sealed, failed)
 
 
+def _migration_0011_orphan_quarantine(conn: sqlite3.Connection) -> None:
+    """Migration 11: quarantine orphan rows (roadmap 1.7).
+
+    FK relationships were logical-only until now (``PRAGMA
+    foreign_keys`` was never enabled), so wild databases may hold
+    child rows whose parents are gone. Enabling enforcement on top of
+    them would turn routine inserts/deletes into IntegrityError
+    crashes, so this repair runs BEFORE enforcement is switched on.
+
+    Driven by ``PRAGMA foreign_key_check`` (works with enforcement
+    off): each violating row is copied in full (JSON) into
+    ``orphaned_rows`` and then deleted by rowid; the check re-runs
+    until clean, so grandchildren orphaned by a parent's removal
+    surface in later passes. Bounded at 100 passes; still-dirty after
+    that aborts the migration (the runner rolls back) rather than
+    looping forever. Nothing is silently dropped: quarantined rows
+    stay recoverable in the same database.
+
+    Invoice header totals ARE stored columns (subtotal/discount/
+    tax/total_minor), so a quarantined line would stale its parent
+    invoice: draft totals are recomputed from the remaining lines
+    with the Q12 integer formula. Sent/paid totals are the frozen
+    issued record (migration 0008 immutability triggers) and are
+    deliberately left untouched; the quarantined line remains in
+    ``orphaned_rows`` for audit. The 0008 invoice_lines immutability
+    triggers would otherwise abort the repair DELETE for sent
+    invoices, so they are dropped for the duration of this migration
+    and recreated verbatim (inside the same transaction).
+    """
+    conn.execute(
+        """
+        CREATE TABLE IF NOT EXISTS orphaned_rows (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            source_table TEXT NOT NULL,
+            source_rowid INTEGER,
+            row_json TEXT NOT NULL,
+            parent_table TEXT,
+            quarantined_at TEXT NOT NULL
+        )
+        """
+    )
+    line_triggers = (
+        "trg_invoice_lines_immutable_upd",
+        "trg_invoice_lines_immutable_del",
+        "trg_invoice_lines_no_add_sent",
+    )
+    has_lines = table_exists(conn, "invoice_lines")
+    if has_lines:
+        for trigger in line_triggers:
+            conn.execute("DROP TRIGGER IF EXISTS %s" % trigger)
+    quarantined_at = datetime.now().isoformat(timespec="seconds")
+    total = 0
+    affected_invoices = set()
+    try:
+        for _pass in range(100):
+            violations = conn.execute(
+                "PRAGMA foreign_key_check").fetchall()
+            if not violations:
+                break
+            for table, rowid, parent, _fkid in violations:
+                safe_table = table.replace('"', '""')
+                row = conn.execute(
+                    'SELECT * FROM "%s" WHERE rowid = ?' % safe_table,
+                    (rowid,),
+                ).fetchone()
+                if row is None:
+                    continue  # already removed via another FK
+                payload = json.dumps(
+                    {key: row[key] for key in row.keys()},
+                    default=str, ensure_ascii=False)
+                conn.execute(
+                    "INSERT INTO orphaned_rows (source_table, "
+                    "source_rowid, row_json, parent_table, "
+                    "quarantined_at) VALUES (?, ?, ?, ?, ?)",
+                    (table, rowid, payload, parent, quarantined_at),
+                )
+                if table == "invoice_lines":
+                    affected_invoices.add(row["invoice_id"])
+                conn.execute(
+                    'DELETE FROM "%s" WHERE rowid = ?' % safe_table,
+                    (rowid,),
+                )
+                total += 1
+        remaining = conn.execute(
+            "PRAGMA foreign_key_check").fetchall()
+        if remaining:
+            raise MigrationError(
+                "0011: foreign_key_check still reports %d "
+                "violation(s) after 100 passes" % len(remaining))
+    finally:
+        if has_lines:
+            conn.execute(
+                """
+                CREATE TRIGGER IF NOT EXISTS
+                trg_invoice_lines_immutable_upd
+                BEFORE UPDATE ON invoice_lines
+                FOR EACH ROW
+                WHEN (SELECT status FROM invoices
+                      WHERE id = OLD.invoice_id) IN ('sent', 'paid')
+                BEGIN
+                    SELECT RAISE(ABORT,
+                        'invoice lines are immutable once the invoice is sent');
+                END
+                """
+            )
+            conn.execute(
+                """
+                CREATE TRIGGER IF NOT EXISTS
+                trg_invoice_lines_immutable_del
+                BEFORE DELETE ON invoice_lines
+                FOR EACH ROW
+                WHEN (SELECT status FROM invoices
+                      WHERE id = OLD.invoice_id) IN ('sent', 'paid')
+                BEGIN
+                    SELECT RAISE(ABORT,
+                        'invoice lines are immutable once the invoice is sent');
+                END
+                """
+            )
+            conn.execute(
+                """
+                CREATE TRIGGER IF NOT EXISTS
+                trg_invoice_lines_no_add_sent
+                BEFORE INSERT ON invoice_lines
+                FOR EACH ROW
+                WHEN (SELECT status FROM invoices
+                      WHERE id = NEW.invoice_id) IN ('sent', 'paid')
+                BEGIN
+                    SELECT RAISE(ABORT,
+                        'cannot add lines to a sent invoice');
+                END
+                """
+            )
+    recomputed = 0
+    for invoice_id in affected_invoices:
+        inv = conn.execute(
+            "SELECT status, discount_pct, tax_pct FROM invoices "
+            "WHERE id = ?", (invoice_id,),
+        ).fetchone()
+        if inv is None or inv["status"] != "draft":
+            continue  # gone, or frozen issued record (see docstring)
+        subtotal = int(conn.execute(
+            "SELECT COALESCE(SUM(amount_minor_units), 0) "
+            "FROM invoice_lines WHERE invoice_id = ?",
+            (invoice_id,),
+        ).fetchone()[0])
+        discount = money.pct_of_minor(subtotal, inv["discount_pct"])
+        taxable = subtotal - discount
+        tax = money.pct_of_minor(taxable, inv["tax_pct"])
+        conn.execute(
+            "UPDATE invoices SET subtotal_minor = ?, "
+            "discount_amount_minor = ?, tax_amount_minor = ?, "
+            "total_minor = ? WHERE id = ?",
+            (subtotal, discount, tax, taxable + tax, invoice_id),
+        )
+        recomputed += 1
+    logger.info(
+        "0011: quarantined %d orphan row(s); recomputed totals for "
+        "%d draft invoice(s)", total, recomputed)
+
+
 MIGRATIONS: List[Migration] = [
     Migration(1, "0001_afk_intervals", _migration_0001_afk_intervals),
     Migration(2, "0002_shield_columns", _migration_0002_shield_columns),
@@ -913,6 +1077,11 @@ MIGRATIONS: List[Migration] = [
         10,
         "0010_encrypt_title_columns",
         _migration_0010_encrypt_title_columns,
+    ),
+    Migration(
+        11,
+        "0011_orphan_quarantine",
+        _migration_0011_orphan_quarantine,
     ),
 ]
 
@@ -978,7 +1147,81 @@ def prune_snapshots(
     return pruned
 
 
+# ------------------------------------------- migrations-applied flag ---
+# Roadmap 1.7: process-level registry of files this process has fully
+# migrated, keyed by resolved path and validated against the file's
+# identity (st_ino, st_mtime_ns). A match means "stat only, do not
+# open the database"; os.replace (backup restore) and fixture swaps
+# change the identity and therefore invalidate naturally.
+_APPLIED_LOCK = threading.Lock()
+_APPLIED_REGISTRY = {}
+
+
+def _applied_lookup(resolved: Path) -> Optional[int]:
+    try:
+        stat = os.stat(resolved)
+    except OSError:
+        return None
+    with _APPLIED_LOCK:
+        entry = _APPLIED_REGISTRY.get(str(resolved))
+    if entry is not None and entry[0] == stat.st_ino \
+            and entry[1] == stat.st_mtime_ns:
+        return entry[2]
+    return None
+
+
+def _applied_record(resolved: Path, version: int) -> None:
+    try:
+        stat = os.stat(resolved)
+    except OSError:
+        return
+    with _APPLIED_LOCK:
+        _APPLIED_REGISTRY[str(resolved)] = (
+            stat.st_ino, stat.st_mtime_ns, version)
+
+
+def apply_migrations_with_status(
+    db_path: Optional[str] = None,
+    dest_backup_dir: Optional[str] = None,
+    backups_dir: Optional[str] = None,
+):
+    """``apply_migrations`` plus whether the database was opened.
+
+    Returns ``(highest_version, opened)``; ``store.init_db`` uses
+    ``opened`` to ride the same gate for its idempotent index
+    creation instead of opening a throwaway connection per call.
+    """
+    target_path = Path(db_path or store.DEFAULT_DB_PATH)
+    resolved = None
+    if str(target_path) != ":memory:":
+        resolved = target_path.resolve()
+        hit = _applied_lookup(resolved)
+        if hit is not None:
+            return hit, False
+    version = _apply_migrations_impl(
+        db_path, dest_backup_dir, backups_dir)
+    if resolved is not None:
+        _applied_record(resolved, version)
+    return version, True
+
+
 def apply_migrations(
+    db_path: Optional[str] = None,
+    dest_backup_dir: Optional[str] = None,
+    backups_dir: Optional[str] = None,
+) -> int:
+    """Apply pending migrations; see ``_apply_migrations_impl``.
+
+    Roadmap 1.7: when this process has already migrated this exact
+    file (identity unchanged), returns the recorded version without
+    opening the database.
+    """
+    version, _opened = apply_migrations_with_status(
+        db_path, dest_backup_dir, backups_dir)
+    return version
+
+
+def _apply_migrations_impl(
     db_path: Optional[str] = None,
     dest_backup_dir: Optional[str] = None,
     backups_dir: Optional[str] = None,

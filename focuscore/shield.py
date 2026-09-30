@@ -1303,6 +1303,13 @@ def run_shield(db_path=None, session_only=False):
     from . import logging_config
     logging_config.setup_logging(process_name="shield")
 
+    # Roadmap 1.7: migrations before the snapshot prime, so the
+    # telemetry writer (a direct store.get_db caller, now with FK
+    # enforcement) never writes into an unmigrated schema. Startup
+    # only -- the enforcement path stays SQLite-free (Invariant I-1).
+    from . import store
+    store.init_db(db_path)
+
     # Shared infrastructure (created once, reused across restarts).
     snapshot_holder = SnapshotHolder()
     try:

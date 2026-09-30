@@ -235,12 +235,40 @@ class TrayApp:
                 self._apply_pending_update(pending)
                 return
 
+    def _run_nightly_checks(self):
+        """Roadmap 1.7: nightly WAL checkpoint + integrity probe.
+
+        On integrity failure: log loudly and surface one user-visible
+        notification pointing at backup/restore. Never raises into
+        the daemon loop -- the tray must keep running.
+        """
+        from . import store
+        try:
+            store.checkpoint_wal(self.db_path)
+        except Exception:  # noqa: BLE001 -- logged, never fatal
+            logger.warning(
+                "nightly WAL checkpoint failed for %s",
+                self.db_path, exc_info=True)
+        ok, problems = store.run_integrity_check(self.db_path)
+        if ok:
+            logger.debug("nightly integrity check ok for %s",
+                         self.db_path)
+            return
+        logger.error(
+            "nightly integrity check FAILED for %s: %s",
+            self.db_path, "; ".join(problems))
+        self._notify(
+            "Database check failed. Open Backup and restore the "
+            "latest backup.",
+            title="Focus Core")
+
     def _nightly_wal_checkpoint(self):
         """Sprint 4 (Qwen item 10): TRUNCATE-checkpoint the WAL once a
         day on a dedicated connection. The supervisor (tray) owns this
-        because it's the longest-lived process."""
+        because it's the longest-lived process. Roadmap 1.7: the
+        nightly tick now runs _run_nightly_checks (checkpoint +
+        integrity probe)."""
         import time
-        from . import store
         while not self._quitting:
             # Sleep in small increments so quit is responsive.
             for _ in range(24 * 60):  # ~24 h in 1-minute slices
@@ -249,10 +277,7 @@ class TrayApp:
                 time.sleep(60)
             if self._quitting:
                 return
-            try:
-                store.checkpoint_wal(self.db_path)
-            except Exception as exc:  # noqa: BLE001 -- best-effort
-                logger.warning("nightly WAL checkpoint failed: %s", exc)
+            self._run_nightly_checks()
 
     def _peak_watch(self):
         """Phase 11: 5-minute peak-window toast. Checks once a minute;
@@ -488,6 +513,10 @@ def run(db_path=None):
     # log file from here on (the launcher process becomes this one).
     from . import logging_config
     logging_config.setup_logging(process_name="tray")
+    # Roadmap 1.7: migrations before any thread writes through the
+    # FK-enforcing store.get_db.
+    from . import store
+    store.init_db(db_path)
     if not available():
         raise RuntimeError(
             "Tray needs pystray and Pillow. Run setup.bat again, or "

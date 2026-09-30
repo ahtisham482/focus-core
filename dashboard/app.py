@@ -1805,5 +1805,9 @@ if __name__ == "__main__":
     # Roadmap 1.3: tag this process "dashboard" in the shared log.
     from focuscore import logging_config
     logging_config.setup_logging(process_name="dashboard")
+    # Roadmap 1.7: migrations before the first request writes through
+    # the FK-enforcing store.get_db.
+    from focuscore import store as _store
+    _store.init_db()
     from dashboard.app import app as application
     application.run(host=args.host, port=args.port)
