@@ -9,6 +9,7 @@ from datetime import date, datetime, timedelta
 
 from focuscore import chronotype
 from focuscore import intelligence as intel_mod
+from focuscore import migrations
 from focuscore import store
 
 
@@ -377,14 +378,14 @@ def test_heatmap_buckets_local_timezone(tmp_path):
     assert grid[local.weekday()][local.hour] == 1
 
 
-def test_schema_version_stays_9(tmp_path):
-    """Council item 5: Phase 12 adds zero schema changes."""
+def test_schema_version_current(tmp_path):
+    """Schema head is the latest migration after init."""
     db = str(tmp_path / "i.db")
     store.init_db(db)
     conn = store.get_db(db)
     ver = conn.execute("PRAGMA user_version").fetchone()[0]
     conn.close()
-    assert ver == 9
+    assert ver == migrations.LATEST_VERSION
 
 
 def test_report_redacts_titles_and_urls(tmp_path, monkeypatch):

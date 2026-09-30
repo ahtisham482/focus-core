@@ -1,5 +1,7 @@
 """Roadmap 0.2: PRIVACY.md honesty + update-check toggle (TDD)."""
 
+from datetime import date
+
 import pytest
 
 from focuscore import store
@@ -360,7 +362,7 @@ def test_privacy_documents_the_toggle():
 
 def test_privacy_date_is_current():
     text = _privacy_text()
-    assert "2026-09-30" in text
+    assert ("Last updated " + date.today().isoformat()) in text
 
 
 def test_privacy_does_not_claim_version_is_sent():
@@ -391,9 +393,10 @@ def test_privacy_blanket_claims_qualify_drive_backup():
     assert "optional drive backup" in text
 
 
-def test_toggle_card_copy_matches_what_is_sent():
+def test_toggle_card_copy_matches_what_is_sent(monkeypatch, tmp_path):
     # MEDIUM-1 (card copy): the Updates-page toggle card must describe the
     # same request as PRIVACY.md -- IP + the updater User-Agent, no version.
+    monkeypatch.setattr(store, "DEFAULT_DB_PATH", str(tmp_path / "u.db"))
     import dashboard.routes.system as system_mod
     card = system_mod._update_toggle_card_html().lower()
     assert "the app version" not in card

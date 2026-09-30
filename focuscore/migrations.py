@@ -15,11 +15,11 @@ from datetime import datetime
 from pathlib import Path
 from typing import Callable, List, Optional, Set
 
-from . import backup, paths, store
+from . import backup, columncrypto, paths, store
 
 logger = logging.getLogger(__name__)
 
-LATEST_VERSION = 9
+LATEST_VERSION = 10
 
 
 class MigrationError(Exception):
@@ -819,6 +819,62 @@ def _migration_0009_gamification(conn: sqlite3.Connection) -> None:
             "ON activities(ts)")
 
 
+def _migration_0010_encrypt_title_columns(conn: sqlite3.Connection) -> None:
+    """Migration 10: seal stored window titles / URLs (roadmap 1.5a).
+
+    Data-only (no DDL): every plaintext value in activities(title,url),
+    focus_blocks(title,url) and timesheet_entries(title) is sealed with
+    columncrypto (Windows DPAPI in production; see that module for the
+    format).  Runs inside the runner's BEGIN IMMEDIATE transaction, so
+    the whole pass is atomic: a crash mid-run rolls back and the
+    migration simply re-runs on next startup.  The seal format is
+    self-describing (``dpapi:v1:`` prefix), so already-sealed rows are
+    skipped and no row can be double-encrypted; re-running 0010 against
+    a partially-sealed DB seals only what is still plaintext.
+
+    One bad row must never brick startup: a value whose seal fails
+    (ColumnCryptoError, e.g. DPAPI unavailable) stays plaintext,
+    counted and logged, and migration continues; reads never depend on
+    the seal (worst case they show the value as-is), and the row is
+    re-sealed if the migration ever runs again.
+    """
+    sealed = failed = 0
+    targets = (
+        ("activities", ("title", "url")),
+        ("focus_blocks", ("title", "url")),
+        ("timesheet_entries", ("title",)),
+    )
+    for table, columns in targets:
+        if not table_exists(conn, table):
+            continue
+        existing = get_table_columns(conn, table)
+        for column in columns:
+            if column not in existing:
+                continue
+            rows = conn.execute(
+                "SELECT rowid, %s FROM %s "
+                "WHERE %s IS NOT NULL AND %s <> ''"
+                % (column, table, column, column)
+            ).fetchall()
+            for row in rows:
+                rowid, value = row[0], row[1]
+                if not isinstance(value, str) or columncrypto.is_protected(value):
+                    continue
+                try:
+                    conn.execute(
+                        "UPDATE %s SET %s = ? WHERE rowid = ?" % (table, column),
+                        (columncrypto.protect_text(value), rowid),
+                    )
+                    sealed += 1
+                except columncrypto.ColumnCryptoError as exc:
+                    failed += 1
+                    logger.warning(
+                        "0010: could not seal %s.%s row %s (%s); "
+                        "value left plaintext", table, column, rowid, exc)
+    logger.info("0010: sealed %d window-title/URL value(s), "
+                "%d left plaintext", sealed, failed)
+
+
 MIGRATIONS: List[Migration] = [
     Migration(1, "0001_afk_intervals", _migration_0001_afk_intervals),
     Migration(2, "0002_shield_columns", _migration_0002_shield_columns),
@@ -852,6 +908,11 @@ MIGRATIONS: List[Migration] = [
         9,
         "0009_gamification",
         _migration_0009_gamification,
+    ),
+    Migration(
+        10,
+        "0010_encrypt_title_columns",
+        _migration_0010_encrypt_title_columns,
     ),
 ]
 

@@ -45,7 +45,7 @@ def test_migration_7_applies_cleanly_and_is_idempotent(tmp_path):
     conn = _connect(db)
     try:
         version = conn.execute("PRAGMA user_version").fetchone()[0]
-        assert version == 9
+        assert version == migrations.LATEST_VERSION
         tables = {r[0] for r in conn.execute(
             "SELECT name FROM sqlite_master WHERE type = 'table'")}
         assert "project_budget_ledger" in tables

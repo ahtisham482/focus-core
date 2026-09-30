@@ -13,6 +13,7 @@ import pytest
 
 import dashboard.app as dash_app  # noqa: F401  (import registers routes)
 from dashboard.app import app
+from focuscore import store
 
 
 @app.route("/_test_500_boom")
@@ -21,7 +22,10 @@ def _boom():
 
 
 @pytest.fixture()
-def client():
+def client(tmp_path, monkeypatch):
+    # Redirect the dashboard's default DB: error-page tests render the
+    # full branded layout, which reads settings via the real store path.
+    monkeypatch.setattr(store, "DEFAULT_DB_PATH", str(tmp_path / "err.db"))
     app.config["TESTING"] = False  # real error handlers, not propagation
     with app.test_client() as c:
         yield c

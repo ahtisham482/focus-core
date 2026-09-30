@@ -81,7 +81,7 @@ def test_concurrent_migrations_fresh_db(tmp_path: Path) -> None:
         rows = conn.execute(
             "SELECT version FROM schema_migrations ORDER BY version"
         ).fetchall()
-        assert [r[0] for r in rows] == [1, 2, 3, 4, 5, 6, 7, 8, 9]
+        assert [r[0] for r in rows] == list(range(1, migrations.LATEST_VERSION + 1))
     finally:
         conn.close()
 

@@ -67,7 +67,7 @@ def test_migration_8_applies_cleanly_and_is_idempotent(tmp_path):
     conn = _connect(db)
     try:
         version = conn.execute("PRAGMA user_version").fetchone()[0]
-        assert version == 9
+        assert version == migrations.LATEST_VERSION
         tables = {r[0] for r in conn.execute(
             "SELECT name FROM sqlite_master WHERE type = 'table'")}
         for t in ("invoices", "invoice_lines", "invoice_counters",
@@ -133,7 +133,8 @@ def test_migration_8_upgrade_from_v7_preserves_data(tmp_path):
     migrations.apply_migrations(db)
     conn = _connect(db)
     try:
-        assert conn.execute("PRAGMA user_version").fetchone()[0] == 9
+        assert conn.execute("PRAGMA user_version").fetchone()[0] \
+            == migrations.LATEST_VERSION
         row = conn.execute(
             "SELECT invoice_id FROM timesheet_entries").fetchone()
         assert row["invoice_id"] is None

@@ -9,7 +9,7 @@ import sqlite3
 import logging
 from datetime import date, datetime, timedelta
 
-from . import paths
+from . import columncrypto, paths
 
 # Roadmap 0.3: log failures that used to be swallowed silently.
 logger = logging.getLogger(__name__)
@@ -198,7 +198,8 @@ def save_events(day, events, path=None):
             [
                 (
                     e.get("ts"), e.get("duration", 0), e.get("app", ""),
-                    e.get("title", ""), e.get("url"),
+                    columncrypto.protect_text(e.get("title", "")),
+                    columncrypto.protect_text(e.get("url")),
                     e.get("category", "Uncategorized"),
                     e.get("score", 0), e.get("override_score"), e.get("match_key", ""),
                     day,
@@ -301,15 +302,18 @@ def get_day_activities(day, path=None):
     init_db(path)
     conn = get_db(path)
     try:
-        return [
-            dict(row)
-            for row in conn.execute(
-                "SELECT ts, duration, app, title, url, category, score, "
-                "       override_score, match_key "
-                "FROM activities WHERE day = ? ORDER BY ts",
-                (day,),
-            )
-        ]
+        rows = []
+        for row in conn.execute(
+            "SELECT ts, duration, app, title, url, category, score, "
+            "       override_score, match_key "
+            "FROM activities WHERE day = ? ORDER BY ts",
+            (day,),
+        ):
+            opened = dict(row)
+            opened["title"] = columncrypto.unprotect_text(opened["title"])
+            opened["url"] = columncrypto.unprotect_text(opened["url"])
+            rows.append(opened)
+        return rows
     finally:
         conn.close()
 
@@ -323,15 +327,17 @@ def get_activities_range(start_ts, end_ts, path=None):
     init_db(path)
     conn = get_db(path)
     try:
-        return [
-            dict(row)
-            for row in conn.execute(
-                "SELECT ts, duration, app, title, category, score "
-                "FROM activities WHERE ts >= ? AND ts <= ? "
-                "ORDER BY ts ASC",
-                (start_ts, end_ts),
-            )
-        ]
+        rows = []
+        for row in conn.execute(
+            "SELECT ts, duration, app, title, category, score "
+            "FROM activities WHERE ts >= ? AND ts <= ? "
+            "ORDER BY ts ASC",
+            (start_ts, end_ts),
+        ):
+            opened = dict(row)
+            opened["title"] = columncrypto.unprotect_text(opened["title"])
+            rows.append(opened)
+        return rows
     finally:
         conn.close()
 
@@ -363,12 +369,13 @@ def get_day_summary(day, path=None):
             )
             if row["category"] == "Uncategorized":
                 key = row["match_key"] or "app:unknown"
+                title = columncrypto.unprotect_text(row["title"])
                 entry = uncat.setdefault(
                     key, {"match_key": key, "app": row["app"],
-                          "title": row["title"], "seconds": 0.0})
+                          "title": title, "seconds": 0.0})
                 entry["seconds"] += seconds
-                if not entry["title"] and row["title"]:
-                    entry["title"] = row["title"]
+                if not entry["title"] and title:
+                    entry["title"] = title
 
         stats = conn.execute(
             "SELECT afk_seconds, total_seconds FROM day_stats WHERE day = ?",
@@ -901,7 +908,8 @@ def record_block(session_id, ts, app, title, url, score, category,
             "(session_id, ts, app, title, url, score, category, "
             "action_taken, process_name, window_handle) "
             "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
-            (session_id, ts, app, title, url, score, category,
+            (session_id, ts, app, columncrypto.protect_text(title),
+             columncrypto.protect_text(url), score, category,
              action_taken, process_name or "", window_handle or 0),
         )
         return
@@ -913,7 +921,8 @@ def record_block(session_id, ts, app, title, url, score, category,
             "(session_id, ts, app, title, url, score, category, "
             "action_taken, process_name, window_handle) "
             "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
-            (session_id, ts, app, title, url, score, category,
+            (session_id, ts, app, columncrypto.protect_text(title),
+             columncrypto.protect_text(url), score, category,
              action_taken, process_name or "", window_handle or 0),
         )
         conn.commit()
@@ -972,7 +981,13 @@ def get_today_blocks(limit=50, path=None):
             "ORDER BY ts DESC LIMIT ?",
             (date.today().isoformat(), limit),
         ).fetchall()
-        return [dict(r) for r in rows]
+        opened_rows = []
+        for r in rows:
+            opened = dict(r)
+            opened["title"] = columncrypto.unprotect_text(opened["title"])
+            opened["url"] = columncrypto.unprotect_text(opened["url"])
+            opened_rows.append(opened)
+        return opened_rows
     finally:
         conn.close()
 
@@ -1089,7 +1104,7 @@ def _entry_row(row):
         "minutes": row["minutes"],
         "category": row["category"],
         "app": row["app"] or "",
-        "title": row["title"] or "",
+        "title": columncrypto.unprotect_text(row["title"]) or "",
         "project_id": row["project_id"],
         "project_name": row["project_name"] or "",
         "client": row["client"] or "",
@@ -1135,7 +1150,8 @@ def create_entry(day, start_ts, end_ts, minutes, category, app="",
             " project_id, task, note, status, locked, created_at) "
             "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 0, ?)",
             (day, start_ts, end_ts, float(minutes), category, app or "",
-             title or "", project_id, task or "", note or "", status,
+             columncrypto.protect_text(title or ""), project_id, task or "",
+             note or "", status,
              datetime.now().isoformat(timespec="seconds")),
         )
         entry_id = cur.lastrowid
@@ -1203,6 +1219,8 @@ def update_entry(entry_id, fields, path=None):
     updates = {k: v for k, v in fields.items() if k in allowed}
     if not updates:
         return
+    if "title" in updates:
+        updates["title"] = columncrypto.protect_text(updates["title"] or "")
     init_db(path)
     conn = get_db(path)
     try:

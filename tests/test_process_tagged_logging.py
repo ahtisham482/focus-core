@@ -21,6 +21,7 @@ from pathlib import Path
 import pytest
 
 from focuscore import logging_config
+from focuscore import store
 
 REPO_ROOT = Path(__file__).resolve().parent.parent
 
@@ -122,7 +123,8 @@ def _boom_13():
     raise RuntimeError("simulated 500 failure")
 
 
-def test_one_500_logs_a_single_traceback(caplog):
+def test_one_500_logs_a_single_traceback(caplog, monkeypatch, tmp_path):
+    monkeypatch.setattr(store, "DEFAULT_DB_PATH", str(tmp_path / "p.db"))
     _flask_app.config["TESTING"] = False  # real error handlers
     with caplog.at_level(logging.ERROR):
         with _flask_app.test_client() as client:

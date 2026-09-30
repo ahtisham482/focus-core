@@ -64,7 +64,7 @@ def test_fresh_db_applies_all_migrations(tmp_path: Path) -> None:
         ).fetchall()
         assert len(rows) == migrations.LATEST_VERSION
         versions = [r["version"] for r in rows]
-        assert versions == [1, 2, 3, 4, 5, 6, 7, 8, 9]
+        assert versions == list(range(1, migrations.LATEST_VERSION + 1))
 
         # Table & Column verifications
         # 1. afk_intervals

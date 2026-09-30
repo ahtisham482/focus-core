@@ -1,6 +1,6 @@
 # Privacy — Focus Core
 
-Plain-language privacy statement. Last updated 2026-09-30.
+Plain-language privacy statement. Last updated 2026-10-01.
 
 ## The short version
 **All of your data stays on your own computer.** Focus Core has no accounts, no
@@ -17,8 +17,12 @@ turn off the automatic update check on the Updates page.
 
 ## What lives where
 - Your tracked activity, scores, goals, timesheets, and settings live in one file,
-  `focuscore.db`, in your Focus Core folder on your PC. Only you (and anyone with
-  access to your PC) can read it.
+  `focuscore.db`, in your Focus Core folder on your PC. Window titles and website
+  addresses — the most revealing text in there — are stored encrypted with
+  Windows DPAPI, tied to your Windows user account: another Windows user, or a
+  copy of the file taken to another PC, cannot read them. App names, times and
+  scores stay readable; this is a guard on the sensitive text, not full-database
+  encryption.
 - The dashboard runs on your own computer at `http://127.0.0.1:5000`. It is not
   reachable from the internet — it only listens on your PC itself.
 
@@ -61,7 +65,12 @@ Google account.
   the pre-update safety backup made before an update runs, and the safety
   backup made before a database upgrade.
 - **What is copied.** Your whole `focuscore.db` — tracked activity, scores,
-  goals, timesheets, and settings, all in one file.
+  goals, timesheets, and settings, all in one file. The encryption described
+  above travels with it: window titles and website addresses in the copy stay
+  readable only under your Windows user. Restoring the file on a *different*
+  Windows user or PC still brings back everything else (times, scores, goals,
+  timesheets); titles and addresses then show as unreadable. The backup copy
+  itself is not separately password-protected.
 - **Your account only.** It is your Drive, your account, your folder. We have
   no access to it and never request access.
 - **Turning it off.** Because the copies are automatic whenever Drive is

@@ -20,7 +20,7 @@ import hashlib
 import sqlite3
 from pathlib import Path
 
-from focuscore import migrations, store
+from focuscore import columncrypto, migrations, store
 
 
 def _db(tmp_path: Path, name: str = "test.db") -> str:
@@ -296,13 +296,17 @@ def test_legacy_9_tables_data_preservation_and_defaults(tmp_path: Path) -> None:
         check = conn.execute("PRAGMA integrity_check").fetchone()[0]
         assert check == "ok"
 
-        # (1) activities
+        # (1) activities -- titles/URLs are sealed by migration 0010
+        # (roadmap 1.5a); data preservation is judged through the
+        # decryptor, which must hand back the exact legacy plaintext.
         act_rows = conn.execute("SELECT * FROM activities ORDER BY ts").fetchall()
         assert len(act_rows) == 3
-        assert act_rows[0]["title"] == "migrations.py — Focus Core [UTF-8 🚀]"
+        assert columncrypto.unprotect_text(act_rows[0]["title"]) == \
+            "migrations.py — Focus Core [UTF-8 🚀]"
         assert act_rows[0]["score"] == 2
         assert act_rows[1]["app"] == "slack.exe"
-        assert act_rows[2]["url"] == "https://news.ycombinator.com"
+        assert columncrypto.unprotect_text(act_rows[2]["url"]) == \
+            "https://news.ycombinator.com"
 
         # (2) overrides
         ovr_rows = conn.execute(
@@ -401,8 +405,9 @@ def test_legacy_9_tables_data_preservation_and_defaults(tmp_path: Path) -> None:
         assert "idx_afk_intervals_start" in idx_names
         assert "idx_timesheet_session" in idx_names
 
-        # PRAGMA user_version is 8 (all migrations applied)
-        assert conn.execute("PRAGMA user_version").fetchone()[0] == 9
+        # PRAGMA user_version at schema head (all migrations applied)
+        assert conn.execute("PRAGMA user_version").fetchone()[0] \
+            == migrations.LATEST_VERSION
     finally:
         conn.close()
 

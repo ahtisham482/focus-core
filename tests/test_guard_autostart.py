@@ -13,6 +13,7 @@ import sys
 
 import dashboard.app as dash_app
 from focuscore import blocker
+from focuscore import store
 from focuscore import tray as tray_mod
 
 
@@ -80,7 +81,8 @@ def test_dashboard_focus_start_starts_guard(monkeypatch):
     assert started == [True]
 
 
-def test_dashboard_focus_start_no_guard_on_error(monkeypatch):
+def test_dashboard_focus_start_no_guard_on_error(monkeypatch, tmp_path):
+    monkeypatch.setattr(store, "DEFAULT_DB_PATH", str(tmp_path / "g.db"))
     monkeypatch.setattr("focuscore.focus.start_session",
                         lambda *a, **k: {"error": "already active"})
     started = []
@@ -94,7 +96,8 @@ def test_dashboard_focus_start_no_guard_on_error(monkeypatch):
     assert started == []
 
 
-def test_layout_includes_favicon():
+def test_layout_includes_favicon(monkeypatch, tmp_path):
+    monkeypatch.setattr(store, "DEFAULT_DB_PATH", str(tmp_path / "g2.db"))
     html = dash_app.layout("T", "<p>x</p>")
     assert "<link rel='icon' href='/static/icon.png'>" in html
 

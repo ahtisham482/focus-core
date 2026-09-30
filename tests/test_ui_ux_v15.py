@@ -243,6 +243,7 @@ def test_qwen_rv4_report_route_isolation_and_csp(tmp_path, monkeypatch):
 
 
 def test_qwen_rv5_dashboard_csp_allows_self(monkeypatch, tmp_path):
+    monkeypatch.setattr(store, "DEFAULT_DB_PATH", str(tmp_path / "v.db"))
     """RV-5: Verify dashboard routes permit 'self' for nav.js and local Geist fonts."""
     flag = tmp_path / ".onboarded"
     flag.write_text("2026-09-29")

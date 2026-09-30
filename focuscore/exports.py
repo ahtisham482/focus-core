@@ -23,8 +23,8 @@ import json
 from datetime import datetime
 
 from focuscore import budgets as budgets_mod
+from focuscore import columncrypto, store
 from focuscore import money as money_mod
-from focuscore import store
 
 SCHEMA_VERSION = "focuscore.timesheet/v1"
 APP_VERSION = "1.10.0"
@@ -123,7 +123,8 @@ def build_export_rows(
                 "amount_minor": amount,
                 # Gated: only present when the internal profile is requested.
                 "app": (r["app"] or "") if include_app_details else "",
-                "title": (r["title"] or "") if include_app_details else "",
+                "title": (columncrypto.unprotect_text(r["title"]) or "")
+                if include_app_details else "",
             }
         )
     return rows
