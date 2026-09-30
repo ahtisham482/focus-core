@@ -62,6 +62,27 @@ def test_500_page_is_friendly_and_logs(client, caplog):
                for rec in caplog.records)
 
 
+def test_500_page_shows_request_id(client):
+    import re
+    r = client.get("/_test_500_boom")
+    assert r.status_code == 500
+    html = r.get_data(as_text=True)
+    m = re.search(r"req-[0-9a-f]{8}", html)
+    assert m, "500 page should show a quotable request id"
+
+
+def test_500_log_line_carries_same_request_id(client, caplog):
+    import re
+    with caplog.at_level(logging.ERROR):
+        r = client.get("/_test_500_boom")
+    html = r.get_data(as_text=True)
+    m = re.search(r"req-[0-9a-f]{8}", html)
+    assert m, "500 page should show a quotable request id"
+    rid = m.group(0)
+    assert any(rid in rec.getMessage() for rec in caplog.records), (
+        "the same request id must appear in the logged traceback line")
+
+
 def test_focus_page_logs_settle_failure(client, monkeypatch, caplog):
     """Sample site 1: /focus settle_session failure must leave a trace."""
     from focuscore import focus as focus_mod

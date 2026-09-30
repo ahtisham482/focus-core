@@ -21,13 +21,14 @@ Routes:
 import sys
 import json as _json
 import logging
+import uuid
 from datetime import date, datetime
 from html import escape
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
-from flask import Flask, redirect, request  # noqa: E402
+from flask import Flask, g, redirect, request  # noqa: E402
 
 from focuscore import paths
 from focuscore import store  # noqa: E402
@@ -269,7 +270,7 @@ def hm_target_strips(day):
     _STATUS_WORD = {"on_track": "On track", "behind": "Behind pace",
                     "achieved": "Achieved", "missed": "Missed"}
     rows = []
-    for g in pinned[:3]:
+    for goal in pinned[:3]:
         rows.append(
             "<div class='hm-strip-row'>"
             "<div class='hm-strip-top'>"
@@ -278,11 +279,11 @@ def hm_target_strips(day):
             "<div class='hm-strip-bar'><div style='width:%.1f%%'></div></div>"
             "<p class='hm-strip-val'>%s of %s %s</p>"
             "</div>"
-            % (escape(g["name"]),
-               escape(_STATUS_WORD.get(g["status"], g["status"])),
-               min(100.0, g["pct"] or 0),
-               "%.0f" % (g["current"] or 0),
-               "%.0f" % (g["target"] or 0), escape(g["unit"])))
+            % (escape(goal["name"]),
+               escape(_STATUS_WORD.get(goal["status"], goal["status"])),
+               min(100.0, goal["pct"] or 0),
+               "%.0f" % (goal["current"] or 0),
+               "%.0f" % (goal["target"] or 0), escape(goal["unit"])))
     return "".join(rows)
 
 
@@ -526,16 +527,26 @@ def _add_security_headers(response):
 # recovery link -- never a traceback or internals. The 500 handler
 # still logs the exception server-side so field failures leave a trace.
 
-def _error_page(code, headline, detail):
+def _error_page(code, headline, detail, request_id=None):
     """Branded error page inside the normal page shell."""
+    ref = ""
+    if request_id:
+        ref = ("<p>If you ask for help, quote this code: "
+               "<code>%s</code></p>" % escape(request_id))
     body = (
         "<div class='hm-wrap'><div class='hm-empty'>"
         "<p class='hm-empty-title'>%s</p>"
         "<p>%s</p>"
+        "%s"
         "<p><a href='/'>Back to Home</a></p>"
         "</div></div>"
-        % (escape(headline), detail))
+        % (escape(headline), detail, ref))
     return layout("%s (%d)" % (headline, code), body, active="home")
+
+
+@app.before_request
+def _assign_request_id():
+    g.request_id = "req-" + uuid.uuid4().hex[:8]
 
 
 @app.errorhandler(404)
@@ -549,12 +560,15 @@ def _page_not_found(_err):
 
 @app.errorhandler(500)
 def _internal_error(_err):
-    logger.exception("Unhandled exception while serving %s", request.path)
+    rid = getattr(g, "request_id", "req-unknown")
+    logger.exception("Unhandled exception while serving %s [%s]",
+                     request.path, rid)
     return _error_page(
         500,
         "Something went wrong on our side.",
         "Your data is safe. Head back home and carry on &mdash; if this "
-        "keeps happening, the details are in the app log."), 500
+        "keeps happening, the details are in the app log.",
+        request_id=rid), 500
 
 
 _TARGET_SVG = (
