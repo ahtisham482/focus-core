@@ -73,10 +73,14 @@ def main():
         def goals_crud():
             page.goto(args.base_url + "/goals",
                       wait_until="networkidle")
-            # Create a goal the way a person does: fill the form, submit.
-            page.fill("input[name=name]", MARKER)
-            page.fill("input[name=threshold]", "70")
-            page.click("button:has-text('Add goal')")
+            # Create a goal the way a person does: fill the visible
+            # sentence form and submit. (Scoped to form.sentence-form:
+            # the one-tap starter chips also carry hidden name/threshold
+            # inputs, which would trip Playwright's strict mode.)
+            form = page.locator("form.sentence-form")
+            form.locator("input[name=name]").fill(MARKER)
+            form.locator("input[name=threshold]").fill("70")
+            form.get_by_role("button", name="Add goal").click()
             page.wait_for_url("**/goals", timeout=15000)
             expect(page.get_by_text(MARKER)).to_be_visible(timeout=15000)
             shot("03-goal-created.png")
