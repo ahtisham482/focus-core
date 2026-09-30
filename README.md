@@ -27,8 +27,9 @@ full details.
 
 ## Install (Windows, 3 steps)
 
-1. **Install Focus Core**: download `FocusCore-Setup-1.6.0.exe` from the
-   Releases page and run it. No admin rights needed. It puts a
+1. **Install Focus Core**: download the newest `FocusCore-Setup-<version>.exe`
+   from the [Releases page](https://github.com/ahtisham482/focus-core/releases)
+   and run it. No admin rights needed. It puts a
    **Focus Core** icon on your desktop.
 2. **Open Focus Core** from the desktop icon and take the 3-screen
    welcome tour.
@@ -60,6 +61,25 @@ task, then **Lock day** when it looks right.
 
 **Stuck on any page?** Click **Help** in the footer -- every page has
 its own short guide. The full manual is `USER_GUIDE.md`.
+
+## Code signing policy
+
+Focus Core releases are built in public, by this repository's GitHub
+Actions workflows, and attached to GitHub Releases. Free code signing
+provided by [SignPath.io](https://signpath.io), certificate by
+[SignPath Foundation](https://signpath.org). Focus Core is applying to
+SignPath Foundation; until it is approved, published builds are
+unsigned.
+
+Only installer builds produced by these workflows from tagged releases
+of this repository will ever be submitted for signing -- locally built
+binaries are never signed. Signed installers will show **SignPath
+Foundation** as the publisher.
+
+- Committers and reviewers: the repository owner, `ahtisham482`.
+- Signing approver: the repository owner, `ahtisham482`. Every signing
+  request is approved manually before release.
+- Privacy policy: [PRIVACY.md](PRIVACY.md)
 
 ## Updates
 

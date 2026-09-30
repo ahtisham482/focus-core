@@ -114,3 +114,10 @@ jobs:
 
             Inside the app: the Help menu (plain-English guides). Something wrong?
             https://github.com/ahtisham482/focus-core/issues
+
+            ## Code signing policy
+
+            Focus Core is applying to [SignPath Foundation](https://signpath.org)
+            for free open-source code signing; until it is approved, published
+            builds are unsigned. Full policy:
+            https://github.com/ahtisham482/focus-core#code-signing-policy
