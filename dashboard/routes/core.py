@@ -3,6 +3,7 @@
 Sprint 4 (Qwen item 11): split from dashboard/app.py.
 Zero URL changes, zero HTML changes -- pure code move.
 """
+import logging
 from datetime import date
 from html import escape
 
@@ -11,6 +12,7 @@ from flask import abort, redirect, request
 from focuscore import store
 from focuscore.scoring import UI_LABELS
 from focuscore.taxonomy import host_of
+
 from dashboard.app import app
 import dashboard.app as _app_mod  # for monkeypatch-compatible access
 from dashboard.app import (
@@ -26,6 +28,9 @@ from dashboard.app import (
     layout,
     mark_onboarded,
 )
+
+logger = logging.getLogger(__name__)
+
 
 @app.route("/")
 def index():
@@ -150,8 +155,8 @@ def welcome_restart():
         # Via module attribute so tests can monkeypatch
         # dashboard.app.ONBOARDED_FLAG.
         _app_mod.ONBOARDED_FLAG.unlink()
-    except OSError:
-        pass
+    except OSError as exc:
+        logger.warning("could not remove the onboarding flag: %s", exc)
     return redirect("/welcome")
 
 
@@ -390,7 +395,9 @@ def goals_delete():
     try:
         store.delete_goal(int(request.form.get("id")))
     except (TypeError, ValueError):
-        pass
+        # A malformed id means the action silently did not happen;
+        # say so in the log without echoing raw form values.
+        logger.warning("goals/delete: invalid id, nothing deleted")
     return redirect("/goals")
 
 
@@ -400,7 +407,7 @@ def goals_pin():
         store.set_pinned(int(request.form.get("id")),
                          request.form.get("pinned") == "1")
     except (TypeError, ValueError):
-        pass
+        logger.warning("goals/pin: invalid id, nothing changed")
     return redirect("/goals")
 
 
@@ -565,7 +572,7 @@ def alerts_delete():
     try:
         store.delete_alert(int(request.form.get("id")))
     except (TypeError, ValueError):
-        pass
+        logger.warning("alerts/delete: invalid id, nothing deleted")
     return redirect("/alerts")
 
 
@@ -575,7 +582,7 @@ def alerts_toggle():
         store.set_alert_enabled(int(request.form.get("id")),
                                 request.form.get("enabled") == "1")
     except (TypeError, ValueError):
-        pass
+        logger.warning("alerts/toggle: invalid id, nothing changed")
     return redirect("/alerts")
 
 

@@ -15,9 +15,13 @@ Qwen audit constraints (Revision 2) implemented here:
 
 from datetime import datetime, timedelta
 
+import logging
+
 from . import intelligence
 from . import store
 from .scoring import productivity_pulse
+
+logger = logging.getLogger(__name__)
 
 # --- named thresholds -------------------------------------------------------
 HISTORY_DAYS = 14       # suggestion window: last 2 weeks
@@ -102,7 +106,10 @@ def suggest_work_minutes(db_path=None, now=None, mode="pomodoro"):
             reason_bits.append("This is not a peak hour for you, so a "
                                "little shorter.")
     except Exception:
-        pass  # nudge is best-effort; the base suggestion stands
+        # The nudge is best-effort and the base suggestion stands --
+        # but a broken peak calculation should not be invisible.
+        logger.exception("peak-window nudge failed; using the base "
+                         "suggestion")
     return (_clamp_round(minutes, WORK_MIN_MINUTES, WORK_MAX_MINUTES),
             " ".join(reason_bits))
 
@@ -230,5 +237,6 @@ def past_flow_lengths(db_path=None, limit=20):
             if len(lengths) >= limit:
                 break
     except Exception:
-        pass
+        logger.exception("past flow lengths scan failed; history "
+                         "may be incomplete")
     return lengths

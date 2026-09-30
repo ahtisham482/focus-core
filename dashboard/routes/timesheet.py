@@ -3,12 +3,14 @@
 Sprint 4 (Qwen item 11): split from dashboard/app.py.
 Zero URL changes, zero HTML changes -- pure code move.
 """
+import logging
 from datetime import date
 from html import escape
 
 from flask import Response, abort, redirect, request
 
 from focuscore import store
+
 from dashboard.app import app
 from dashboard.app import (
     _category_options,
@@ -21,6 +23,9 @@ from dashboard.app import (
     json_dumps,
     layout,
 )
+
+logger = logging.getLogger(__name__)
+
 
 @app.route("/timesheet")
 def timesheet_page():
@@ -363,7 +368,8 @@ def timesheet_project_delete():
     try:
         store.delete_project(int(request.form.get("id")))
     except (TypeError, ValueError):
-        pass
+        logger.warning("timesheet project delete: invalid id, "
+                       "nothing deleted")
     return redirect("/timesheet?day=" + day)
 
 

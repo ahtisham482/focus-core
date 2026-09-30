@@ -309,13 +309,17 @@ def _spill_event(event):
             for i in range(TELEMETRY_SPILL_MAX_FILES - 1):
                 try:
                     os.replace(_spill_path(i + 1), _spill_path(i))
-                except OSError:
-                    pass
+                except OSError as exc:
+                    # A missing slot mid-rotation is normal; DEBUG.
+                    logger.debug("telemetry spill rotation step "
+                                 "failed: %s", exc)
             target = _spill_path(TELEMETRY_SPILL_MAX_FILES - 1)
         with open(target, "a", encoding="utf-8") as fh:
             fh.write(json.dumps(event) + "\n")
     except Exception:
-        pass  # spill is best-effort; never raise
+        # Spill is best-effort (never raise), but a lost event should
+        # leave a trace: telemetry silently vanishing is undebuggable.
+        logger.exception("telemetry spill write failed; event lost")
 
 
 def _flush_telemetry_batch(batch, db_path):
@@ -643,7 +647,9 @@ def shield_once(state, client, categorize_fn, db_path=None, now=None,
                 return {"action": "allow", "reason": "resume grace",
                         "app": window["app"]}
         except Exception:
-            pass
+            # Fail open (fall through to enforcement) -- but say so.
+            logger.exception("resume-grace check failed; enforcing "
+                             "normally")
 
         # 4. Session + rules.
         # Sprint 4 (I-1): snapshot mode uses pre-fetched session, cycle,
@@ -826,7 +832,10 @@ def shield_once(state, client, categorize_fn, db_path=None, now=None,
                             "session_id": session_id,
                         })
                 except queue.Full:
-                    pass  # bounded queue; drop rather than block
+                    # Bounded queue; drop rather than block. DEBUG:
+                    # under load this is a flood, not an event.
+                    logger.debug("intercept telemetry queue full; "
+                                 "event dropped")
             else:
                 store.record_block(
                     session_id if session_id else RULE_ONLY_SESSION_ID,
@@ -865,11 +874,11 @@ def _queue_overlay(label, app, locked, session_id, db_path):
         try:
             _UI_QUEUE.get_nowait()  # drop oldest
         except queue.Empty:
-            pass
+            logger.debug("ui queue raced empty while making room")
         try:
             _UI_QUEUE.put_nowait(cmd)
         except queue.Full:
-            pass
+            logger.debug("ui queue still full; overlay dropped")
 
 
 def _queue_ui_command(cmd):
@@ -880,11 +889,12 @@ def _queue_ui_command(cmd):
         try:
             _UI_QUEUE.get_nowait()
         except queue.Empty:
-            pass
+            logger.debug("ui queue raced empty while making room")
         try:
             _UI_QUEUE.put_nowait(cmd)
         except queue.Full:
-            pass
+            logger.debug("ui queue still full; command dropped: %s",
+                         cmd.cmd)
 
 
 # Module-level UI queue, set by run_shield() before the worker starts.
@@ -963,8 +973,10 @@ def _worker_main(stop_event, event_q, ui_q, db_path, session_only,
     def _on_foreground(hwnd):
         try:
             event_q.put_nowait(int(hwnd))
-        except Exception:
-            pass
+        except Exception as exc:
+            # Win32 hook callback thread: never raise, and a dropped
+            # event is covered by the worker's fallback poll. DEBUG.
+            logger.debug("foreground event hand-off failed: %s", exc)
 
     hook = win32.install_foreground_hook(_on_foreground)
     client = ActivityWatchClient()
@@ -1011,8 +1023,9 @@ def _worker_main(stop_event, event_q, ui_q, db_path, session_only,
             if worker_alive is not None:
                 try:
                     worker_alive.set()
-                except Exception:
-                    pass
+                except Exception as exc:
+                    logger.debug("worker liveness signal failed: %s",
+                                 exc)
             if os.path.exists(kill_switch_path()):
                 break
             if session_only:
@@ -1029,20 +1042,27 @@ def _worker_main(stop_event, event_q, ui_q, db_path, session_only,
                             db_path=db_path)
                     if not active:
                         break
-                except Exception:
-                    pass
+                except Exception as exc:
+                    # Session ended-check failed: keep enforcing (the
+                    # loop retries next iteration). WARNING without a
+                    # traceback -- a locked DB would repeat this.
+                    logger.warning("could not check whether the "
+                                   "session ended: %s", exc)
             # Keep Win32 hooks alive.
             try:
                 win32.pump_messages_once()
-            except Exception:
-                pass
+            except Exception as exc:
+                logger.debug("message pump step failed: %s", exc)
             # Expire the keyboard swallow.
             if swallow_handle is not None and \
                     time.time() >= swallow_until:
                 try:
                     win32.uninstall_keyboard_swallow(swallow_handle)
-                except Exception:
-                    pass
+                except Exception as exc:
+                    # win32 logs the uninstall failure itself; this is
+                    # the belt to its braces.
+                    logger.debug("keyboard swallow expiry failed: %s",
+                                 exc)
                 swallow_handle = None
             # Event-driven: hook events first...
             try:
@@ -1051,7 +1071,9 @@ def _worker_main(stop_event, event_q, ui_q, db_path, session_only,
                 _engine_cycle()
                 continue
             except queue.Empty:
-                pass
+                # Normal idle path (no foreground event within
+                # WORKER_IDLE_SECONDS); falls through to the poll.
+                logger.debug("worker idle tick; polling instead")
             # ...2 s fallback poll in case the hook was dropped (R1).
             now_t = time.time()
             if now_t - last_fallback >= FALLBACK_POLL_SECONDS:
@@ -1067,12 +1089,14 @@ def _worker_main(stop_event, event_q, ui_q, db_path, session_only,
         if swallow_handle is not None:
             try:
                 win32.uninstall_keyboard_swallow(swallow_handle)
-            except Exception:
-                pass
+            except Exception as exc:
+                logger.debug("final keyboard swallow removal failed: "
+                             "%s", exc)
         try:
             win32.uninstall_foreground_hook(hook)
-        except Exception:
-            pass
+        except Exception as exc:
+            logger.debug("final foreground hook removal failed: %s",
+                         exc)
         # Tell the UI thread to quit its mainloop.
         _queue_ui_command(UICommand(cmd="quit"))
 
@@ -1122,8 +1146,9 @@ def _ui_main(stop_event, ui_q, db_path, worker_alive=None,
         for win in overlays:
             try:
                 win.destroy()
-            except Exception:
-                pass
+            except Exception as exc:
+                # A half-dead tkinter window is routine at shutdown.
+                logger.debug("closing a block overlay failed: %s", exc)
         overlays.clear()
 
     def _handle_command(cmd):
@@ -1146,21 +1171,21 @@ def _ui_main(stop_event, ui_q, db_path, worker_alive=None,
         elif cmd.cmd == "hud_update" and hud is not None:
             try:
                 hud.update_snapshot(cmd.payload)
-            except Exception:
-                pass
+            except Exception as exc:
+                logger.debug("hud update failed: %s", exc)
         elif cmd.cmd == "hud_hide" and hud is not None:
             try:
                 hud.hide()
-            except Exception:
-                pass
+            except Exception as exc:
+                logger.debug("hud hide failed: %s", exc)
         elif cmd.cmd == "hud_show":
             try:
                 if hud is None:
                     hud = hud_mod.HudWindow(root, db_path=db_path)
                 else:
                     hud.show()
-            except Exception:
-                pass
+            except Exception as exc:
+                logger.debug("hud show failed: %s", exc)
         elif cmd.cmd == "quit":
             stop_event.set()
 
@@ -1173,15 +1198,17 @@ def _ui_main(stop_event, ui_q, db_path, worker_alive=None,
                 try:
                     if hud is not None:
                         hud.destroy()
-                except Exception:
-                    pass
+                except Exception as exc:
+                    logger.debug("hud destroy on stop failed: %s", exc)
                 root.quit()
                 return
             try:
                 while True:
                     _handle_command(ui_q.get_nowait())
             except queue.Empty:
-                pass
+                # Expected: the command queue is empty again (this
+                # fires on most 100 ms drain ticks). DEBUG only.
+                logger.debug("ui command queue drained")
             # Worker liveness: check every 30 s (Qwen item 5).
             now_t = time.time()
             if worker_alive is not None and \
@@ -1226,22 +1253,26 @@ def _ui_main(stop_event, ui_q, db_path, worker_alive=None,
                             hud.show()
                     elif not want and hud is not None and hud.visible:
                         hud.hide()
-            except Exception:
-                pass
+            except Exception as exc:
+                # HUD sync runs on the 100 ms drain tick: DEBUG, or a
+                # broken HUD would flood the log ten times a second.
+                logger.debug("hud sync step failed: %s", exc)
         finally:
             # Sprint 4 (Qwen item 4): the reschedule is UNCONDITIONAL.
             # No exception in drain() can ever stop the UI loop.
             try:
                 if not stop_event.is_set():
                     root.after(UI_DRAIN_MS, drain)
-            except Exception:
-                pass
+            except Exception as exc:
+                # Fires once -- after this, nothing reschedules drain.
+                logger.warning("UI loop reschedule failed; shield UI "
+                               "is stopping: %s", exc)
 
     root.after(UI_DRAIN_MS, drain)
     try:
         root.mainloop()
     except Exception:
-        pass
+        logger.exception("shield UI mainloop ended with an error")
     return "worker_silent" if worker_dead else "stopped"
 
 
@@ -1265,6 +1296,12 @@ def run_shield(db_path=None, session_only=False):
     if mutex is None:
         print("Shield is already running; not starting a second copy.")
         return
+
+    # Roadmap 1.3: this process owns the "shield" tag in the shared
+    # log file. (Placed after the singleton check so a duplicate
+    # starter doesn't re-tag or re-configure anything.)
+    from . import logging_config
+    logging_config.setup_logging(process_name="shield")
 
     # Shared infrastructure (created once, reused across restarts).
     snapshot_holder = SnapshotHolder()
@@ -1350,8 +1387,8 @@ def run_shield(db_path=None, session_only=False):
                 conn.execute("PRAGMA wal_checkpoint(TRUNCATE)")
             finally:
                 conn.close()
-        except Exception:
-            pass
+        except Exception as exc:
+            logger.warning("final WAL checkpoint failed: %s", exc)
         # 5. Release the singleton mutex.
         win32.release_singleton_mutex(mutex)
 
@@ -1382,9 +1419,9 @@ def _drain_queue(q):
         while True:
             q.get_nowait()
     except queue.Empty:
-        pass
-    except Exception:
-        pass
+        logger.debug("queue fully drained")
+    except Exception as exc:
+        logger.warning("queue drain failed: %s", exc)
 
 
 def _drain_telemetry(telemetry_q, db_path):
@@ -1394,9 +1431,9 @@ def _drain_telemetry(telemetry_q, db_path):
         while True:
             batch.append(telemetry_q.get_nowait())
     except queue.Empty:
-        pass
-    except Exception:
-        pass
+        logger.debug("telemetry queue fully drained")
+    except Exception as exc:
+        logger.warning("telemetry drain failed: %s", exc)
     if batch:
         try:
             _flush_telemetry_batch(batch, db_path)

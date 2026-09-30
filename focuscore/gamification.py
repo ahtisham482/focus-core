@@ -16,9 +16,12 @@ Writes happen once, in end_session(), a single transaction -- off every
 hot path. No floats anywhere in the ledger.
 """
 
+import logging
 from datetime import datetime
 
 from . import store
+
+logger = logging.getLogger(__name__)
 
 
 # ------------------------------------------------------------- settings ---
@@ -162,7 +165,8 @@ def award_session_xp(session_id, db_path=None):
         try:
             conn.rollback()
         except Exception:
-            pass
+            logger.exception("award_session_xp: rollback after the "
+                             "award failure also failed")
         return {"awarded": False, "reason": "db_error"}
     finally:
         conn.close()

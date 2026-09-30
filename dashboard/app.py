@@ -571,6 +571,25 @@ def _internal_error(_err):
         request_id=rid), 500
 
 
+class _DropFlaskDuplicateTraceback(logging.Filter):
+    """Roadmap 1.3: drop Flask's own copy of the 500 traceback.
+
+    Flask logs "Exception on <path> [METHOD]" with exc_info for the
+    same failure the handler above already logged via
+    logger.exception(...). Both records come from this logger and
+    both carry a traceback, so a single failure reads as two.
+    Keep ours (it carries the request id); drop Flask's copy.
+    """
+
+    def filter(self, record):
+        return not (record.exc_info
+                    and isinstance(record.msg, str)
+                    and record.msg.startswith("Exception on "))
+
+
+app.logger.addFilter(_DropFlaskDuplicateTraceback())
+
+
 _TARGET_SVG = (
     "<svg width='26' height='26' viewBox='0 0 26 26' fill='none' "
     "stroke='currentColor' stroke-width='2' aria-hidden='true'>"
@@ -646,7 +665,10 @@ def home_page():
     try:
         run_day(date.today())
     except ActivityWatchError:
-        pass  # the "ActivityWatch isn't running" card covers this
+        # Expected whenever ActivityWatch is off -- the "ActivityWatch
+        # isn't running" card on this very page covers it. DEBUG only:
+        # this fires on every home load while AW is down.
+        logger.debug("home page: ActivityWatch day sync unavailable")
 
     aw_status = aw_mod.server_status()
     aw_state = aw_mod.detection_state(status=aw_status)
@@ -1741,5 +1763,8 @@ if __name__ == "__main__":
         print("WARNING: binding to %s exposes your tracked data to the "
               "local network. Anyone on your Wi-Fi could open the dashboard."
               % args.host)
+    # Roadmap 1.3: tag this process "dashboard" in the shared log.
+    from focuscore import logging_config
+    logging_config.setup_logging(process_name="dashboard")
     from dashboard.app import app as application
     application.run(host=args.host, port=args.port)

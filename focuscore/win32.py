@@ -257,8 +257,8 @@ def release_singleton_mutex(handle):
         if b is not None and handle is not None \
                 and not isinstance(handle, object):
             b["kernel32"].CloseHandle(handle)
-    except Exception:
-        pass
+    except Exception as exc:
+        logger.warning("releasing the singleton mutex failed: %s", exc)
 
 
 def mutex_held(name=SHIELD_MUTEX_NAME):
@@ -458,8 +458,11 @@ def install_foreground_hook(on_foreground):
                 if event == EVENT_SYSTEM_FOREGROUND and hwnd \
                         and id_object == OBJID_WINDOW:
                     on_foreground(int(hwnd))
-            except Exception:
-                pass
+            except Exception as exc:
+                # Win32 callback: never raise into the hook machinery.
+                # DEBUG -- fires per foreground event, and the shield's
+                # 2-second fallback poll covers any event lost here.
+                logger.debug("foreground hook callback failed: %s", exc)
 
         proc = b["WINEVENTPROC"](_proc)
         _remember(proc)
@@ -477,8 +480,8 @@ def uninstall_foreground_hook(handle):
         b = _bindings()
         if b is not None and handle:
             b["user32"].UnhookWinEvent(int(handle))
-    except Exception:
-        pass
+    except Exception as exc:
+        logger.warning("removing the foreground hook failed: %s", exc)
 
 
 def pump_messages_once():
@@ -503,6 +506,9 @@ def pump_messages_once():
             n += 1
         return n
     except Exception:
+        # Called every shield-worker iteration: DEBUG only (at the
+        # default INFO level this never even builds a record).
+        logger.debug("win32 message drain failed", exc_info=True)
         return 0
 
 
@@ -530,9 +536,12 @@ def pump_messages(stop_event, timeout_ms=500):
             except Exception:
                 # Roadmap 0.3: pump failures used to fail with no trace.
                 logger.exception("win32 message pump iteration failed")
-                pass
             stop_event.wait(timeout_ms / 1000.0)
     except Exception:
+        # Roadmap 1.3: the "never raises" outer guard used to exit
+        # without a trace. It fires once, as the pump stops for good,
+        # so a full traceback carries no loop-spam risk.
+        logger.exception("win32 message pump stopped unexpectedly")
         return
 
 
@@ -589,5 +598,6 @@ def uninstall_keyboard_swallow(handle):
         b = _bindings()
         if b is not None and handle:
             b["user32"].UnhookWindowsHookEx(int(handle))
-    except Exception:
-        pass
+    except Exception as exc:
+        logger.warning("removing the keyboard swallow hook failed: %s",
+                       exc)

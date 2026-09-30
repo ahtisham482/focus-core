@@ -91,8 +91,10 @@ def ensure_wal_and_timeout(conn: sqlite3.Connection) -> None:
     """Set WAL journal mode and busy timeout to avoid write deadlocks."""
     try:
         conn.execute("PRAGMA journal_mode = WAL")
-    except sqlite3.OperationalError:
-        pass
+    except sqlite3.OperationalError as exc:
+        # Can fire per connection under lock contention; DEBUG so a
+        # locked database doesn't become a log flood.
+        logger.debug("could not enable WAL journal mode: %s", exc)
     conn.execute("PRAGMA busy_timeout = 5000")
 
 
@@ -902,13 +904,15 @@ def prune_snapshots(
         try:
             path.unlink(missing_ok=True)
             pruned += 1
-        except OSError:
-            pass
+        except OSError as exc:
+            logger.warning("could not prune old migration snapshot "
+                           "%s: %s", path, exc)
         try:
             sidecar = Path(str(path) + ".sha256")
             sidecar.unlink(missing_ok=True)
-        except OSError:
-            pass
+        except OSError as exc:
+            logger.warning("could not prune snapshot checksum %s: %s",
+                           sidecar, exc)
 
     return pruned
 
@@ -1056,7 +1060,11 @@ def apply_migrations(
                 try:
                     conn.rollback()
                 except Exception:
-                    pass
+                    # The step failure is logged just above; this is
+                    # the distinct "rollback ALSO failed" signal.
+                    logger.exception(
+                        "Migration %d rollback also failed",
+                        migration.version)
                 raise step_err
 
         return current_version
@@ -1064,8 +1072,9 @@ def apply_migrations(
         if conn is not None:
             try:
                 conn.close()
-            except Exception:
-                pass
+            except Exception as close_exc:
+                logger.debug("closing the failed migration connection "
+                             "failed: %s", close_exc)
             conn = None
 
         # 6. On failure, restore pre-migration snapshot if available
@@ -1083,8 +1092,9 @@ def apply_migrations(
             try:
                 wal_file.unlink(missing_ok=True)
                 shm_file.unlink(missing_ok=True)
-            except OSError:
-                pass
+            except OSError as exc:
+                logger.warning("could not remove stale WAL files "
+                               "before snapshot restore: %s", exc)
 
             try:
                 backup.restore_backup(
@@ -1105,15 +1115,17 @@ def apply_migrations(
             try:
                 wal_file.unlink(missing_ok=True)
                 shm_file.unlink(missing_ok=True)
-            except OSError:
-                pass
+            except OSError as exc:
+                logger.warning("could not remove stale WAL files "
+                               "after snapshot restore: %s", exc)
         elif is_fresh and len(applied_by_this_call) > 0:
             try:
                 target_path.unlink(missing_ok=True)
                 Path(str(target_path) + "-wal").unlink(missing_ok=True)
                 Path(str(target_path) + "-shm").unlink(missing_ok=True)
-            except OSError:
-                pass
+            except OSError as exc:
+                logger.warning("could not remove the half-migrated "
+                               "fresh database: %s", exc)
 
         if isinstance(exc, MigrationError):
             raise exc
@@ -1124,5 +1136,6 @@ def apply_migrations(
         if conn is not None:
             try:
                 conn.close()
-            except Exception:
-                pass
+            except Exception as exc:
+                logger.debug("closing the migration connection "
+                             "failed: %s", exc)

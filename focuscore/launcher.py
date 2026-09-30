@@ -19,12 +19,15 @@ Every helper here is a small pure/testable function; the .bat file
 itself is just two lines.
 """
 
+import logging
 import socket
 import subprocess
 import sys
 import time
 import webbrowser
 from pathlib import Path
+
+logger = logging.getLogger(__name__)
 
 PROJECT_ROOT = Path(__file__).resolve().parent.parent
 HOST = "127.0.0.1"
@@ -109,8 +112,9 @@ def ensure_server():
     if not wait_for_port():
         try:
             proc.terminate()
-        except OSError:
-            pass
+        except OSError as exc:
+            logger.warning("could not stop the server process that "
+                           "failed to start: %s", exc)
         raise RuntimeError(
             "The Focus Core server did not start. Please double-click "
             "setup.bat again, and if it still fails send a screenshot "
@@ -177,7 +181,7 @@ def _background_update_check():
         from . import updater
         updater.check_for_update()
     except Exception:  # noqa: BLE001 -- updates must never break launch
-        pass
+        logger.exception("background update check failed")
 
 
 def main():
@@ -185,6 +189,10 @@ def main():
     # process is Focus Core (not the Python interpreter), so the
     # taskbar/Alt+Tab show the app's own name and icon.
     set_windows_app_identity()
+    # Roadmap 1.3: tag this process "launcher" in the shared log; the
+    # tray re-tags it "tray" when it takes over in-process.
+    from . import logging_config
+    logging_config.setup_logging(process_name="launcher")
     # Make sure the data folder exists before anything writes to it
     # (matters for installed copies, where it lives outside the app).
     from . import paths
@@ -217,7 +225,9 @@ def main():
             from . import shield as _shield
             _shield.ensure_shield_running()
     except Exception:  # noqa: BLE001 -- shield is best-effort
-        pass
+        # Best-effort, but the user believes they are protected, so
+        # the failure must leave a trace.
+        logger.exception("could not start the shield daemon")
     open_app_window()
 
 

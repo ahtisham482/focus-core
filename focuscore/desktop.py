@@ -17,9 +17,12 @@ Threading model (pywebview rules):
 - The Flask server stays a subprocess owned by the tray, exactly as before.
 """
 
+import logging
 import tempfile
 import threading
 from pathlib import Path
+
+logger = logging.getLogger(__name__)
 
 APP_TITLE = "Focus Core"
 WINDOW_WIDTH = 1200
@@ -120,8 +123,8 @@ def find_app_icon(search_dirs):
                 with Image.open(png) as im:
                     im.save(tmp, sizes=[(16, 16), (32, 32), (48, 48)])
                 return str(tmp)
-    except Exception:  # noqa: BLE001 -- icon is cosmetic, never fatal
-        pass
+    except Exception as exc:  # noqa: BLE001 -- icon is cosmetic, never fatal
+        logger.warning("could not build the app icon: %s", exc)
     return None
 
 

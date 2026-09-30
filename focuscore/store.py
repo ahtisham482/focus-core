@@ -176,9 +176,11 @@ def init_db(path=None):
             conn.commit()
         finally:
             conn.close()
-    except Exception:
-        pass  # table may not exist yet on very old DBs; migration 8
-        # creates it, and the next init_db will add the index.
+    except Exception as exc:
+        # Expected on very old DBs (the invoice_lines table may not
+        # exist yet; migration 8 creates it, and the next init_db
+        # adds the index) -- hence DEBUG, not silence.
+        logger.debug("invoice-line index not added yet: %s", exc)
 
 
 
@@ -1419,7 +1421,12 @@ def create_pass(minutes, reason, now=None, path=None):
                       encoding="utf-8") as fh:
                 fh.write(json.dumps(row) + "\n")
         except Exception:
-            pass
+            # Last-resort path: SQLite AND the fallback file both
+            # failed, so this pass exists only in memory. That is
+            # worth a traceback -- the user may believe the shield
+            # is paused when, after a restart, it is not.
+            logger.exception("emergency pass fallback write failed; "
+                             "pass is memory-only")
         return row
 
 

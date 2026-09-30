@@ -23,6 +23,7 @@ Notes:
 import hashlib
 import hmac
 import json
+import logging
 import tempfile
 import time
 import urllib.error
@@ -31,6 +32,8 @@ from datetime import datetime
 from pathlib import Path
 
 from . import paths
+
+logger = logging.getLogger(__name__)
 
 UPDATE_INFO_NAME = "update-info.json"
 CHECK_CACHE_NAME = ".update-check.json"
@@ -189,8 +192,9 @@ def check_for_update(force=False):
                   "current": info["version"], "checked_at": time.time()}
     try:
         _cache_file().write_text(json.dumps(result), encoding="utf-8")
-    except OSError:
-        pass
+    except OSError as exc:
+        logger.warning("could not cache the update check result: %s",
+                       exc)
     return result
 
 
@@ -255,8 +259,9 @@ def _discard(path):
     """Best-effort delete of an unverified download."""
     try:
         Path(path).unlink()
-    except OSError:
-        pass
+    except OSError as exc:
+        logger.debug("could not delete unverified download %s: %s",
+                     path, exc)
 
 
 def download_installer(asset_url, dest_path, expected_size=0,
@@ -341,8 +346,9 @@ def take_pending_install():
         return None
     try:
         path.unlink()
-    except OSError:
-        pass
+    except OSError as exc:
+        logger.warning("could not clear the pending-update marker: "
+                       "%s", exc)
     if not isinstance(data, dict) or not data.get("installer"):
         return None
     return data

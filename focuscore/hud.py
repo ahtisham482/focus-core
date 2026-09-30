@@ -8,10 +8,14 @@ Threading (Qwen R5): every function here runs on the tkinter owner
 thread (the shield daemon's main thread). Nothing here is called from
 the worker thread -- the worker only posts commands into a queue.
 
-All tkinter work fails silent when tkinter or a display is unavailable.
+All tkinter work fails soft when tkinter or a display is unavailable
+(the failure is logged at DEBUG; see Roadmap 1.3).
 """
 
+import logging
 from datetime import datetime
+
+logger = logging.getLogger(__name__)
 
 SCORE_COLORS = {2: "#2e7d32", 1: "#66bb6a", 0: "#9e9e9e",
                 -1: "#ffa726", -2: "#e53935"}
@@ -64,8 +68,9 @@ def hud_snapshot(db_path=None):
                 mins = int(delta.total_seconds()) // 60
                 snap["session_elapsed"] = "%d:%02d" % (
                     mins // 60, mins % 60)
-            except Exception:
-                pass
+            except Exception as exc:
+                logger.debug("hud snapshot: bad session start time: %s",
+                             exc)
         elif daemon:
             snap["state"] = "protected"
             snap["state_label"] = "Shield on"
@@ -75,8 +80,9 @@ def hud_snapshot(db_path=None):
             fg = win32.get_foreground_info()
             if fg:
                 snap["app"] = fg.get("process_name") or None
-        except Exception:
-            pass
+        except Exception as exc:
+            logger.debug("hud snapshot: foreground app lookup failed: "
+                         "%s", exc)
         return snap
     except Exception:
         return snap
@@ -97,16 +103,16 @@ class HudWindow:
         self.win.attributes("-topmost", True)
         try:
             self.win.attributes("-alpha", 0.88)
-        except Exception:
-            pass
+        except Exception as exc:
+            logger.debug("hud window transparency unsupported: %s", exc)
         self.win.configure(bg="#1a1a1a")
         # Top-right of the primary screen.
         try:
             sw = self.win.winfo_screenwidth()
             self.win.geometry("%dx%d+%d+%d" % (
                 self.WIDTH, self.HEIGHT, sw - self.WIDTH - 12, 12))
-        except Exception:
-            pass
+        except Exception as exc:
+            logger.debug("hud window placement failed: %s", exc)
         self._build()
         self._make_draggable()
 
@@ -169,28 +175,28 @@ class HudWindow:
             bits.append("blocked today: %d" % (
                 snap.get("blocks_today") or 0))
             self.meta_lbl.configure(text="  \u00b7  ".join(bits))
-        except Exception:
-            pass
+        except Exception as exc:
+            logger.debug("hud label refresh failed: %s", exc)
 
     def show(self):
         try:
             self.win.deiconify()
             self.visible = True
-        except Exception:
-            pass
+        except Exception as exc:
+            logger.debug("hud show failed: %s", exc)
 
     def hide(self):
         try:
             self.win.withdraw()
             self.visible = False
-        except Exception:
-            pass
+        except Exception as exc:
+            logger.debug("hud hide failed: %s", exc)
 
     def destroy(self):
         try:
             self.win.destroy()
-        except Exception:
-            pass
+        except Exception as exc:
+            logger.debug("hud destroy failed: %s", exc)
 
 
 def show_block_overlay(root, label, app, locked=False, session_id=None,
@@ -215,8 +221,8 @@ def show_block_overlay(root, label, app, locked=False, session_id=None,
             win.configure(bg="#1a1a1a")
             try:
                 win.attributes("-topmost", True)
-            except Exception:
-                pass
+            except Exception as exc:
+                logger.debug("block overlay topmost failed: %s", exc)
             tk.Label(win, text="Focus session in progress"
                      if session_id else "Shield block",
                      font=("Segoe UI", 28), bg="#1a1a1a",
@@ -234,8 +240,9 @@ def show_block_overlay(root, label, app, locked=False, session_id=None,
                 for w in wins:
                     try:
                         w.destroy()
-                    except Exception:
-                        pass
+                    except Exception as exc:
+                        logger.debug("block overlay destroy failed: %s",
+                                     exc)
                 wins.clear()
 
             if locked:
@@ -255,16 +262,18 @@ def show_block_overlay(root, label, app, locked=False, session_id=None,
                         try:
                             dismiss_btn.configure(state="normal")
                             lock_var.set("You can go back now.")
-                        except Exception:
-                            pass
+                        except Exception as exc:
+                            logger.debug("lock countdown finish failed: "
+                                         "%s", exc)
                         return
                     lock_var.set("Locked for %d more seconds -- "
                                  "breathe." % remaining[0])
                     remaining[0] -= 1
                     try:
                         win.after(1000, tick)
-                    except Exception:
-                        pass
+                    except Exception as exc:
+                        logger.debug("lock countdown reschedule failed: "
+                                     "%s", exc)
                 tick()
             else:
                 tk.Button(btn_frame, text="Back to work",
@@ -277,7 +286,10 @@ def show_block_overlay(root, label, app, locked=False, session_id=None,
                     from . import focus as focus_mod
                     focus_mod.end_session(db_path=db_path)
                 except Exception:
-                    pass
+                    # NOT cosmetic: the session stays open in the data
+                    # if this fails, so it gets a full traceback.
+                    logger.exception("overlay End session failed; the "
+                                     "session may still be open")
                 _destroy_all()
 
             if session_id:
@@ -289,7 +301,7 @@ def show_block_overlay(root, label, app, locked=False, session_id=None,
         for w in wins:
             try:
                 w.destroy()
-            except Exception:
-                pass
+            except Exception as exc:
+                logger.debug("block overlay cleanup failed: %s", exc)
         return []
     return wins

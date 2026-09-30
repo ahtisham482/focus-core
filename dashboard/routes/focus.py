@@ -688,7 +688,8 @@ def focus_peak():
     try:
         chronotype.set_window(start, end)
     except ValueError:
-        pass
+        logger.warning("peak window rejected; keeping the previous "
+                       "window")
     return redirect("/focus")
 
 

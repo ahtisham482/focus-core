@@ -232,8 +232,9 @@ def create_backup(db_path=None, dest_dir=None):
         # An interrupted write must not leave a partial backup behind.
         try:
             staging.unlink(missing_ok=True)
-        except OSError:
-            pass
+        except OSError as exc:
+            logger.warning("could not remove the partial backup file "
+                           "%s: %s", staging, exc)
     _write_checksum(target)
     return target
 
@@ -338,8 +339,9 @@ def prune_backups(keep=PRUNE_KEEP_DEFAULT, dest_dir=None):
             continue
         try:
             _checksum_path(backup["path"]).unlink(missing_ok=True)
-        except OSError:
-            pass
+        except OSError as exc:
+            logger.warning("could not remove the pruned backup's "
+                           "checksum file: %s", exc)
     return len(doomed)
 
 
@@ -424,8 +426,9 @@ def restore_backup(name, db_path=None, dest_dir=None):
     finally:
         try:
             staging.unlink(missing_ok=True)
-        except OSError:
-            pass
+        except OSError as exc:
+            logger.warning("could not remove the restore staging "
+                           "file %s: %s", staging, exc)
     return safety
 
 

@@ -389,7 +389,7 @@ def _switch_baseline(db_path, today):
         try:
             rates.append(intelligence.switch_rate(day, db_path=db_path))
         except Exception:
-            pass
+            logger.exception("switch-rate baseline failed for %s", day)
     return sum(rates) / len(rates) if rates else 0.0
 
 

@@ -17,8 +17,11 @@ The tray OWNS the server subprocess: it starts the server on launch
 below is a plain function so tests can exercise them without a GUI.
 """
 
+import logging
 from datetime import date
 from pathlib import Path
+
+logger = logging.getLogger(__name__)
 
 PROJECT_ROOT = Path(__file__).resolve().parent.parent
 
@@ -153,8 +156,9 @@ class TrayApp:
         except Exception:  # noqa: BLE001
             try:
                 proc.kill()
-            except Exception:  # noqa: BLE001
-                pass
+            except Exception as exc:  # noqa: BLE001
+                logger.warning("server process ignored terminate and "
+                               "kill: %s", exc)
         return True
 
     # -- menu actions ------------------------------------------------------
@@ -162,8 +166,8 @@ class TrayApp:
         if self.icon is not None:
             try:
                 self.icon.notify(message, title)
-            except Exception:  # noqa: BLE001
-                pass
+            except Exception as exc:  # noqa: BLE001
+                logger.warning("tray notification failed: %s", exc)
 
     def on_open(self, icon=None, item=None):
         from . import desktop, launcher
@@ -173,8 +177,9 @@ class TrayApp:
             try:
                 window.show()
                 window.restore()
-            except Exception:  # noqa: BLE001
-                pass
+            except Exception as exc:  # noqa: BLE001
+                logger.warning("bringing the window forward failed: "
+                               "%s", exc)
             return
         if desktop.available():
             # Should not normally happen (run() creates the window), but
@@ -239,8 +244,8 @@ class TrayApp:
                 return
             try:
                 store.checkpoint_wal(self.db_path)
-            except Exception:  # noqa: BLE001 -- best-effort
-                pass
+            except Exception as exc:  # noqa: BLE001 -- best-effort
+                logger.warning("nightly WAL checkpoint failed: %s", exc)
 
     def _peak_watch(self):
         """Phase 11: 5-minute peak-window toast. Checks once a minute;
@@ -279,8 +284,11 @@ class TrayApp:
                     "Open Focus Core for a 1-click deep-focus launch."
                     % (label, status["minutes"]),
                     "Peak window approaching")
-            except Exception:  # noqa: BLE001 -- best-effort
-                pass
+            except Exception as exc:  # noqa: BLE001 -- best-effort
+                # Once-a-minute watcher: WARNING without traceback so a
+                # persistent failure repeats at one line per minute,
+                # not one traceback per minute.
+                logger.warning("peak-window watch failed: %s", exc)
 
     def on_quick_session(self, icon=None, item=None):
         result = start_quick_session(self.db_path)
@@ -312,15 +320,15 @@ class TrayApp:
         """pywebview loaded event: stamp the Focus Core icon on the window.
 
         The native window exists by now, so the OS call can find it.
-        Cosmetic only; failures are swallowed.
+        Cosmetic only; failures are logged, never fatal.
         """
         try:
             from pathlib import Path
             from . import desktop, launcher
             icon = desktop.find_app_icon([Path(launcher.PROJECT_ROOT)])
             desktop.set_window_icon(desktop.APP_TITLE, icon)
-        except Exception:  # noqa: BLE001 -- cosmetic, never fatal
-            pass
+        except Exception as exc:  # noqa: BLE001 -- cosmetic, never fatal
+            logger.warning("setting the window icon failed: %s", exc)
 
     def on_quit(self, icon=None, item=None):
         self._quitting = True
@@ -330,16 +338,16 @@ class TrayApp:
             # then stops the server and the tray icon.
             try:
                 window.destroy()
-            except Exception:  # noqa: BLE001
-                pass
+            except Exception as exc:  # noqa: BLE001
+                logger.warning("window destroy on quit failed: %s", exc)
         else:
             # Browser-fallback mode: clean up directly, as before.
             self.stop_server()
             if self.icon is not None:
                 try:
                     self.icon.stop()
-                except Exception:  # noqa: BLE001
-                    pass
+                except Exception as exc:  # noqa: BLE001
+                    logger.warning("tray icon stop failed: %s", exc)
 
     def on_shield_toggle(self, icon=None, item=None):
         from . import shield as shield_mod
@@ -430,7 +438,9 @@ class TrayApp:
                 from . import shield as _shield
                 _shield.ensure_shield_running()
         except Exception:  # noqa: BLE001 -- shield is best-effort
-            pass
+            # Best-effort, yes -- but the user believes they are
+            # protected, so the failure must leave a trace.
+            logger.exception("could not start the shield daemon")
         threading.Thread(target=self._watch_for_update, daemon=True,
                          name="focuscore-update-watch").start()
         # Sprint 4 (Qwen item 10): the tray is the long-running
@@ -461,12 +471,16 @@ class TrayApp:
             self.stop_server()
             try:
                 self.icon.stop()
-            except Exception:  # noqa: BLE001
-                pass
+            except Exception as exc:  # noqa: BLE001
+                logger.warning("tray icon stop failed: %s", exc)
 
 
 def run(db_path=None):
     """Entry point used by the launcher."""
+    # Roadmap 1.3: this process carries the "tray" tag in the shared
+    # log file from here on (the launcher process becomes this one).
+    from . import logging_config
+    logging_config.setup_logging(process_name="tray")
     if not available():
         raise RuntimeError(
             "Tray needs pystray and Pillow. Run setup.bat again, or "

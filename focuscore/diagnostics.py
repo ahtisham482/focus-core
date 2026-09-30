@@ -139,7 +139,8 @@ def _system_section(db_path):
                      % ("installed" if paths.is_installed() else
                         "portable / developer copy"))
     except Exception:
-        pass
+        logger.exception("diagnostics: could not work out the "
+                         "install mode")
     lines.append("")
     lines.append("Database integrity_check: %s" % _integrity(db_path))
     return "\n".join(lines) + "\n"
@@ -159,7 +160,7 @@ def _webview2_version():
             except OSError:
                 continue
     except Exception:
-        pass
+        logger.exception("diagnostics: WebView2 detection failed")
     return "not detected"
 
 
@@ -269,7 +270,8 @@ def _installer_section(app_root, data_dir):
                    % ("installed copy" if paths.is_installed()
                       else "portable / developer copy"))
     except Exception:
-        pass
+        logger.exception("diagnostics: could not work out the "
+                         "install mode")
     return "\n".join(out) + "\n"
 
 
