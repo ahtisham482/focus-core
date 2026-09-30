@@ -163,8 +163,17 @@ def open_app_window(url=APP_URL):
 
 
 def _background_update_check():
-    """Quietly check for a newer release once per day. Never raises."""
+    """Quietly check for a newer release once per day. Never raises.
+
+    Honors the user's automatic-checks toggle (Updates page -> setting
+    ``update_check_enabled``). When off, no network traffic happens at all;
+    the manual "Check again" on the Updates page still works because it is
+    the user's own action.
+    """
     try:
+        from . import store
+        if store.get_setting("update_check_enabled", "1") != "1":
+            return
         from . import updater
         updater.check_for_update()
     except Exception:  # noqa: BLE001 -- updates must never break launch

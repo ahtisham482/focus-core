@@ -1,14 +1,19 @@
 # Privacy — Focus Core
 
-Plain-language privacy statement. Last updated 2026-09-25.
+Plain-language privacy statement. Last updated 2026-09-30.
 
 ## The short version
 **All of your data stays on your own computer.** Focus Core has no accounts, no
-analytics, no telemetry, and makes no internet calls. Nobody — not us, not anyone
-else — can see your activity data. (The app does talk to itself inside your own
-PC: the dashboard is served from your own computer, and the tracker reads the
-activity-watcher through a connection that never leaves your PC. Nothing ever
-goes to the internet.)
+analytics, and no telemetry. Nobody — not us, not anyone else — can see your
+activity data. The app does talk to itself inside your own PC: the dashboard is
+served from your own computer, and the tracker reads the activity-watcher
+through a connection that never leaves your PC.
+
+Besides the Google Drive backup described below (a plain file copy into your
+own Drive folder, made automatically whenever Drive is installed), the only
+time Focus Core touches the internet is the three things listed under
+**Internet use** below. Each one is described there in plain words, and you can
+turn off the automatic update check on the Updates page.
 
 ## What lives where
 - Your tracked activity, scores, goals, timesheets, and settings live in one file,
@@ -17,25 +22,64 @@ goes to the internet.)
 - The dashboard runs on your own computer at `http://127.0.0.1:5000`. It is not
   reachable from the internet — it only listens on your PC itself.
 
-## Google Drive backup (optional)
-- If you turn on Drive backups, Focus Core copies the `focuscore.db` file into a
-  "Focus Core Backups" folder **in your own Google Drive**. That is a plain file
-  copy — the same as you dragging the file there yourself.
-- It is your Drive, your account, your folder. We have no access to it and never
-  request access. Turning it off stops the copies immediately; nothing is sent
-  anywhere else, ever.
+## Internet use (only what you allow)
+Focus Core contacts the internet only in these three ways:
+
+1. **Update check (automatic, once a day).** Installed copies of Focus Core
+   ask `api.github.com` once a day whether a newer version exists. The request
+   sends your IP address (that's how the internet works — every website sees
+   it) and a "User-Agent" label naming Focus Core (`FocusCore-Updater`).
+   Nothing else is sent. The answer is saved for 24 hours, so the check doesn't
+   run more often. **You can turn off this automatic check** on the Updates
+   page — the manual "Check again" button keeps working.
+2. **Installer download (only when you click "Update now").** When you start
+   an update, the new installer downloads from the GitHub releases page. One
+   file, only when you ask for it. Before anything runs, Focus Core checks
+   the file's SHA-256 checksum against the record published with the release,
+   so a corrupted download is refused instead of installed.
+3. **Calendar feed (optional, off by default).** If you paste a calendar
+   (ICS) link into Focus Core, it fetches that feed so your schedule can show
+   on the Home page. This only happens if you set it up, and clearing the
+   link stops it.
+
+That is the whole list of internet calls. None of these ever carry your
+activity data: no window titles, no website URLs, no scores, no goals, no
+timesheet entries. Your activity data leaves the PC one other way — the
+Google Drive backup below — but that is Focus Core copying a file into a
+folder on this PC, not an internet call by the app.
+
+## Google Drive backup (automatic when Drive is installed)
+Focus Core never talks to Google directly. It copies your database file into
+a folder on this PC, and Google Drive for Desktop syncs that folder to your
+Google account.
+
+- **When it happens.** If Google Drive for Desktop is installed on this PC,
+  backups are copied into a "Focus Core Backups" folder in your Drive
+  **automatically** — there is no in-app on/off switch. Every backup lands
+  there: the ones you make from the Backup page or the tray menu, the
+  automatic backup at startup when the last one is older than 24 hours,
+  the pre-update safety backup made before an update runs, and the safety
+  backup made before a database upgrade.
+- **What is copied.** Your whole `focuscore.db` — tracked activity, scores,
+  goals, timesheets, and settings, all in one file.
+- **Your account only.** It is your Drive, your account, your folder. We have
+  no access to it and never request access.
+- **Turning it off.** Because the copies are automatic whenever Drive is
+  installed, there is no switch in the app: quit Google Drive for Desktop and
+  the copies stop. Deleting the "Focus Core Backups" folder alone is not
+  enough — the next backup will create it again while Drive is running.
 
 ## What Focus Core never does
 - No user accounts, no sign-in, no passwords stored anywhere.
 - No analytics, no telemetry, no crash reporting, no usage statistics.
-- No internet calls: it does not phone home, check for updates over the network,
-  or contact any outside server. (The version notice planned for a later release will only
-  compare against a version file you download yourself — still no telemetry.)
+- No ads, no tracking, nothing sold or shared. The three internet uses
+  above, plus the optional Drive backup described in its own section, are
+  the complete list.
 
 ## Optional diagnostics bundle (planned for a later release)
 A future update will add an option to generate a diagnostics bundle from the
 dashboard if something breaks and you ask for help. It will contain **only**:
-- The app version and Windows version.
+- Which version of Focus Core you run, and which version of Windows.
 - Recent error messages from the app's log (no activity titles, no URLs, no scores).
 - Backup status (when the last backup ran, whether it succeeded).
 

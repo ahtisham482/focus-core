@@ -189,12 +189,68 @@ def backup_restore():
     return layout("Backup restored", body, active="backup")
 
 
+def _update_toggle_card_html():
+    """The automatic-update-checks toggle card shown on the Updates page.
+
+    Explains in plain English what's on/off and that manual checks always
+    work. Submits to /update/check-toggle like any other settings form.
+    """
+    enabled = store.get_setting("update_check_enabled", "1") == "1"
+    state = "on" if enabled else "off"
+    next_value = "0" if enabled else "1"
+    action = "Turn off" if enabled else "Turn on"
+    return (
+        "<div class='card'><h3>Automatic update checks</h3>"
+        "<p>Automatic update checks are <b>%s</b>. Focus Core asks the "
+        "GitHub releases page once a day whether a newer version exists. "
+        "The only thing sent is your IP address and a \"User-Agent\" "
+        "label naming Focus Core.</p>"
+        "<form method='post' action='/update/check-toggle' "
+        "class='update-check-toggle'>"
+        "<input type='hidden' name='update_check_enabled' value='%s'>"
+        "<button type='submit'>%s automatic checks</button></form>"
+        "<p class='note'>This only stops the automatic check. The "
+        "\"Check again\" button above always works.</p></div>"
+        % (state, next_value, action))
+
+
+def _cached_update_status(updater_mod):
+    """Last known update-check state, read from the cache -- never the
+    network.
+
+    With automatic checks off, a plain /update page load must make ZERO
+    updater network calls (roadmap 1.21), even when the 24h cache has gone
+    stale. So instead of ``check_for_update()`` (which refreshes a stale
+    cache by asking GitHub), read the cache directly and translate it into
+    the shape ``update_page`` already renders. The explicit "Check again"
+    link (``?refresh=1``) remains the manual way to ask.
+    """
+    info = updater_mod.get_update_info()
+    if info is None:
+        return {"status": "dev-copy"}
+    cached = updater_mod.read_cached_check()
+    if cached and isinstance(cached, dict) \
+            and cached.get("current") == info["version"]:
+        if cached.get("status") in ("ok", "error"):
+            return cached
+    return {"status": "not-checked", "current": info["version"]}
+
+
 @app.route("/update")
 def update_page():
     from focuscore import updater as updater_mod
 
     refresh = request.args.get("refresh") == "1"
-    status = updater_mod.check_for_update(force=refresh)
+    if refresh:
+        # Explicit "Check again" click: a deliberate action, always
+        # allowed -- the toggle governs automatic checks, not this.
+        status = updater_mod.check_for_update(force=True)
+    elif store.get_setting("update_check_enabled", "1") == "1":
+        status = updater_mod.check_for_update()
+    else:
+        # Automatic checks off: render the last known state (or "not
+        # checked yet") without touching the network (roadmap 1.21).
+        status = _cached_update_status(updater_mod)
 
     if status["status"] == "dev-copy":
         body = (
@@ -206,6 +262,19 @@ def update_page():
             "only.</p></div>")
         return layout("Updates", body, help_key="update")
 
+    if status["status"] == "not-checked":
+        body = (
+            "<div class='card'><h3>Updates</h3>"
+            "<p>You're on <b>%s</b>.</p>"
+            "<p><b>Not checked yet.</b> Automatic checks are off, so "
+            "Focus Core hasn't asked about new versions. Use \"Check "
+            "again\" whenever you want to look.</p>"
+            "<p><a class='btn' href='/update?refresh=1'>Check again</a></p>"
+            "</div>"
+            % escape(status["current"]))
+        return layout("Updates", body + _update_toggle_card_html(),
+                      help_key="update")
+
     if status["status"] == "error":
         body = (
             "<div class='card'><h3>Updates</h3>"
@@ -215,18 +284,23 @@ def update_page():
             "<p><a class='btn' href='/update?refresh=1'>Check again</a></p>"
             "</div>"
             % (escape(status["error"]), escape(status["current"])))
-        return layout("Updates", body, help_key="update")
+        return layout("Updates", body + _update_toggle_card_html(),
+                      help_key="update")
 
     head = ("<div class='card'><h3>Updates</h3>"
             "<p>You're on <b>%s</b>.</p>"
             % escape(status["current"]))
     if not status["update_available"]:
+        auto_on = store.get_setting("update_check_enabled", "1") == "1"
+        check_hint = (" Focus Core checks once a day by itself." if auto_on
+                      else " Automatic checks are off, so this page only "
+                           "updates when you check.")
         body = (head +
-                "<p><b>You're up to date.</b> Focus Core checks once a day "
-                "by itself.</p>"
+                "<p><b>You're up to date.</b>" + check_hint + "</p>"
                 "<p><a class='btn' href='/update?refresh=1'>Check again</a>"
                 "</p></div>")
-        return layout("Updates", body, help_key="update")
+        return layout("Updates", body + _update_toggle_card_html(),
+                      help_key="update")
 
     body = (
         head +
@@ -240,7 +314,24 @@ def update_page():
         "</p></div>"
         % (escape(status["latest"]), escape(status["latest"]),
            escape(status["latest"])))
-    return layout("Updates", body, help_key="update")
+    return layout("Updates", body + _update_toggle_card_html(),
+                  help_key="update")
+
+
+@app.route("/update/check-toggle", methods=["POST"])
+def update_check_toggle():
+    """Turn the automatic daily update check on or off.
+
+    Same shape as /settings/theme: a plain form POST + redirect. The
+    setting governs only the automatic background check -- the manual
+    "Check again" button on the Updates page always works. Garbage input
+    fails safe to off (fewer internet calls, never more) -- a missing
+    field resolves to off too, never on.
+    """
+    enabled = request.form.get("update_check_enabled", "0") == "1"
+    store.set_setting("update_check_enabled", "1" if enabled else "0")
+    referrer = request.referrer or "/update"
+    return redirect(referrer)
 
 
 @app.route("/update/start", methods=["POST"])
