@@ -7,13 +7,12 @@ import logging
 from datetime import date
 from html import escape
 
-from flask import abort, redirect, request
+from flask import Blueprint, abort, redirect, request
 
 from focuscore import store
 from focuscore.scoring import UI_LABELS
 from focuscore.taxonomy import host_of
 
-from dashboard.app import app
 import dashboard.app as _app_mod  # for monkeypatch-compatible access
 from dashboard.app import (
     WELCOME_STEPS,
@@ -29,17 +28,19 @@ from dashboard.app import (
     mark_onboarded,
 )
 
+bp = Blueprint("core", __name__)
+
 logger = logging.getLogger(__name__)
 
 
-@app.route("/")
+@bp.route("/")
 def index():
     if not is_onboarded():
         return redirect("/welcome")
     return home_page()
 
 
-@app.route("/collect")
+@bp.route("/collect")
 def collect():
     """Re-run today's collection, then show the day page (which explains
     clearly when ActivityWatch is not reachable)."""
@@ -47,7 +48,7 @@ def collect():
     return redirect("/day/" + today)
 
 
-@app.route("/welcome")
+@bp.route("/welcome")
 def welcome():
     try:
         step = int(request.args.get("step", "1"))
@@ -105,7 +106,7 @@ def welcome():
     return layout("Welcome", body, refresh=3600, help_key="welcome", hero="")
 
 
-@app.route("/setup/activitywatch")
+@bp.route("/setup/activitywatch")
 def setup_activitywatch():
     """Stranger onboarding: detect ActivityWatch and walk the user through
     installing/starting it. The page re-probes on every load, so the
@@ -119,14 +120,14 @@ def setup_activitywatch():
                   help_key="setup")
 
 
-@app.route("/help")
+@bp.route("/help")
 def help_index():
     """Index of all in-app help articles."""
     from focuscore import help as help_mod
     return layout("Help", help_mod.index_html(), active="help")
 
 
-@app.route("/help/<key>")
+@bp.route("/help/<key>")
 def help_article(key):
     """One help article. Unknown keys show the index with a short note."""
     from focuscore import help as help_mod
@@ -140,7 +141,7 @@ def help_article(key):
                   active="help")
 
 
-@app.route("/welcome/finish", methods=["POST"])
+@bp.route("/welcome/finish", methods=["POST"])
 def welcome_finish():
     mark_onboarded()
     dest = request.form.get("next") or "/"
@@ -149,7 +150,7 @@ def welcome_finish():
     return redirect(dest)
 
 
-@app.route("/welcome/restart")
+@bp.route("/welcome/restart")
 def welcome_restart():
     try:
         # Via module attribute so tests can monkeypatch
@@ -160,14 +161,14 @@ def welcome_restart():
     return redirect("/welcome")
 
 
-@app.route("/day/<day>")
+@bp.route("/day/<day>")
 def day_view(day):
     if not _parse_day(day):
         abort(404)
     return day_page(day)
 
 
-@app.route("/activities")
+@bp.route("/activities")
 def activities():
     day = _parse_day(request.args.get("day")) or date.today().isoformat()
     rows = store.get_day_activities(day)
@@ -249,7 +250,7 @@ def activities():
     return layout("Activities " + day, body, day, active="review")
 
 
-@app.route("/override", methods=["POST"])
+@bp.route("/override", methods=["POST"])
 def override():
     day = _parse_day(request.form.get("day")) or date.today().isoformat()
     match_key = (request.form.get("match_key") or "").strip()
@@ -263,7 +264,7 @@ def override():
     return redirect("/activities?day=" + day)
 
 
-@app.route("/goals")
+@bp.route("/goals")
 def goals_page():
     from focuscore import goals as goals_mod
 
@@ -351,7 +352,7 @@ def goals_page():
     return layout("Goals", body, active="goals")
 
 
-@app.route("/goals/add", methods=["POST"])
+@bp.route("/goals/add", methods=["POST"])
 def goals_add():
     from focuscore import goals as goals_mod
 
@@ -390,7 +391,7 @@ def goals_add():
     return redirect("/goals")
 
 
-@app.route("/goals/delete", methods=["POST"])
+@bp.route("/goals/delete", methods=["POST"])
 def goals_delete():
     try:
         store.delete_goal(int(request.form.get("id")))
@@ -401,7 +402,7 @@ def goals_delete():
     return redirect("/goals")
 
 
-@app.route("/goals/pin", methods=["POST"])
+@bp.route("/goals/pin", methods=["POST"])
 def goals_pin():
     try:
         store.set_pinned(int(request.form.get("id")),
@@ -411,7 +412,7 @@ def goals_pin():
     return redirect("/goals")
 
 
-@app.route("/alerts")
+@bp.route("/alerts")
 def alerts_page():
     alert_rows = []
     for alert in store.list_alerts():
@@ -536,7 +537,7 @@ def alerts_page():
     return layout("Alerts", body, active="alerts")
 
 
-@app.route("/alerts/add", methods=["POST"])
+@bp.route("/alerts/add", methods=["POST"])
 def alerts_add():
     from focuscore import alerts as alerts_mod
 
@@ -567,7 +568,7 @@ def alerts_add():
     return redirect("/alerts")
 
 
-@app.route("/alerts/delete", methods=["POST"])
+@bp.route("/alerts/delete", methods=["POST"])
 def alerts_delete():
     try:
         store.delete_alert(int(request.form.get("id")))
@@ -576,7 +577,7 @@ def alerts_delete():
     return redirect("/alerts")
 
 
-@app.route("/alerts/toggle", methods=["POST"])
+@bp.route("/alerts/toggle", methods=["POST"])
 def alerts_toggle():
     try:
         store.set_alert_enabled(int(request.form.get("id")),

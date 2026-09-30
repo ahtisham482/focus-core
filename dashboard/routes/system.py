@@ -6,12 +6,12 @@ Zero URL changes, zero HTML changes -- pure code move.
 from datetime import date, datetime, timedelta
 from html import escape
 from pathlib import Path
+import logging
 import re
 
-from flask import redirect, request
+from flask import Blueprint, redirect, request
 
 from focuscore import store
-from dashboard.app import app
 from dashboard.app import (
     _SCORE_CELL_COLORS,
     _WEEKDAY_NAMES,
@@ -22,12 +22,16 @@ from dashboard.app import (
     layout,
 )
 
+bp = Blueprint("system", __name__)
+
+logger = logging.getLogger(__name__)
+
 
 # ─────────────────────────────────────────────────────────────────────────────
 # Theme setting (server-side, no JS required)
 # ─────────────────────────────────────────────────────────────────────────────
 
-@app.route("/settings/theme", methods=["POST"])
+@bp.route("/settings/theme", methods=["POST"])
 def settings_theme():
     """Toggle light / dark / system theme via a simple form POST.
     Stored in the settings table; read by layout() on every page render.
@@ -40,7 +44,7 @@ def settings_theme():
     return redirect(referrer)
 
 
-@app.route("/settings/calendar", methods=["POST"])
+@bp.route("/settings/calendar", methods=["POST"])
 def settings_calendar():
     """Save or clear the Google Calendar secret iCal URL.
 
@@ -58,7 +62,7 @@ def settings_calendar():
     return redirect("/")
 
 
-@app.route("/backup")
+@bp.route("/backup")
 def backup_page():
     from focuscore import backup as backup_mod
 
@@ -233,7 +237,7 @@ def _backup_encryption_card_html(backup_mod):
         "backup keeps the passphrase it was made with.</p></section>")
 
 
-@app.route("/backup/diagnostics")
+@bp.route("/backup/diagnostics")
 def backup_diagnostics():
     """Roadmap 0.4: one-click diagnostics export.
 
@@ -251,7 +255,7 @@ def backup_diagnostics():
                  % diagnostics.zip_filename()})
 
 
-@app.route("/backup/now", methods=["POST"])
+@bp.route("/backup/now", methods=["POST"])
 def backup_now():
     from focuscore import backup as backup_mod
     from focuscore.backupcrypto import BackupCryptoError
@@ -267,7 +271,7 @@ def backup_now():
     return redirect("/backup")
 
 
-@app.route("/backup/encryption/enable", methods=["POST"])
+@bp.route("/backup/encryption/enable", methods=["POST"])
 def backup_encryption_enable():
     from focuscore import backup as backup_mod
     from focuscore import backupcrypto
@@ -296,11 +300,11 @@ def backup_encryption_enable():
     try:
         backup_mod.write_cached_passphrase(passphrase)
     except Exception:
-        app.logger.exception("could not cache the backup passphrase")
+        logger.exception("could not cache the backup passphrase")
     return redirect("/backup")
 
 
-@app.route("/backup/encryption/disable", methods=["POST"])
+@bp.route("/backup/encryption/disable", methods=["POST"])
 def backup_encryption_disable():
     from focuscore import backup as backup_mod
     from focuscore import backupcrypto
@@ -318,7 +322,7 @@ def backup_encryption_disable():
     return redirect("/backup")
 
 
-@app.route("/backup/encryption/unlock", methods=["POST"])
+@bp.route("/backup/encryption/unlock", methods=["POST"])
 def backup_encryption_unlock():
     from focuscore import backup as backup_mod
     from focuscore import backupcrypto
@@ -334,7 +338,7 @@ def backup_encryption_unlock():
     return redirect("/backup")
 
 
-@app.route("/backup/restore", methods=["POST"])
+@bp.route("/backup/restore", methods=["POST"])
 def backup_restore():
     import warnings
     from focuscore import backup as backup_mod
@@ -415,7 +419,7 @@ def _cached_update_status(updater_mod):
     return {"status": "not-checked", "current": info["version"]}
 
 
-@app.route("/update")
+@bp.route("/update")
 def update_page():
     from focuscore import updater as updater_mod
 
@@ -497,7 +501,7 @@ def update_page():
                   help_key="update")
 
 
-@app.route("/update/check-toggle", methods=["POST"])
+@bp.route("/update/check-toggle", methods=["POST"])
 def update_check_toggle():
     """Turn the automatic daily update check on or off.
 
@@ -513,7 +517,7 @@ def update_check_toggle():
     return redirect(referrer)
 
 
-@app.route("/update/start", methods=["POST"])
+@bp.route("/update/start", methods=["POST"])
 def update_start():
     import tempfile
     from focuscore import backup as backup_mod
@@ -574,7 +578,7 @@ def update_start():
     return layout("Updating", body, help_key="update")
 
 
-@app.route("/report")
+@bp.route("/report")
 def report_page():
     from focuscore import reports as rep_mod
 
@@ -723,7 +727,7 @@ def report_page():
                   active="report")
 
 
-@app.route("/coaching")
+@bp.route("/coaching")
 def coaching_page():
     from focuscore import coaching as coach_mod
     from focuscore.scoring import productivity_pulse as _pp
@@ -884,7 +888,7 @@ def coaching_page():
     return layout("Coaching", body, active="coaching")
 
 
-@app.route("/shield")
+@bp.route("/shield")
 def shield_page():
     from focuscore import shield as shield_mod
 
@@ -1104,7 +1108,7 @@ def shield_page():
                   hero=hero_html)
 
 
-@app.route("/shield/rule/add", methods=["POST"])
+@bp.route("/shield/rule/add", methods=["POST"])
 def shield_rule_add():
     try:
         store.create_block_rule(
@@ -1122,7 +1126,7 @@ def shield_rule_add():
     return redirect("/shield")
 
 
-@app.route("/shield/rule/toggle", methods=["POST"])
+@bp.route("/shield/rule/toggle", methods=["POST"])
 def shield_rule_toggle():
     try:
         rule_id = int(request.form.get("id"))
@@ -1133,7 +1137,7 @@ def shield_rule_toggle():
     return redirect("/shield")
 
 
-@app.route("/shield/rule/delete", methods=["POST"])
+@bp.route("/shield/rule/delete", methods=["POST"])
 def shield_rule_delete():
     try:
         rule_id = int(request.form.get("id"))
@@ -1143,7 +1147,7 @@ def shield_rule_delete():
     return redirect("/shield")
 
 
-@app.route("/shield/pass", methods=["POST"])
+@bp.route("/shield/pass", methods=["POST"])
 def shield_pass():
     try:
         minutes = float(request.form.get("minutes") or 5)
@@ -1167,7 +1171,7 @@ def shield_pass():
     return redirect("/shield")
 
 
-@app.route("/shield/toggle", methods=["POST"])
+@bp.route("/shield/toggle", methods=["POST"])
 def shield_toggle():
     import os as _os
     from focuscore import shield as shield_mod
@@ -1181,14 +1185,14 @@ def shield_toggle():
     return redirect("/shield")
 
 
-@app.route("/shield/hud", methods=["POST"])
+@bp.route("/shield/hud", methods=["POST"])
 def shield_hud():
     store.set_setting("hud_enabled",
                       "1" if request.form.get("enabled") == "1" else "0")
     return redirect("/shield")
 
 
-@app.route("/intelligence")
+@bp.route("/intelligence")
 def intelligence_page():
     from focuscore import intelligence as intel_mod
 
@@ -1859,7 +1863,7 @@ def _phase12_cards(sel_day):
             "report_link": report_link}
 
 
-@app.route("/intelligence/report")
+@bp.route("/intelligence/report")
 def intelligence_report():
     """Standalone printable Deep Work Intelligence Report (Phase 12).
 

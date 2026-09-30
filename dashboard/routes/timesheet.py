@@ -7,11 +7,10 @@ import logging
 from datetime import date
 from html import escape
 
-from flask import Response, abort, redirect, request
+from flask import Blueprint, Response, abort, redirect, request
 
 from focuscore import store
 
-from dashboard.app import app
 from dashboard.app import (
     _category_options,
     _export_filters,
@@ -24,10 +23,12 @@ from dashboard.app import (
     layout,
 )
 
+bp = Blueprint("timesheet", __name__)
+
 logger = logging.getLogger(__name__)
 
 
-@app.route("/timesheet")
+@bp.route("/timesheet")
 def timesheet_page():
     from focuscore import timesheet as ts_mod
 
@@ -245,7 +246,7 @@ def timesheet_page():
 
 
 
-@app.route("/timesheet/accept", methods=["POST"])
+@bp.route("/timesheet/accept", methods=["POST"])
 def timesheet_accept():
     from focuscore import timesheet as ts_mod
 
@@ -270,7 +271,7 @@ def timesheet_accept():
     return redirect("/timesheet?day=" + day)
 
 
-@app.route("/timesheet/add", methods=["POST"])
+@bp.route("/timesheet/add", methods=["POST"])
 def timesheet_add():
     from focuscore import timesheet as ts_mod
 
@@ -297,7 +298,7 @@ def timesheet_add():
     return redirect("/timesheet?day=" + day)
 
 
-@app.route("/timesheet/edit", methods=["POST"])
+@bp.route("/timesheet/edit", methods=["POST"])
 def timesheet_edit():
     from focuscore import timesheet as ts_mod
 
@@ -326,7 +327,7 @@ def timesheet_edit():
     return redirect("/timesheet?day=" + day)
 
 
-@app.route("/timesheet/delete", methods=["POST"])
+@bp.route("/timesheet/delete", methods=["POST"])
 def timesheet_delete():
     from focuscore import timesheet as ts_mod
 
@@ -343,7 +344,7 @@ def timesheet_delete():
     return redirect("/timesheet?day=" + day)
 
 
-@app.route("/timesheet/lock", methods=["POST"])
+@bp.route("/timesheet/lock", methods=["POST"])
 def timesheet_lock():
     from focuscore import timesheet as ts_mod
 
@@ -352,7 +353,7 @@ def timesheet_lock():
     return redirect("/timesheet?day=" + day)
 
 
-@app.route("/timesheet/project/add", methods=["POST"])
+@bp.route("/timesheet/project/add", methods=["POST"])
 def timesheet_project_add():
     day = _parse_day(request.form.get("day")) or date.today().isoformat()
     name = (request.form.get("name") or "").strip()
@@ -362,7 +363,7 @@ def timesheet_project_add():
     return redirect("/timesheet?day=" + day)
 
 
-@app.route("/timesheet/project/delete", methods=["POST"])
+@bp.route("/timesheet/project/delete", methods=["POST"])
 def timesheet_project_delete():
     day = _parse_day(request.form.get("day")) or date.today().isoformat()
     try:
@@ -373,7 +374,7 @@ def timesheet_project_delete():
     return redirect("/timesheet?day=" + day)
 
 
-@app.route("/timesheet/export/old")
+@bp.route("/timesheet/export/old")
 def timesheet_export_old():
     """Legacy CSV kept for old bookmarks: redirects to the safe client
     export (M4.1 -- the old app/title columns no longer leak by default)."""
@@ -388,7 +389,7 @@ def timesheet_export_old():
     return redirect("/timesheet/export/client?%s" % qs, code=302)
 
 
-@app.route("/timesheet/export/client")
+@bp.route("/timesheet/export/client")
 def timesheet_export_client():
     from focuscore import exports as exports_mod
 
@@ -422,7 +423,7 @@ def timesheet_export_client():
                  % (filename % (day_from, day_to))})
 
 
-@app.route("/timesheet/export.json")
+@bp.route("/timesheet/export.json")
 def timesheet_export_json():
     from focuscore import budgets as budgets_mod
     from focuscore import exports as exports_mod
@@ -463,7 +464,7 @@ def timesheet_export_json():
                     % (day_from, day_to))})
 
 
-@app.route("/timesheet/statement")
+@bp.route("/timesheet/statement")
 def timesheet_statement():
     from focuscore import budgets as budgets_mod
     from focuscore import exports as exports_mod

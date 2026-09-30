@@ -6,10 +6,9 @@ Zero URL changes, zero HTML changes -- pure code move.
 from datetime import date
 from html import escape
 
-from flask import Response, abort, redirect, request
+from flask import Blueprint, Response, abort, redirect, request
 
 from focuscore import store
-from dashboard.app import app
 from dashboard.app import (
     _invoice_action_redirect,
     _invoice_detail_body,
@@ -18,7 +17,9 @@ from dashboard.app import (
     layout,
 )
 
-@app.route("/invoices")
+bp = Blueprint("invoices", __name__)
+
+@bp.route("/invoices")
 def invoices_page():
     """List invoices with derived balance/overdue info (Q4/Q15)."""
     from focuscore import invoices as inv_mod
@@ -113,7 +114,7 @@ def invoices_page():
     return layout("Invoices", body, active="invoices")
 
 
-@app.route("/invoices/new")
+@bp.route("/invoices/new")
 def invoice_new_page():
     """Pick uninvoiced entries for a new draft invoice."""
     from focuscore import invoices as inv_mod
@@ -210,7 +211,7 @@ def invoice_new_page():
     return layout("New invoice", body, active="invoices")
 
 
-@app.route("/invoices/create", methods=["POST"])
+@bp.route("/invoices/create", methods=["POST"])
 def invoice_create():
     from focuscore import invoices as inv_mod
 
@@ -235,7 +236,7 @@ def invoice_create():
     return redirect("/invoices?msg=" + msg.replace(" ", "+"))
 
 
-@app.route("/invoices/<int:invoice_id>")
+@bp.route("/invoices/<int:invoice_id>")
 def invoice_detail_page(invoice_id):
     from focuscore import invoices as inv_mod
 
@@ -250,7 +251,7 @@ def invoice_detail_page(invoice_id):
     return layout("Invoice", body, active="invoices")
 
 
-@app.route("/invoices/<int:invoice_id>/add-line", methods=["POST"])
+@bp.route("/invoices/<int:invoice_id>/add-line", methods=["POST"])
 def invoice_add_line(invoice_id):
     from focuscore import invoices as inv_mod
 
@@ -260,7 +261,7 @@ def invoice_add_line(invoice_id):
         request.form.get("rate"))
 
 
-@app.route("/invoices/<int:invoice_id>/remove-line", methods=["POST"])
+@bp.route("/invoices/<int:invoice_id>/remove-line", methods=["POST"])
 def invoice_remove_line(invoice_id):
     from focuscore import invoices as inv_mod
 
@@ -273,7 +274,7 @@ def invoice_remove_line(invoice_id):
         invoice_id, inv_mod.remove_line, invoice_id, line_id)
 
 
-@app.route("/invoices/<int:invoice_id>/tax-discount", methods=["POST"])
+@bp.route("/invoices/<int:invoice_id>/tax-discount", methods=["POST"])
 def invoice_tax_discount(invoice_id):
     from focuscore import invoices as inv_mod
 
@@ -282,7 +283,7 @@ def invoice_tax_discount(invoice_id):
         request.form.get("tax_pct"), request.form.get("discount_pct"))
 
 
-@app.route("/invoices/<int:invoice_id>/send", methods=["POST"])
+@bp.route("/invoices/<int:invoice_id>/send", methods=["POST"])
 def invoice_send(invoice_id):
     from focuscore import invoices as inv_mod
 
@@ -295,7 +296,7 @@ def invoice_send(invoice_id):
                     % (invoice_id, msg.replace(" ", "+")))
 
 
-@app.route("/invoices/<int:invoice_id>/pay", methods=["POST"])
+@bp.route("/invoices/<int:invoice_id>/pay", methods=["POST"])
 def invoice_pay(invoice_id):
     from focuscore import invoices as inv_mod
     from focuscore import money as money_mod
@@ -322,7 +323,7 @@ def invoice_pay(invoice_id):
                     % (invoice_id, msg.replace(" ", "+")))
 
 
-@app.route("/invoices/<int:invoice_id>/mark-paid", methods=["POST"])
+@bp.route("/invoices/<int:invoice_id>/mark-paid", methods=["POST"])
 def invoice_mark_paid(invoice_id):
     from focuscore import invoices as inv_mod
 
@@ -330,7 +331,7 @@ def invoice_mark_paid(invoice_id):
         invoice_id, inv_mod.mark_paid, invoice_id)
 
 
-@app.route("/invoices/<int:invoice_id>/void", methods=["POST"])
+@bp.route("/invoices/<int:invoice_id>/void", methods=["POST"])
 def invoice_void(invoice_id):
     from focuscore import invoices as inv_mod
 
@@ -339,7 +340,7 @@ def invoice_void(invoice_id):
         request.form.get("reason") or "Other")
 
 
-@app.route("/invoices/<int:invoice_id>/reissue", methods=["POST"])
+@bp.route("/invoices/<int:invoice_id>/reissue", methods=["POST"])
 def invoice_reissue(invoice_id):
     from focuscore import invoices as inv_mod
 
@@ -354,7 +355,7 @@ def invoice_reissue(invoice_id):
                     % (invoice_id, msg.replace(" ", "+")))
 
 
-@app.route("/invoices/<int:invoice_id>/print")
+@bp.route("/invoices/<int:invoice_id>/print")
 def invoice_print(invoice_id):
     """Standalone printable invoice (Q10: CSP, zero JS, auto-escaped)."""
     from focuscore import invoices as inv_mod

@@ -10,14 +10,15 @@ starter chips. Same POST contracts, restructured HTML only.
 from html import escape
 import logging
 
-from flask import jsonify, redirect, request
+from flask import Blueprint, jsonify, redirect, request
 
-from dashboard.app import app
 from dashboard.app import (
     _fmt_countdown,
     _living_tabs,
     layout,
 )
+
+bp = Blueprint("focus", __name__)
 
 # Roadmap 0.3: log failures that used to be swallowed silently.
 logger = logging.getLogger(__name__)
@@ -611,7 +612,7 @@ def _peak_end_value(db_path=None):
     return "%02d:%02d" % (end.hour, end.minute)
 
 
-@app.route("/focus")
+@bp.route("/focus")
 def focus_page():
     from focuscore import focus as focus_mod
 
@@ -655,7 +656,7 @@ def _xp_summary_html(xp):
     return "".join(parts)
 
 
-@app.route("/focus/depth")
+@bp.route("/focus/depth")
 def focus_depth():
     """JSON depth gauge for live polling (Phase 11)."""
     from focuscore import focus as focus_mod
@@ -669,7 +670,7 @@ def focus_depth():
     return jsonify(depth)
 
 
-@app.route("/focus/target", methods=["POST"])
+@bp.route("/focus/target", methods=["POST"])
 def focus_target():
     from focuscore import gamification as gami_mod
     try:
@@ -680,7 +681,7 @@ def focus_target():
     return redirect("/focus")
 
 
-@app.route("/focus/peak", methods=["POST"])
+@bp.route("/focus/peak", methods=["POST"])
 def focus_peak():
     from focuscore import chronotype
     start = request.form.get("peak_start") or "09:00"
@@ -693,7 +694,7 @@ def focus_peak():
     return redirect("/focus")
 
 
-@app.route("/focus/start", methods=["POST"])
+@bp.route("/focus/start", methods=["POST"])
 def focus_start():
     from focuscore import adaptive
     from focuscore import focus as focus_mod
@@ -737,7 +738,7 @@ def focus_start():
     return redirect("/focus")
 
 
-@app.route("/focus/cycle/break/start", methods=["POST"])
+@bp.route("/focus/cycle/break/start", methods=["POST"])
 def focus_cycle_break_start():
     from focuscore import focus as focus_mod
     result = focus_mod.start_break_now()
@@ -749,7 +750,7 @@ def focus_cycle_break_start():
     return redirect("/focus")
 
 
-@app.route("/focus/cycle/break/end", methods=["POST"])
+@bp.route("/focus/cycle/break/end", methods=["POST"])
 def focus_cycle_break_end():
     from focuscore import focus as focus_mod
     result = focus_mod.end_break_now()
@@ -761,7 +762,7 @@ def focus_cycle_break_end():
     return redirect("/focus")
 
 
-@app.route("/focus/cycle/break/skip", methods=["POST"])
+@bp.route("/focus/cycle/break/skip", methods=["POST"])
 def focus_cycle_break_skip():
     from focuscore import focus as focus_mod
     result = focus_mod.end_break_now(skipped=True)
@@ -773,7 +774,7 @@ def focus_cycle_break_skip():
     return redirect("/focus")
 
 
-@app.route("/focus/cues", methods=["POST"])
+@bp.route("/focus/cues", methods=["POST"])
 def focus_cues_toggle():
     from focuscore import store as store_mod
     enabled = "1" if request.form.get("audio_cues") else "0"
@@ -785,7 +786,7 @@ def focus_cues_toggle():
     return redirect("/focus")
 
 
-@app.route("/focus/end", methods=["POST"])
+@bp.route("/focus/end", methods=["POST"])
 def focus_end():
     from focuscore import focus as focus_mod
 
@@ -817,7 +818,7 @@ def focus_end():
     return layout("Session summary", body, help_key="focus")
 
 
-@app.route("/focus/abort", methods=["POST"])
+@bp.route("/focus/abort", methods=["POST"])
 def focus_abort():
     from focuscore import focus as focus_mod
 

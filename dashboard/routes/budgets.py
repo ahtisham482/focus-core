@@ -5,15 +5,16 @@ Zero URL changes, zero HTML changes -- pure code move.
 """
 from datetime import date
 
-from flask import redirect, request
+from flask import Blueprint, redirect, request
 
 from focuscore import store
-from dashboard.app import app
 from dashboard.app import (
     _parse_day,
 )
 
-@app.route("/timesheet/project/rate", methods=["POST"])
+bp = Blueprint("budgets", __name__)
+
+@bp.route("/timesheet/project/rate", methods=["POST"])
 def timesheet_project_rate():
     from focuscore import budgets as budgets_mod
     from focuscore import money as money_mod
@@ -32,7 +33,7 @@ def timesheet_project_rate():
     return redirect("/timesheet?day=" + day + "&msg=" + msg.replace(" ", "+"))
 
 
-@app.route("/timesheet/project/budget", methods=["POST"])
+@bp.route("/timesheet/project/budget", methods=["POST"])
 def timesheet_project_budget():
     from focuscore import budgets as budgets_mod
     from focuscore import money as money_mod
@@ -61,7 +62,7 @@ def timesheet_project_budget():
     return redirect("/timesheet?day=" + day + "&msg=" + msg.replace(" ", "+"))
 
 
-@app.route("/timesheet/project/backfill-rate", methods=["POST"])
+@bp.route("/timesheet/project/backfill-rate", methods=["POST"])
 def timesheet_project_backfill_rate():
     """Explicit, user-confirmed backfill (Qwen M1.5). The confirm() dialog
     in the form IS the explicit confirmation; the action is audit-logged."""
@@ -81,7 +82,7 @@ def timesheet_project_backfill_rate():
     return redirect("/timesheet?day=" + day + "&msg=" + msg.replace(" ", "+"))
 
 
-@app.route("/timesheet/project/rollover", methods=["POST"])
+@bp.route("/timesheet/project/rollover", methods=["POST"])
 def timesheet_project_rollover():
     """Per-project rollover toggle (Phase 10, Q6: hours only)."""
     from focuscore import forecast as forecast_mod
@@ -97,7 +98,7 @@ def timesheet_project_rollover():
     return redirect("/timesheet?day=" + day + "&msg=" + msg.replace(" ", "+"))
 
 
-@app.route("/timesheet/rollover-settings", methods=["POST"])
+@bp.route("/timesheet/rollover-settings", methods=["POST"])
 def timesheet_rollover_settings():
     """Global rollover cap percentage (Phase 10, Q7: integer 0-100)."""
     day = _parse_day(request.form.get("day")) or date.today().isoformat()

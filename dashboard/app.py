@@ -37,8 +37,6 @@ from focuscore.ingest import ActivityWatchError  # noqa: E402
 from focuscore.pipeline import run_day  # noqa: E402
 from focuscore.scoring import UI_LABELS, productivity_pulse  # noqa: E402
 
-app = Flask(__name__)
-
 # Roadmap 0.3: module logger for the error handlers below.
 logger = logging.getLogger(__name__)
 
@@ -477,7 +475,6 @@ _BLOCKED_PAGE = (
     "<p><a href='/'>Back to Home</a></p>")
 
 
-@app.before_request
 def _reject_loopback_csrf():
     # Only state-changing requests need protection; GET/HEAD/OPTIONS
     # are read-only in this app and must keep working.
@@ -491,7 +488,6 @@ def _reject_loopback_csrf():
     return None
 
 
-@app.after_request
 def _add_security_headers(response):
     response.headers["X-Content-Type-Options"] = "nosniff"
     response.headers["X-Frame-Options"] = "DENY"
@@ -544,12 +540,10 @@ def _error_page(code, headline, detail, request_id=None):
     return layout("%s (%d)" % (headline, code), body, active="home")
 
 
-@app.before_request
 def _assign_request_id():
     g.request_id = "req-" + uuid.uuid4().hex[:8]
 
 
-@app.errorhandler(404)
 def _page_not_found(_err):
     return _error_page(
         404,
@@ -558,7 +552,6 @@ def _page_not_found(_err):
         "Your data is untouched."), 404
 
 
-@app.errorhandler(500)
 def _internal_error(_err):
     rid = getattr(g, "request_id", "req-unknown")
     logger.exception("Unhandled exception while serving %s [%s]",
@@ -585,9 +578,6 @@ class _DropFlaskDuplicateTraceback(logging.Filter):
         return not (record.exc_info
                     and isinstance(record.msg, str)
                     and record.msg.startswith("Exception on "))
-
-
-app.logger.addFilter(_DropFlaskDuplicateTraceback())
 
 
 _TARGET_SVG = (
@@ -1732,17 +1722,46 @@ def _rule_schedule_text(rule):
         return span
 
 
-# Sprint 4 (Qwen item 11): route handlers live in
-# dashboard/routes/*.py. Importing them registers the routes
-# on the `app` object above. Zero URL/HTML/schema changes.
-from dashboard.routes import (  # noqa: E402,F401
-    budgets,
-    core,
-    focus,
-    invoices,
-    system,
-    timesheet,
-)
+def create_app(config=None):
+    """Application factory (Roadmap 1.6).
+
+    Builds a Flask app, applies ``config`` overrides when given,
+    attaches the app-level hooks/handlers defined above, registers
+    the six route blueprints in one place, and returns the app.
+    Helpers stay in this module; routes import them from here.
+    """
+    app = Flask(__name__)
+    if config is not None:
+        app.config.update(config)
+    app.before_request(_reject_loopback_csrf)
+    app.before_request(_assign_request_id)
+    app.after_request(_add_security_headers)
+    app.register_error_handler(404, _page_not_found)
+    app.register_error_handler(500, _internal_error)
+    app.logger.addFilter(_DropFlaskDuplicateTraceback())
+    from dashboard.routes import (
+        budgets,
+        core,
+        focus,
+        invoices,
+        system,
+        timesheet,
+    )
+
+    # Registration happens only here (Roadmap 1.6). ``getattr`` guards
+    # the circular-import case: when a routes module is imported first,
+    # it triggers this factory while still loading (no ``bp`` yet), and
+    # Flask forbids adding routes to an already-registered blueprint.
+    # Skipping the still-loading module lets its import finish; a fresh
+    # ``create_app()`` (or the normal app-first import) registers all six.
+    for _module in (budgets, core, focus, invoices, system, timesheet):
+        _bp = getattr(_module, "bp", None)
+        if _bp is not None:
+            app.register_blueprint(_bp)
+    return app
+
+
+app = create_app()
 
 
 if __name__ == "__main__":
