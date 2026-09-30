@@ -21,7 +21,7 @@ def test_migration_5_creates_tables_and_defaults(tmp_path):
     assert "block_rules" in tables
     assert "block_passes" in tables
     assert "settings" in tables
-    assert migrations.LATEST_VERSION == 10
+    assert migrations.LATEST_VERSION == 11
     # defaults seeded
     assert store.get_setting("hud_enabled", path=db) == "1"
     assert store.get_setting("shield_enabled", path=db) == "1"

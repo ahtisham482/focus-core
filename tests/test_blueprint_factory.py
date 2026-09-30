@@ -181,10 +181,12 @@ def test_dashboard_app_cold_import_without_routes_first():
     assert _cold_global_route_map(_PRINT_MAP) == GOLDEN_ROUTE_MAP
 
 
-def test_create_app_fresh_instance_route_map_and_serving():
+def test_create_app_fresh_instance_route_map_and_serving(tmp_path,
+                                                         monkeypatch):
     import dashboard.app as dash_app
     from dashboard.app import app as global_app
     from dashboard.app import create_app
+    from focuscore import store
 
     # ``from dashboard.app import app`` returns the same cached
     # object as attribute access on the module.
@@ -204,6 +206,13 @@ def test_create_app_fresh_instance_route_map_and_serving():
     ]
     assert global_map == GOLDEN_ROUTE_MAP
 
+    # Serving a real page runs route handlers that call
+    # store.init_db(); route that at a throwaway DB (Roadmap 1.7
+    # repair: the default path is the repo dev DB, which the suite
+    # must never migrate). The route-map/cold-import assertions
+    # above are unaffected.
+    monkeypatch.setattr(store, "DEFAULT_DB_PATH",
+                        str(tmp_path / "blueprint.db"))
     client = fresh.test_client()
     response = client.get("/help")
     assert response.status_code == 200

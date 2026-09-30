@@ -17,6 +17,7 @@ Usage:
 
 import argparse
 import csv
+import sqlite3
 from collections import Counter
 from datetime import datetime, timedelta
 
@@ -204,7 +205,12 @@ def delete_entry(entry_id, db_path=None):
         return {"error": "Unknown entry."}
     if entry["locked"]:
         return {"error": "This day is locked -- entries cannot be deleted."}
-    store.delete_entry(entry_id, path=db_path)
+    try:
+        store.delete_entry(entry_id, path=db_path)
+    except sqlite3.IntegrityError:
+        # Roadmap 1.7: FK enforcement is live; an entry referenced by
+        # an invoice line (ON DELETE RESTRICT) cannot be removed.
+        return {"error": "This entry is on an invoice, so it cannot be deleted."}
     return {}
 
 

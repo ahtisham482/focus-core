@@ -304,7 +304,7 @@ def test_migration_m9_idempotent(tmp_path):
     conn = store.get_db(db)
     ver = conn.execute("PRAGMA user_version").fetchone()[0]
     conn.close()
-    assert ver == migrations.LATEST_VERSION == 10
+    assert ver == migrations.LATEST_VERSION == 11
     # Re-run is safe.
     store.init_db(db)
     conn = store.get_db(db)

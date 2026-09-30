@@ -4,6 +4,7 @@ Sprint 4 (Qwen item 11): split from dashboard/app.py.
 Zero URL changes, zero HTML changes -- pure code move.
 """
 import logging
+import sqlite3
 from datetime import date
 from html import escape
 
@@ -371,6 +372,14 @@ def timesheet_project_delete():
     except (TypeError, ValueError):
         logger.warning("timesheet project delete: invalid id, "
                        "nothing deleted")
+    except sqlite3.IntegrityError:
+        # Roadmap 1.7: FK enforcement is live; a project that has
+        # invoices (NO ACTION FK) cannot be removed.
+        message = "This project has invoices and cannot be deleted."
+        return layout("Timesheet",
+                      "<div class='card'><p><b>Could not delete:</b> %s</p>"
+                      "<p><a href='/timesheet?day=%s'>Back</a></p></div>"
+                      % (message, day)), 400
     return redirect("/timesheet?day=" + day)
 
 
