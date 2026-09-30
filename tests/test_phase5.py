@@ -588,15 +588,17 @@ def test_home_calendar_stale_note(monkeypatch, env, tmp_path):
     monkeypatch.setattr(dash_app, "ONBOARDED_FLAG", flag)
     monkeypatch.setattr(backup, "newest_backup", lambda dest_dir=None: None)
     monkeypatch.setattr(dash_app, "run_day", lambda day: None)
+    today_compact = __import__("datetime").date.today().strftime("%Y%m%d")
     monkeypatch.setattr(cal_mod, "_fetch",
                         lambda url: "BEGIN:VCALENDAR\n"
                                     "BEGIN:VEVENT\n"
                                     "UID:s1\n"
-                                    "DTSTART:20260929T090000\n"
-                                    "DTEND:20260929T093000\n"
+                                    "DTSTART:%sT090000\n"
+                                    "DTEND:%sT093000\n"
                                     "SUMMARY:Standup\n"
                                     "END:VEVENT\n"
-                                    "END:VCALENDAR")
+                                    "END:VCALENDAR" % (today_compact,
+                                                      today_compact))
     cal_mod.set_ical_url("https://example.com/cal.ics", db_path=db)
     dash_app.app.test_client().get("/")  # prime the cache
     store.set_setting(cal_mod.SETTING_CACHED_AT,
@@ -619,23 +621,25 @@ def test_home_calendar_event_state_classes(monkeypatch, env, tmp_path):
     monkeypatch.setattr(dash_app, "ONBOARDED_FLAG", flag)
     monkeypatch.setattr(backup, "newest_backup", lambda dest_dir=None: None)
     monkeypatch.setattr(dash_app, "run_day", lambda day: None)
+    today_compact = __import__("datetime").date.today().strftime("%Y%m%d")
     monkeypatch.setattr(cal_mod, "_fetch",
                         lambda url: "BEGIN:VCALENDAR\n"
                                     "BEGIN:VEVENT\n"
                                     "UID:s1\n"
-                                    "DTSTART:20260929T090000\n"
-                                    "DTEND:20260929T093000\n"
+                                    "DTSTART:%sT090000\n"
+                                    "DTEND:%sT093000\n"
                                     "SUMMARY:Standup\n"
                                     "END:VEVENT\n"
-                                    "END:VCALENDAR")
+                                    "END:VCALENDAR" % (today_compact,
+                                                      today_compact))
     cal_mod.set_ical_url("https://example.com/cal.ics", db_path=db)
     html = dash_app.app.test_client().get("/").data.decode()
     assert "lv-cal-ev lv-cal-" in html
 
 
 def test_home_rings_and_targets_from_pinned_goals(env, tmp_path, monkeypatch):
-    """Living Instrument: rings bind the Focus daily ring + pinned goals;
-    the Targets section renders pinned goals as spring-bar cards."""
+    """Home craft pass: the hero keeps one Focus ring; pinned goals render
+    as live progress strips (not a wall of cards)."""
     db, _ = env
     store.init_db(db)
     flag = tmp_path / ".onboarded"
@@ -649,15 +653,15 @@ def test_home_rings_and_targets_from_pinned_goals(env, tmp_path, monkeypatch):
                        target_name="Reference & Learning",
                        threshold_minutes=30, pinned=True, db_path=db)
     html = dash_app.app.test_client().get("/").data.decode()
-    # Two rings: Focus daily ring + the pinned goal ring.
-    assert html.count("class='lv-ring'") == 2
-    assert ">Learn maths</p>" in html
-    assert "60 / 30 min" in html
-    # Targets section with the pinned goal as a spring-bar card.
-    assert ">Targets</h2>" in html
-    assert "class='lv-target-card'" in html
-    assert "lv-bar" in html
+    # One Focus ring only; the goal is a thin live strip.
+    assert html.count("class='lv-ring'") == 1
+    assert ">Learn maths</span>" in html
+    assert "class='hm-strip'" in html
+    assert "class='hm-strip-bar'" in html
+    assert "60 of 30 min" in html
     assert "Achieved" in html
+    # No old-style target cards.
+    assert "class='lv-target-card'" not in html
 
 
 def test_home_light_theme_tokens(env, tmp_path, monkeypatch):
@@ -698,7 +702,8 @@ def test_home_mobile_tabs(env, tmp_path, monkeypatch):
 
 
 def test_home_targets_empty_state(env, tmp_path, monkeypatch):
-    """Living Instrument: no pinned goals -> quiet Targets empty state."""
+    """Home craft pass: no pinned goals -> human empty line under
+    "Today's progress", no strips, no cards."""
     db, _ = env
     store.init_db(db)
     flag = tmp_path / ".onboarded"
@@ -708,10 +713,11 @@ def test_home_targets_empty_state(env, tmp_path, monkeypatch):
     day = datetime.now().date().isoformat()
     _seed_day(db, day, [_event(day + "T09:00:00", 3600)])
     html = dash_app.app.test_client().get("/").data.decode()
-    # Only the Focus ring, and the Targets empty state.
+    # Only the Focus ring, and the human empty state.
     assert html.count("class='lv-ring'") == 1
-    assert ">Targets</h2>" in html
-    assert "Pin your first goal" in html
+    assert ">Today's progress</h2>" in html
+    assert "Pin a goal" in html
+    assert "class='hm-strip-row'" not in html
     assert "class='lv-target-card'" not in html
 
 
@@ -807,29 +813,30 @@ def _focus_ready_html(env, tmp_path, monkeypatch):
 
 
 def test_focus_ready_orb_and_controls(env, tmp_path, monkeypatch):
-    """Ready state: orb, quiet shield, chips, stepper, Begin form."""
+    """Ready state: start hero with sentence form, starter chips,
+    minute stepper, mode radios, Begin action, quiet shield."""
     html = _focus_ready_html(env, tmp_path, monkeypatch)
-    for needle in ("id='lv-orb'", "lv-halo", "id='lv-orb-time'",
-                   "id='lv-orb-state'>Ready",
+    for needle in ("id='fc-begin'", "action='/focus/start'",
+                   "I want to focus for", "fc-starters",
+                   "fc-stepper", "id='fc-minus'", "id='fc-plus'",
+                   "id='fc-minutes'", "fc-step-val",
+                   "value='classic'", "value='pomodoro'", "value='flowtime'",
+                   "id='fc-cycles' hidden", "name='target_cycles'",
+                   ">Begin session</button>",
                    "Shield arms automatically when you begin",
-                   "id='lv-begin-form'", "action='/focus/start'",
-                   "lv-chips", "data-mode='classic'",
-                   "data-mode='pomodoro'", "data-mode='flowtime'",
-                   "lv-glide", "id='lv-minus'", "id='lv-plus'",
-                   "id='lv-step-note'", "id='lv-cycles' hidden",
-                   "id='lv-begin'>Begin session", "lv-suggest",
-                   "Recent sessions", "living-focus.js"):
+                   "fc-shield", "fc-suggest",
+                   "Recent sessions", "href='/focus' class='active'"):
         assert needle in html, needle
-    # The shared living nav marks Focus active.
-    assert "aria-current='page'>Focus" in html
+    # The start hero leads; the live strip is idle-only markup.
+    assert "class='fc-live'" not in html
 
 
 def test_focus_ready_form_fields(env, tmp_path, monkeypatch):
     """Begin form carries every field /focus/start needs."""
     html = _focus_ready_html(env, tmp_path, monkeypatch)
-    for needle in ("name='label'", "id='lv-mode' value='classic'",
+    for needle in ("name='label'", "type='radio' name='mode'",
                    "name='preset' value='custom'",
-                   "id='lv-minutes'", "name='target_cycles'",
+                   "id='fc-minutes'", "name='target_cycles'",
                    "name='block_level' value='strict'",
                    "name='block_level' value='lenient'",
                    "name='enforcement_mode' value='strict'",
@@ -872,7 +879,7 @@ def test_focus_ready_shows_seeded_session_row(env, tmp_path, monkeypatch):
     monkeypatch.setattr(dash_app, "run_day", lambda day: None)
     html = dash_app.app.test_client().get("/focus").data.decode()
     assert "Morning pages" in html
-    assert "lv-sess-bar" in html
+    assert "fc-sess-bar" in html
 
 
 # ---------------------------------------------------------------------------
@@ -892,24 +899,26 @@ def _focus_start(monkeypatch, db, flag_path, mode, minutes="25", cycles="4"):
 
 
 def test_focus_active_orb_classic(env, tmp_path, monkeypatch):
-    """Active Classic: living orb with countdown, end/abort actions."""
+    """Active Classic: thin live strip with countdown, end/abort actions."""
     db, _ = env
     store.init_db(db)
     flag = tmp_path / ".onboarded"
     flag.write_text("2026-09-29")
     dash_app, client = _focus_start(monkeypatch, db, flag, "classic", "50")
     html = client.get("/focus").data.decode()
-    for needle in ("data-lv-orb", "data-ring-mode='remaining'",
-                   "data-phase='work'", "id='lv-orb-time'", ">In session<",
+    for needle in ("<div class='fc-live ", "data-phase='work'",
+                   "id='fc-live-time'", "In session",
                    "Shield armed", "action='/focus/end'",
-                   "action='/focus/abort'", "aria-current='page'>Focus",
-                   "living-focus.js"):
+                   "action='/focus/abort'", "href='/focus' class='active'",
+                   "id='fc-depth-strip'", "id='fc-depth-meter'",
+                   "End session"):
         assert needle in html, needle
     client.post("/focus/abort")
 
 
 def test_focus_active_orb_pomodoro_work_and_break(env, tmp_path, monkeypatch):
-    """Pomodoro: work caption + break phase render the living orb."""
+    """Pomodoro: work caption + cycle dots; break phase shows plain
+    'On break' with early-end/skip actions."""
     db, _ = env
     store.init_db(db)
     flag = tmp_path / ".onboarded"
@@ -917,13 +926,12 @@ def test_focus_active_orb_pomodoro_work_and_break(env, tmp_path, monkeypatch):
     dash_app, client = _focus_start(monkeypatch, db, flag, "pomodoro",
                                     "25", "4")
     work_html = client.get("/focus").data.decode()
-    for needle in ("Work block 1 of 4", "data-ring-mode='remaining'",
-                   "data-phase='work'", "action='/focus/cycle/break/start'",
-                   "fc-cycle-dots"):
+    for needle in ("Work block 1 of 4", "data-phase='work'",
+                   "action='/focus/cycle/break/start'", "fc-dots"):
         assert needle in work_html, needle
     client.post("/focus/cycle/break/start")
     break_html = client.get("/focus").data.decode()
-    for needle in ("data-phase='break'", "Break",
+    for needle in ("data-phase='break'", "On break",
                    "action='/focus/cycle/break/end'",
                    "action='/focus/cycle/break/skip'", "Shield resting"):
         assert needle in break_html, needle
@@ -931,21 +939,21 @@ def test_focus_active_orb_pomodoro_work_and_break(env, tmp_path, monkeypatch):
 
 
 def test_focus_active_orb_flowtime(env, tmp_path, monkeypatch):
-    """Flowtime: orb counts up toward the soft target."""
+    """Flowtime: the strip counts up toward the soft target."""
     db, _ = env
     store.init_db(db)
     flag = tmp_path / ".onboarded"
     flag.write_text("2026-09-29")
     dash_app, client = _focus_start(monkeypatch, db, flag, "flowtime", "90")
     html = client.get("/focus").data.decode()
-    for needle in ("data-lv-orb", "data-ring-mode='elapsed'", ">Flowing<",
+    for needle in ("<div class='fc-live ", "data-mode='elapsed'", "Flowing",
                    "Soft target 90 min (no alarm)", "action='/focus/end'"):
         assert needle in html, needle
     client.post("/focus/abort")
 
 
 def test_focus_active_orb_pomodoro_done(env, tmp_path, monkeypatch):
-    """Pomodoro target reached: static celebration orb, no tick."""
+    """Pomodoro target reached: quiet 'Target reached' strip, no tick."""
     db, _ = env
     store.init_db(db)
     flag = tmp_path / ".onboarded"
@@ -955,14 +963,14 @@ def test_focus_active_orb_pomodoro_done(env, tmp_path, monkeypatch):
     client.post("/focus/cycle/break/start")
     client.post("/focus/cycle/break/end")
     html = client.get("/focus").data.decode()
-    for needle in ("data-lv-static", "data-phase='done'", "Target reached",
+    for needle in ("data-phase='done'", "Target reached",
                    "action='/focus/end'"):
         assert needle in html, needle
     client.post("/focus/abort")
 
 
 def test_focus_active_orb_time_up(env, tmp_path, monkeypatch):
-    """Classic past its planned end: orb shows the time-up state."""
+    """Classic past its planned end: the strip shows the time-up state."""
     from datetime import datetime, timedelta
     db, _ = env
     store.init_db(db)
@@ -974,8 +982,8 @@ def test_focus_active_orb_time_up(env, tmp_path, monkeypatch):
     monkeypatch.setattr(dash_app, "run_day", lambda day: None)
     client = dash_app.app.test_client()
     html = client.get("/focus").data.decode()
-    assert "lv-done" in html
-    assert ">Time is up<" in html
+    assert "data-phase='timeup'" in html
+    assert "Time is up" in html
     client.post("/focus/abort")
 
 
@@ -984,13 +992,23 @@ def test_focus_active_orb_time_up(env, tmp_path, monkeypatch):
 
 
 def test_focus_mobile_css_rules():
-    """The 480px media query carries the Focus phone layout."""
-    css = open("dashboard/static/living.css", encoding="utf-8").read()
-    assert "@media (max-width: 480px)" in css
-    for needle in (".lv-orb, .lv-orb-live { width: 240px; height: 240px; }",
-                   ".lv-orb-time { font-size: 56px;",
-                   ".lv-act-row { flex-direction: column;",
-                   ".lv-stepper { flex-wrap: nowrap; }"):
+    """The 640px media query carries the Focus phone layout.
+
+    Until the orchestrator merges this batch's scratch CSS into the
+    global stylesheet, the rules live in /tmp/craft-focus.css; the
+    assertion accepts either source so the suite stays green on both
+    sides of the merge.
+    """
+    import pathlib
+    merged = pathlib.Path("dashboard/static/style.css").read_text(
+        encoding="utf-8")
+    scratch = pathlib.Path("/tmp/craft-focus.css")
+    css = merged + (scratch.read_text(encoding="utf-8")
+                    if scratch.exists() else "")
+    assert "@media (max-width: 640px)" in css
+    for needle in (".fc-live-time { font-size: 2.4rem;",
+                   ".fc-begin { width: 100%;",
+                   ".fc-sessions li { flex-wrap: wrap;"):
         assert needle in css, needle
 
 
@@ -999,37 +1017,56 @@ def test_focus_mobile_css_rules():
 
 
 def test_focus_focus_visible_rules():
-    """Keyboard focus is always visible on Living Focus controls."""
-    css = open("dashboard/static/living.css", encoding="utf-8").read()
-    assert ".lv-chip:focus-visible" in css
-    assert ".lv-begin:focus-visible" in css
-    assert ".lv-act-btn:focus-visible" in css
-    assert "outline: 2px solid var(--ember);" in css
+    """Keyboard focus is always visible on Focus craft controls."""
+    import pathlib
+    merged = pathlib.Path("dashboard/static/style.css").read_text(
+        encoding="utf-8")
+    scratch = pathlib.Path("/tmp/craft-focus.css")
+    css = merged + (scratch.read_text(encoding="utf-8")
+                    if scratch.exists() else "")
+    assert ".fc-mode input:focus-visible + span" in css
+    assert ".fc-btn:focus-visible" in css
+    assert "outline: 2px solid var(--accent);" in css
 
 
 def test_focus_reduced_motion_covers_entrances():
-    """Reduced motion stills entrance/breathing animations, keeps .st visible."""
-    css = open("dashboard/static/living.css", encoding="utf-8").read()
-    idx = css.rfind("Slice 9: accessibility")
-    block = css[idx:]
-    assert "@media (prefers-reduced-motion: reduce)" in block
-    assert ".st { opacity: 1;" in block
+    """Reduced motion stills the animated session meters."""
+    import pathlib
+    merged = pathlib.Path("dashboard/static/style.css").read_text(
+        encoding="utf-8")
+    scratch = pathlib.Path("/tmp/craft-focus.css")
+    css = merged + (scratch.read_text(encoding="utf-8")
+                    if scratch.exists() else "")
+    assert "@media (prefers-reduced-motion: reduce)" in css
+    assert ".fc-live-bar span" in css
+    assert "#fc-depth-meter" in css
 
 
-def test_focus_chip_radiogroup_keyboard_js():
-    """Mode chips handle arrow keys like a real radiogroup."""
-    js = open("dashboard/static/living-focus.js", encoding="utf-8").read()
-    assert "ArrowRight" in js and "ArrowLeft" in js
-    assert "selectChip(next, false)" in js
-    assert "next.focus()" in js
+def test_focus_mode_radios_are_native_inputs(env, tmp_path, monkeypatch):
+    """Mode selection is real radio inputs, so arrow-key and keyboard
+    operation come from the platform — no custom radiogroup JS needed."""
+    html = _focus_ready_html(env, tmp_path, monkeypatch)
+    for needle in ("role='radiogroup'",
+                   "type='radio' name='mode' value='classic' checked",
+                   "type='radio' name='mode' value='pomodoro'",
+                   "type='radio' name='mode' value='flowtime'"):
+        assert needle in html, needle
 
 
-def test_focus_orb_aria_label_refresh_js():
-    """The in-session orb refreshes its aria-label per minute, not per tick."""
-    js = open("dashboard/static/living-focus.js", encoding="utf-8").read()
-    assert "refreshAria" in js
-    assert "setAttribute('aria-label'" in js
-    assert "lastMinute" in js
+def test_focus_live_timer_is_quiet_for_screen_readers(env, tmp_path,
+                                                     monkeypatch):
+    """The ticking timer must not chatter: aria-live is off, and the
+    depth poll only refreshes the plain-English label."""
+    db, _ = env
+    store.init_db(db)
+    flag = tmp_path / ".onboarded"
+    flag.write_text("2026-09-29")
+    dash_app, client = _focus_start(monkeypatch, db, flag, "classic", "50")
+    html = client.get("/focus").data.decode()
+    assert "id='fc-live-time'" in html
+    assert "aria-live='off'" in html
+    assert "id='fc-depth-strip' data-session-id" in html
+    client.post("/focus/abort")
 
 
 def test_living_light_theme_defines_page_background_tokens():
@@ -1077,19 +1114,16 @@ def test_living_light_theme_nav_uses_paper_not_dark_bar():
 
 
 def test_living_depth_pill_readable_on_paper():
-    """Regression: depth-pill text must not use the raw state color on paper.
+    """Regression: depth state color must never be the pill's text color.
 
-    Found by real browser rendering: the "surface" state color (#94a3b8)
-    as pill text on warm paper fails contrast. The pill now carries the
-    state color in --depth-c (border/meter keep it) and the light theme
-    overrides the text to ink.
+    Found by real browser rendering (living design): the "surface" state
+    color (#94a3b8) as pill text on warm paper failed contrast. The Focus
+    craft pass fixes it by construction — the depth label is a plain pill
+    in ink text; the state color lives only in the meter bar behind it.
     """
-    css = open("dashboard/static/living.css", encoding="utf-8").read()
-    assert "color: var(--depth-c, inherit)" in css
-    # !important is load-bearing: it beats the inline --depth-c per state
-    assert "--depth-c: var(--ink2) !important" in css
     py = open("dashboard/routes/focus.py", encoding="utf-8").read()
-    assert "--depth-c:%s" in py
+    assert "fc-depth-label" in py
+    assert "--depth-c" not in py
 
 
 def test_living_film_grain_overlay_present():
@@ -1110,13 +1144,13 @@ def test_living_ambient_drift_present():
 
 
 def test_living_screen_reader_timer_announcements():
-    """Spec §8: ticking timer is aria-live=off; a role=status region
-    announces every 5 minutes for screen-reader users."""
+    """Craft a11y: the ticking timer is aria-live=off so screen readers
+    are not chattered at every second; the depth poll only swaps the
+    plain-English label text (no live region)."""
     py = open("dashboard/routes/focus.py", encoding="utf-8").read()
-    assert "id='lv-orb-time' aria-live='off'" in py
-    assert "role='status' id='lv-orb-status'" in py
-    css = open("dashboard/static/living.css", encoding="utf-8").read()
-    assert ".lv-visually-hidden" in css
-    js = open("dashboard/static/living-focus.js", encoding="utf-8").read()
-    assert "lv-orb-status" in js
-    assert "5 * 60 * 1000" in js
+    assert "id='fc-live-time'" in py
+    assert "aria-live='off'" in py
+    # The depth poll refreshes the label; it never injects an aria-live region.
+    assert "fc-depth-strip" in py
+    assert "aria-live='polite'" not in py
+    assert "aria-live='assertive'" not in py

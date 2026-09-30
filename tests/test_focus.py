@@ -454,9 +454,8 @@ def test_focus_page_renders_with_active_session(tmp_path, monkeypatch):
     assert resp.status_code == 200
     html = resp.data.decode()
     assert "Deep work" in html
-    # Living Instrument (slice 7): the in-session orb replaced the
-    # legacy SVG progress ring.
-    assert "data-lv-orb" in html
+    # Focus craft pass: the in-session live strip replaced the orb.
+    assert "<div class='fc-live " in html
 
 
 # ----------------- regression tests: PC blocking bugs (Phase 3 fix) ---

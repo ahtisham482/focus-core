@@ -6,6 +6,7 @@ Zero URL changes, zero HTML changes -- pure code move.
 from datetime import date, datetime, timedelta
 from html import escape
 from pathlib import Path
+import re
 
 from flask import redirect, request
 
@@ -81,8 +82,8 @@ def backup_page():
 
     if backups:
         last = backups[0]["modified"].strftime("%Y-%m-%d %H:%M")
-        last_html = "<p>Last backup: <b>%s</b> (%d backups kept).</p>" % (
-            last, len(backups))
+        last_html = "<p>Last backup: <b>%s</b> (%d %s kept).</p>" % (
+            last, len(backups), "backup" if len(backups) == 1 else "backups")
     else:
         last_html = "<p><b>No backups yet.</b> Make your first one now.</p>"
 
@@ -107,28 +108,37 @@ def backup_page():
         % ("".join(rows)
            or "<tr><td colspan='4' class='note'>No backups yet.</td></tr>"))
 
+    # Craft pass (work batch): the backup action is the hero; restore
+    # second; everything else folds away. Same POST contracts.
     body = (
-        "<div class='card'><h3>Where your backups go</h3>%s%s"
+        "<section class='wk-backup-hero'>"
+        "<div class='wk-backup-hero-state' role='status'>%s</div>"
         "<form method='post' action='/backup/now'>"
-        "<button type='submit'>Back up now</button></form>"
-        "<p class='note'>Focus Core also backs up by itself every day when "
-        "you start it (only if the last backup is older than 24 hours).</p>"
-        "</div>"
-        "<div class='card'><h3>Your backups</h3>%s</div>"
-        "<div class='card'><h3>Your data</h3>"
+        "<button type='submit' class='wk-big'>Back up now</button></form>"
+        "</section>"
+        "<section class='wk-section'><h2>Restore a backup</h2>%s"
+        "<p class='note'>Restoring first copies your current data to a "
+        "safety file, so nothing is lost.</p></section>"
+        "<section class='wk-section'><h2>Where your backups go</h2>%s</section>"
+        "<p class='how-it-works'>Focus Core also backs up by itself every "
+        "day when you start it (only if the last backup is older than 24 "
+        "hours).</p>"
+        "<details class='wk-more'><summary>"
+        "Your data &middot; Moving to a new laptop</summary>"
+        "<h3>Your data</h3>"
         "<p class='note'>Everything lives on this PC in "
         "<code>focuscore.db</code>. Export: any timesheet day can be "
         "saved as CSV from the Timesheet page; a full copy is any backup "
         "from this page. Delete: to remove all your data, delete "
-        "<code>focuscore.db</code> (make a backup first).</p></div>"
-        "<div class='card'><h3>Moving to a new laptop</h3>"
+        "<code>focuscore.db</code> (make a backup first).</p>"
+        "<h3>Moving to a new laptop</h3>"
         "<p class='note'>1. On the new laptop, install Focus Core and "
         "Google Drive, and let Drive finish syncing.<br>"
         "2. Copy the newest <code>focuscore-*.db</code> file from the "
         "\"Focus Core Backups\" folder into the Focus Core folder and "
-        "rename it to <code>focuscore.db</code>. Done -- all your history "
-        "is back.</p></div>"
-        % (where_html, last_html, table)
+        "rename it to <code>focuscore.db</code>. Done &mdash; all your history "
+        "is back.</p></details>"
+        % (last_html, table, where_html)
     )
     return layout("Backup", body, active="backup")
 
@@ -175,7 +185,7 @@ def backup_restore():
         "<p class='note'>Safety copy of your previous data: "
         "<code>%s</code></p>"
         "<p><a class='btn' href='/'>Go to Home</a></p></div>"
-        % (escape(name), legacy_note, escape(str(safety) if safety else "none -- "
+        % (escape(name), legacy_note, escape(str(safety) if safety else "none — "
                "there was no previous database")))
     return layout("Backup restored", body, active="backup")
 
@@ -202,7 +212,7 @@ def update_page():
             "<div class='card'><h3>Updates</h3>"
             "<p><b>Couldn't check for updates:</b> %s</p>"
             "<p class='note'>This usually means no internet, or the releases "
-            "page isn't public. Nothing changed -- you're still on %s.</p>"
+            "page isn't public. Nothing changed — you're still on %s.</p>"
             "<p><a class='btn' href='/update?refresh=1'>Check again</a></p>"
             "</div>"
             % (escape(status["error"]), escape(status["current"])))
@@ -226,7 +236,7 @@ def update_page():
         "confirm('Update to %s now? A safety backup is made first, then "
         "Focus Core closes, updates, and reopens by itself.');\">"
         "<button type='submit'>Update to %s now</button></form>"
-        "<p class='note'>Your data is never touched by the update -- and a "
+        "<p class='note'>Your data is never touched by the update — and a "
         "safety backup is made first anyway. The download is about 25 MB."
         "</p></div>"
         % (escape(status["latest"]), escape(status["latest"]),
@@ -287,7 +297,7 @@ def update_start():
         "<div class='card'><h3>Updating to %s...</h3>"
         "<p>The new version is downloaded and a safety backup is made. "
         "Focus Core will now close, install the update, and reopen by "
-        "itself -- about a minute.</p>"
+        "itself — about a minute.</p>"
         "<p class='note'>If it doesn't reopen by itself, start it from "
         "the desktop icon as usual.</p></div>"
         % escape(status["latest"]))
@@ -308,25 +318,50 @@ def report_page():
     rep = rep_mod.weekly_report(week_start)
     prev_week = (week_start - timedelta(days=7)).isoformat()
     next_week = (week_start + timedelta(days=7)).isoformat()
+    # Read-only second report for the "vs last week" delta.
+    prev = rep_mod.weekly_report(week_start - timedelta(days=7))
+    pulse_delta = (rep["avg_pulse"] - prev["avg_pulse"]
+                   if rep["avg_pulse"] is not None
+                   and prev["avg_pulse"] is not None else None)
+    hours_delta = rep["total_hours"] - prev["total_hours"]
+    if pulse_delta is None:
+        delta_txt = "No data last week to compare against yet."
+    else:
+        arrow = ("▲" if pulse_delta > 0 else
+                 "▼" if pulse_delta < 0 else "=")
+        delta_txt = ("%s %.1f Pulse, %s%.1f h vs last week"
+                     % (arrow, abs(pulse_delta),
+                        "+" if hours_delta >= 0 else "\u2212",
+                        abs(hours_delta)))
 
     avg_pulse = ("%.1f" % rep["avg_pulse"]
                  if rep["avg_pulse"] is not None else "--")
     fs = rep["focus_sessions"]
-    cards = (
-        "<div class='card'><h3>Week %s to %s</h3>"
-        "<table><tr>"
-        "<td><div class='pulse' style='font-size:40px'>%.1f</div>"
-        "<div class='note'>tracked hours</div></td>"
-        "<td><div class='pulse' style='font-size:40px'>%s</div>"
-        "<div class='note'>average Pulse</div></td>"
-        "<td><div class='pulse' style='font-size:40px'>%d</div>"
-        "<div class='note'>focus sessions (%.0f min, %d blocks)</div></td>"
-        "</tr></table>"
-        "<p><a href='/report?week=%s'>&larr; Previous week</a> &middot; "
+    hero = (
+        "<div class='in-hero'><p class='in-kicker'>Weekly report · "
+        "%s to %s</p>"
+        "<p class='in-big'>%.1f <span>h tracked</span> · %s "
+        "<span>Pulse</span></p>"
+        "<p class='in-caption'>%s · %d focus sessions (%.0f min, "
+        "%d blocks)</p>"
+        "<p class='in-weeknav'><a href='/report?week=%s'>"
+        "&larr; Previous week</a> &middot; "
         "<a href='/report?week=%s'>Next week &rarr;</a></p></div>"
         % (rep["week_start"], rep["week_end"], rep["total_hours"],
-           avg_pulse, fs["count"], fs["focus_minutes"], fs["blocks"],
-           prev_week, next_week))
+           avg_pulse, delta_txt, fs["count"], fs["focus_minutes"],
+           fs["blocks"], prev_week, next_week))
+    footnote = (
+        "<p class='in-footnote'>Reports are built from your tracked "
+        "time. This week fills in as you track &mdash; the full picture "
+        "lands on Sunday.</p>")
+
+    if rep["total_hours"] == 0:
+        body = (hero +
+                "<div class='in-empty'><p><b>Nothing here yet.</b> "
+                "Your first report lands after a full day of tracking."
+                "</p></div>" + footnote)
+        return layout("Weekly report %s" % rep["week_start"], body,
+                      active="report")
 
     day_rows = "".join(
         "<tr><td>%s</td><td>%.2f</td><td>%s</td><td>%.2f</td></tr>"
@@ -336,8 +371,9 @@ def report_page():
         for d in rep["days"])
     days_table = (
         "<div class='card'><h3>Days</h3>"
+        "<div class='in-grid-scroll'>"
         "<table><tr><th>Date</th><th>Tracked hours</th><th>Pulse</th>"
-        "<th>Focus hours</th></tr>%s</table></div>" % day_rows)
+        "<th>Focus hours</th></tr>%s</table></div></div>" % day_rows)
 
     # CSS-only bar charts (no JavaScript): category hours and daily Pulse.
     max_cat = max([h for _, h in rep["top_categories"]] or [0])
@@ -349,9 +385,19 @@ def report_page():
         % (escape(name), (hours / max_cat * 100) if max_cat else 0,
            _cat_color(name), hours)
         for name, hours in rep["top_categories"])
+    if rep["top_categories"]:
+        top_name, top_hours = rep["top_categories"][0]
+        top_share = (top_hours / rep["total_hours"] * 100
+                     if rep["total_hours"] else 0)
+        cats_caption = (
+            "<p class='in-caption'>%s leads with %.1f h &mdash; %.0f%% of "
+            "your tracked time.</p>"
+            % (escape(top_name), top_hours, top_share))
+    else:
+        cats_caption = ""
     cats_chart = (
-        "<div class='card'><h3>Top categories</h3>%s</div>"
-        % (cat_bars or "<p class='note'>No data.</p>"))
+        "<div class='card'><h3>Top categories</h3>%s%s</div>"
+        % (cats_caption, cat_bars or "<p class='note'>No data.</p>"))
 
     day_bars = "".join(
         "<div class='hbar'><span class='lbl'>%s</span>"
@@ -364,9 +410,21 @@ def report_page():
            ("#f9a825" if (d["pulse"] or 0) >= 40 else "#e53935"),
            ("%.0f" % d["pulse"]) if d["pulse"] is not None else "--")
         for d in rep["days"])
+    pulse_days = [d for d in rep["days"] if d["pulse"] is not None]
+    if pulse_days:
+        best = max(pulse_days, key=lambda d: d["pulse"])
+        best_name = datetime.strptime(
+            best["date"], "%Y-%m-%d").strftime("%a")
+        pulse_caption = (
+            "<p class='in-caption'>Your best day was %s (Pulse %.0f). "
+            "Do more of whatever that day looked like.</p>"
+            % (best_name, best["pulse"]))
+    else:
+        pulse_caption = ""
     pulse_chart = (
         "<div class='card'><h3>Pulse through the week</h3>"
-        "<p class='note'>Daily Pulse, 0-100.</p>%s</div>" % day_bars)
+        "<p class='note'>Daily Pulse, 0-100.</p>%s%s</div>"
+        % (pulse_caption, day_bars))
 
     goal_rows = []
     for goal in rep["goals"]:
@@ -383,11 +441,14 @@ def report_page():
         "<div class='card'><h3>Goal hit-rate</h3>"
         "<p class='note'>Days the goal was hit, out of days with tracked "
         "data.</p>"
-        "<table><tr><th>Goal</th><th>Hit</th><th></th></tr>%s</table></div>"
+        "<div class='in-grid-scroll'>"
+        "<table><tr><th>Goal</th><th>Hit</th><th></th></tr>%s</table>"
+        "</div></div>"
         % ("".join(goal_rows)
            or "<tr><td colspan='3' class='note'>No goals yet.</td></tr>"))
 
-    body = cards + days_table + cats_chart + pulse_chart + goals_table
+    body = (hero + pulse_chart + cats_chart + days_table + goals_table
+            + footnote)
     return layout("Weekly report %s" % rep["week_start"], body,
                   active="report")
 
@@ -405,6 +466,41 @@ def coaching_page():
     warnings = coach_mod.burnout_warnings(day_from, today)
 
     days = sorted(grid.keys())
+
+    # The one insight: when focus peaks.
+    scored_hours = [(h, hourly[h]["pulse"]) for h in range(24)
+                    if hourly[h]["pulse"] is not None
+                    and hourly[h]["minutes"] > 0]
+    if scored_hours:
+        best_h = max(scored_hours, key=lambda t: t[1])[0]
+        best_pulse = max(scored_hours, key=lambda t: t[1])[1]
+        hero = (
+            "<div class='in-hero'><p class='in-kicker'>Coaching · last 7 "
+            "days</p>"
+            "<p class='in-big'>Your deep work peaks at %02d:00.</p>"
+            "<p class='in-caption'>%02d:00-%02d:00 has your highest Pulse "
+            "(%.0f) over the last 7 days. Protect that hour.</p></div>"
+            % (best_h, best_h, (best_h + 2) % 24, best_pulse))
+    else:
+        best_h = None
+        hero = (
+            "<div class='in-hero'><p class='in-kicker'>Coaching · last 7 "
+            "days</p>"
+            "<p class='in-big'>No rhythm yet.</p>"
+            "<p class='in-caption'>After a full day of tracking, your "
+            "rhythm appears here. Come back tomorrow.</p></div>")
+
+    # Lowest-focus 2h block between 09:00 and 17:00: the meeting window.
+    focus_minutes = {}
+    for h in range(24):
+        fm = 0.0
+        for day_str in days:
+            sbl = grid[day_str][h]["seconds_by_level"]
+            fm += (sbl.get(2, 0) + sbl.get(1, 0)) / 60.0
+        focus_minutes[h] = fm
+    meet_h = min(range(9, 16),
+                 key=lambda h: focus_minutes[h] + focus_minutes[h + 1])
+
     header = "".join(
         "<th>%s</th>" % datetime.strptime(d, "%Y-%m-%d").strftime("%a %m-%d")
         for d in days)
@@ -424,14 +520,22 @@ def coaching_page():
                 "title='%s'>%s</td>" % (bg, fg, title, text))
         rows.append("<tr><td><b>%02d:00</b></td>%s</tr>"
                     % (hour, "".join(cells)))
+    if scored_hours:
+        heat_caption = ("<p class='in-caption'>Your best hours glow green "
+                        "— most days peak %02d:00-%02d:00.</p>"
+                        % (best_h, (best_h + 2) % 24))
+    else:
+        heat_caption = ""
     heatmap = (
         "<div class='card'><h3>Your week by hour</h3>"
         "<p class='note'>Each cell is the Pulse for that hour (0-100). "
-        "Green = focused, red = distracted. Last 7 days.</p>"
-        "<table><tr><th>Hour</th>%s</tr>%s</table></div>"
-        % (header, "".join(rows)))
+        "Green = focused, red = distracted. Last 7 days.</p>%s"
+        "<div class='in-grid-scroll'>"
+        "<table><tr><th>Hour</th>%s</tr>%s</table></div></div>"
+        % (heat_caption, header, "".join(rows)))
 
-    # Average-day summary row: best hours overall.
+    # Average-day summary: one horizontal strip of the 24 hours.
+    avg_header = "".join("<th>%02d</th>" % h for h in range(24))
     avg_cells = []
     for hour in range(24):
         info = hourly[hour]
@@ -445,23 +549,49 @@ def coaching_page():
         "<div class='card'><h3>Average day</h3>"
         "<p class='note'>All 7 days combined: when your focus usually "
         "peaks.</p>"
-        "<table><tr>%s</tr></table></div>"
-        % "".join("<tr><td><b>%02d</b></td>%s</tr>"
-                  % (h, avg_cells[h]) for h in range(24)))
+        "<div class='in-grid-scroll'><table><tr>%s</tr><tr>%s</tr></table>"
+        "</div></div>"
+        % (avg_header, "".join(avg_cells)))
 
+    real_windows = [w for w in windows if w["focus_minutes"] > 0]
     window_items = "".join(
-        "<li><b>%02d:00 - %02d:00</b> -- %.0f focus minutes"
+        "<li><b>%02d:00 - %02d:00</b> · %.0f focus minutes"
         "%s</li>"
         % (w["start_hour"], w["end_hour"], w["focus_minutes"],
            (", Pulse %.0f" % w["avg_pulse"])
            if w["avg_pulse"] is not None else "")
-        for w in windows)
-    windows_html = (
-        "<div class='card'><h3>Your best focus windows</h3>"
-        "<p class='note'>The %d-hour blocks where you do your most focused "
-        "work. Try to protect these hours.</p>"
-        "<ul>%s</ul></div>"
-        % (2, window_items or "<li class='note'>Not enough data yet.</li>"))
+        for w in real_windows)
+    if real_windows:
+        w0 = real_windows[0]
+        actions = (
+            "<div class='in-advice'><div class='in-advice-card'>"
+            "<b>Protect your peak: %02d:00-%02d:00</b>"
+            "<p>%.0f focused minutes landed in this window over the last "
+            "7 days. Guard it for your hardest work.</p>"
+            "<form class='inline' method='post' action='/focus/start'>"
+            "<input type='hidden' name='label' value='Peak window work'>"
+            "<input type='hidden' name='preset' value='50'>"
+            "<button type='submit' class='chip'>Start a 50-min focus "
+            "session</button></form></div>"
+            "<div class='in-advice-card'>"
+            "<b>Take meetings at %02d:00-%02d:00</b>"
+            "<p>Your focus is naturally lowest here on workdays, so "
+            "meetings cost you the least deep-work time.</p>"
+            "<p class='note'>Next step: move one recurring meeting into "
+            "this window.</p></div></div>"
+            % (w0["start_hour"], w0["end_hour"], w0["focus_minutes"],
+               meet_h, meet_h + 2))
+        windows_html = (
+            "<div class='card'><h3>Your best focus windows</h3>"
+            "<p class='in-caption'>The 2-hour blocks where you do your "
+            "most focused work. Guard these like meetings.</p>"
+            "<ul>%s</ul></div>" % window_items)
+    else:
+        actions = ""
+        windows_html = (
+            "<div class='in-empty'><p><b>No focus windows yet.</b> "
+            "After a full day of tracking, your best hours appear here."
+            "</p></div>")
 
     if warnings:
         warn_items = "".join(
@@ -469,14 +599,18 @@ def coaching_page():
             % (escape(w["message"]), escape(w["detail"]))
             for w in warnings)
         warnings_html = (
-            "<div class='card'><h3>Warnings</h3><ul>%s</ul></div>"
-            % warn_items)
+            "<section class='in-strip'><h3>Warnings</h3><ul>%s</ul>"
+            "</section>" % warn_items)
     else:
         warnings_html = (
-            "<div class='card'><h3>Warnings</h3>"
-            "<p>No warnings -- looking good.</p></div>")
+            "<section class='in-strip'><h3>Warnings</h3>"
+            "<p>No warnings — looking good.</p></section>")
 
-    body = heatmap + avg_row + windows_html + warnings_html
+    footnote = (
+        "<p class='in-footnote'>Coaching reads your last 7 days of "
+        "tracked time. The more you track, the sharper it gets.</p>")
+    body = (hero + actions + warnings_html + windows_html + heatmap
+            + avg_row + footnote)
     return layout("Coaching", body, active="coaching")
 
 
@@ -492,15 +626,43 @@ def shield_page():
     passes = store.get_recent_passes(limit=10)
     blocks = store.get_today_blocks(limit=30)
 
+    # The on/off state is the hero: big, unmistakable, with the toggle
+    # as the primary action right inside it.
+    on = bool(daemon and not killed)
     if killed:
-        status_html = ("<p><b>Status:</b> Shield is <b>off</b> (kill "
-                       "switch is on).</p>")
+        state_word, state_sub = "off", "The kill switch is on."
     elif daemon:
-        status_html = ("<p><b>Status:</b> Shield is <b>running</b> -- "
-                       "watching for distractions.</p>")
+        state_word, state_sub = "on", "Watching for distractions."
     else:
-        status_html = ("<p><b>Status:</b> Shield is <b>not running</b>. "
-                       "Turn it on below.</p>")
+        state_word, state_sub = "off", "Turn it on to block distractions."
+    n_blocks, n_rules = len(blocks), len(rules)
+    blocks_word = "distraction" if n_blocks == 1 else "distractions"
+    rules_word = "rule" if n_rules == 1 else "rules"
+    hero_html = (
+        "<div class='page-hero gd-hero gd-hero--%s'>"
+        "<div class='page-hero-text'>"
+        "<h1 class='page-title gd-hero-title'>Shield is %s</h1>"
+        "<p class='page-sub gd-hero-sub'>%s"
+        "<span class='page-sub-dot'>&middot;</span>"
+        "<span><b>%d</b> %s blocked today</span>"
+        "<span class='page-sub-dot'>&middot;</span>"
+        "<span><b>%d</b> %s</span>"
+        "</p></div>"
+        "<div class='gd-hero-actions'>"
+        "<form method='post' action='/shield/toggle' style='display:inline'>"
+        "<button type='submit' name='on' value='%s' class='gd-hero-btn'>"
+        "%s</button></form> "
+        "<form method='post' action='/shield/hud' style='display:inline'>"
+        "<button type='submit' name='enabled' value='%s' "
+        "class='gd-hero-btn gd-hero-btn--quiet'>HUD: %s</button></form>"
+        "</div>"
+        "</div>"
+        % (state_word, state_word, state_sub, n_blocks, blocks_word,
+           n_rules, rules_word,
+           "0" if on else "1", "Turn shield off" if on else "Turn shield on",
+           "0" if hud_on else "1", "on" if hud_on else "off"))
+
+    pass_note = ""
     if active_pass:
         try:
             until = (datetime.fromisoformat(active_pass["started_at"])
@@ -508,80 +670,112 @@ def shield_page():
                          active_pass["minutes"]))).strftime("%H:%M")
         except (ValueError, TypeError):
             until = "soon"
-        status_html += ("<p class='note'>Emergency pass active until %s "
-                        "(%s).</p>" % (until,
-                                        escape(active_pass.get("reason")
-                                               or "")))
-    status_html += (
-        "<form method='post' action='/shield/toggle' style='display:inline'>"
-        "<button type='submit' name='on' value='%s'>%s</button></form> "
-        "<form method='post' action='/shield/hud' style='display:inline'>"
-        "<button type='submit' name='enabled' value='%s'>HUD: %s</button>"
-        "</form>"
-        % ("0" if (daemon and not killed) else "1",
-           "Turn shield off" if (daemon and not killed)
-           else "Turn shield on",
-           "0" if hud_on else "1", "on" if hud_on else "off"))
+        pass_note = (
+            "<p class='note gd-pass-note'>Emergency pass active until %s "
+            "(%s).</p>" % (until,
+                            escape(active_pass.get("reason") or "")))
 
-    if rules:
-        rows = []
-        for r in rules:
-            sched = _rule_schedule_text(r)
-            rows.append(
-                "<tr><td>%s</td><td>%s</td><td>%s</td><td>%s</td>"
-                "<td>%s</td><td>%s</td>"
-                "<td><form method='post' action='/shield/rule/toggle' "
-                "style='display:inline'>"
-                "<input type='hidden' name='id' value='%d'>"
-                "<button type='submit' name='enabled' value='%s'>%s</button>"
-                "</form> "
-                "<form method='post' action='/shield/rule/delete' "
-                "style='display:inline' "
-                "onsubmit=\"return confirm('Delete this rule?')\">"
-                "<input type='hidden' name='id' value='%d'>"
-                "<button type='submit'>Delete</button></form></td></tr>"
-                % (escape(r["name"]), escape(r["rule_type"]),
-                   escape(r["key"]), escape(r["action"]), sched,
-                   "on" if r["enabled"] else "off", r["id"],
-                   "0" if r["enabled"] else "1",
-                   "Disable" if r["enabled"] else "Enable", r["id"]))
-        rules_html = ("<table><tr><th>Name</th><th>Type</th><th>Key</th>"
-                      "<th>Action</th><th>Schedule</th><th>On</th>"
-                      "<th></th></tr>%s</table>" % "".join(rows))
-    else:
-        rules_html = ("<p class='note'>No rules yet. Add one below -- "
-                      "for example, block <i>twitter.com</i> every "
-                      "weekday 09:00-18:00.</p>")
-    rules_html += (
-        "<h3>Add a rule</h3>"
-        "<form method='post' action='/shield/rule/add'>"
-        "<p><label>Name <input type='text' name='name' required "
+    action_words = {"soft": "remind me", "firm": "remind + minimize",
+                    "hardcore": "minimize + 30s lock"}
+    rule_rows = []
+    for r in rules:
+        rule_rows.append(
+            "<div class='gd-strip'>"
+            "<div class='gd-strip-main'><b>%s</b>"
+            "<span class='gd-strip-sub'>%s &middot; %s &middot; %s</span>"
+            "</div>"
+            "<span class='gd-state gd-state--%s'>%s</span>"
+            "<form class='inline' method='post' "
+            "action='/shield/rule/toggle'>"
+            "<input type='hidden' name='id' value='%d'>"
+            "<button type='submit' name='enabled' value='%s' "
+            "class='gd-strip-btn'>%s</button></form>"
+            "<form class='inline' method='post' "
+            "action='/shield/rule/delete' "
+            "onsubmit=\"return confirm('Delete this rule?')\">"
+            "<input type='hidden' name='id' value='%d'>"
+            "<button type='submit' class='gd-strip-btn'>Delete</button></form>"
+            "</div>"
+            % (escape(r["name"]), escape(r["key"]), _rule_schedule_text(r),
+               action_words.get(r["action"], escape(r["action"] or "")),
+               "on" if r["enabled"] else "off",
+               "On" if r["enabled"] else "Off",
+               r["id"], "0" if r["enabled"] else "1",
+               "Pause" if r["enabled"] else "Resume", r["id"]))
+    rules_html = "".join(rule_rows) or \
+        "<p class='note'>No rules yet &mdash; add one below and Shield " \
+        "will watch for it.</p>"
+
+    # One-tap starter rules: the empty state as onboarding. Only shown
+    # before the first rule exists; each chip posts the same fields as
+    # the form below, so /shield/rule/add needs no changes.
+    starters = []
+    if not rule_rows:
+        starters = [
+            ("No social at work", "No social at work", "category",
+             "social", "firm", "0,1,2,3,4", "09:00", "18:00"),
+            ("No video rabbit holes", "No video rabbit holes", "app",
+             "youtube.com", "soft", "all", "", ""),
+            ("Quiet evenings", "Quiet evenings", "category",
+             "entertainment", "soft", "all", "20:00", "23:00"),
+        ]
+    starters_html = "".join(
+        "<form class='inline' method='post' action='/shield/rule/add'>"
+        "<input type='hidden' name='name' value='%s'>"
+        "<input type='hidden' name='rule_type' value='%s'>"
+        "<input type='hidden' name='key' value='%s'>"
+        "<input type='hidden' name='action' value='%s'>"
+        "<input type='hidden' name='days' value='%s'>"
+        "<input type='hidden' name='start_time' value='%s'>"
+        "<input type='hidden' name='end_time' value='%s'>"
+        "<button type='submit' class='chip'>%s</button></form>"
+        % (escape(name), rtype, escape(key), action, escape(days),
+           escape(start), escape(end), escape(label))
+        for label, name, rtype, key, action, days, start, end in starters)
+    starters_block = (
+        "<p class='goal-starters-label'>Or start with one of these:</p>"
+        "<div class='goal-starters'>%s</div>" % starters_html
+    ) if starters_html else ""
+
+    rule_form = (
+        "<div class='card gd-create'><h3>Add a rule</h3>%s"
+        "<form method='post' action='/shield/rule/add' "
+        "class='sentence-form'>"
+        "<p class='sentence'>Block "
+        "<input type='text' name='key' required "
+        "placeholder='youtube.com or social' size='20' "
+        "aria-label='App, site or category'> "
+        "<select name='rule_type' aria-label='Rule type'>"
+        "<option value='app'>an app / website</option>"
+        "<option value='category'>a category</option></select> "
+        "<select name='days' aria-label='Days'>"
+        "<option value='all'>every day</option>"
+        "<option value='0,1,2,3,4'>weekdays</option>"
+        "<option value='5,6'>weekends</option></select> "
+        "<span class='nowrap'>from</span> "
+        "<input type='text' name='start_time' placeholder='09:00' size='5' "
+        "aria-label='From'> "
+        "<span class='nowrap'>to</span> "
+        "<input type='text' name='end_time' placeholder='18:00' size='5' "
+        "aria-label='To'> "
+        "<select name='action' aria-label='Action'>"
+        "<option value='soft'>just remind me</option>"
+        "<option value='firm'>remind + minimize</option>"
+        "<option value='hardcore'>minimize + 30s lock</option></select>"
+        "<span class='nowrap'>.</span></p>"
+        "<p><label class='sentence-name'>Name it "
+        "<input type='text' name='name' required "
         "placeholder='e.g. No social at work' size='24'></label></p>"
-        "<p><label>Type <select name='rule_type'>"
-        "<option value='app'>App / website</option>"
-        "<option value='category'>Category</option></select></label> "
-        "<label>Key <input type='text' name='key' required "
-        "placeholder='chrome.exe or twitter.com or social' size='24'>"
-        "</label></p>"
-        "<p class='note'>Key: for an app, the program name or website "
-        "(e.g. chrome.exe, youtube.com). For a category, one of: social, "
-        "entertainment, news, shopping, other.</p>"
-        "<p><label>Action <select name='action'>"
-        "<option value='soft'>Soft -- remind me</option>"
-        "<option value='firm'>Firm -- remind + minimize</option>"
-        "<option value='hardcore'>Hardcore -- minimize + 30 s lock"
-        "</option></select></label></p>"
-        "<p><label>Days <input type='text' name='days' value='all' "
-        "size='14'></label> <span class='note'>all, or e.g. 0,1,2,3,4 "
-        "for Mon-Fri (Mon=0, Sun=6)</span></p>"
-        "<p><label>From <input type='text' name='start_time' "
-        "placeholder='09:00' size='6'></label> "
-        "<label>To <input type='text' name='end_time' "
-        "placeholder='18:00' size='6'></label> "
-        "<span class='note'>24-hour HH:MM; empty = all day</span></p>"
-        "<p><button type='submit'>Add rule</button></p></form>")
+        "<p class='note'>Category keys: social, entertainment, news, "
+        "shopping, other. Leave the times empty for all day.</p>"
+        "<p><button type='submit'>Add rule</button></p></form></div>"
+        % starters_block)
 
     pass_html = (
+        "<div class='card'><h3>Emergency pass</h3>"
+        "<p class='note'>Need 5 minutes for something urgent? A pass "
+        "pauses the shield — it is always logged, so use it honestly."
+        "</p>"
         "<form method='post' action='/shield/pass'>"
         "<p><label>Minutes <input type='number' name='minutes' value='5' "
         "min='1' max='120' style='width:70px'></label> "
@@ -597,11 +791,14 @@ def shield_page():
                     p["started_at"]).strftime("%H:%M")
             except (ValueError, TypeError):
                 when = "?"
-            prows.append("<tr><td>%s</td><td>%s min</td><td>%s</td></tr>"
-                         % (when, p["minutes"],
-                            escape(p.get("reason") or "")))
-        pass_html += ("<table><tr><th>Started</th><th>Length</th>"
-                      "<th>Reason</th></tr>%s</table>" % "".join(prows))
+            prows.append(
+                "<div class='gd-strip gd-strip--quiet'>"
+                "<div class='gd-strip-main'><b>%s</b>"
+                "<span class='gd-strip-sub'>%s min &middot; %s</span></div>"
+                "</div>" % (when, p["minutes"],
+                             escape(p.get("reason") or "")))
+        pass_html += "".join(prows)
+    pass_html += "</div>"
 
     if blocks:
         brows = []
@@ -611,50 +808,30 @@ def shield_page():
             except (ValueError, TypeError):
                 when = "?"
             brows.append(
-                "<tr><td>%s</td><td>%s</td><td>%s</td><td>%s</td></tr>"
+                "<div class='gd-strip gd-strip--quiet'>"
+                "<div class='gd-strip-main'><b>%s</b>"
+                "<span class='gd-strip-sub'>%s &middot; %s &middot; "
+                "%s</span></div></div>"
                 % (when, escape(b.get("app") or ""),
                    escape(b.get("title") or "")[:60],
                    escape(b.get("action_taken") or "")))
-        blocks_html = ("<table><tr><th>Time</th><th>App</th><th>Window</th>"
-                       "<th>What happened</th></tr>%s</table>"
-                       % "".join(brows))
+        blocks_html = "".join(brows)
     else:
         blocks_html = ("<p class='note'>Nothing blocked today yet.</p>")
 
-    shield_state = "off" if killed else ("protected" if daemon else "off")
-    blocks_today_count = len(blocks)
-    hero_html = (
-        "<div class='page-hero'>"
-        "<div class='page-hero-text'>"
-        "<h1 class='page-title'>Shield</h1>"
-        "<p class='page-sub'>"
-        "<span>Status: <span class='badge badge--%s'>%s</span></span>"
-        "<span class='page-sub-dot'>&middot;</span>"
-        "<span><b>%d</b> distraction(s) blocked today</span>"
-        "<span class='page-sub-dot'>&middot;</span>"
-        "<span><b>%d</b> active rule(s)</span>"
-        "</p>"
-        "</div>"
-        "</div>" % (
-            shield_state,
-            "Protected" if shield_state == "protected" else "Inactive",
-            blocks_today_count, len(rules)
-        )
-    )
-
-
     body = (
-        "<div class='card'><h3>Shield status</h3>%s</div>"
-        "<div class='card'><h3>Always-on rules</h3>%s</div>"
-        "<div class='card'><h3>Emergency pass</h3>"
-        "<p class='note'>Need 5 minutes for something urgent? A pass "
-        "pauses the shield -- it is always logged, so use it honestly."
-        "</p>%s</div>"
-        "<div class='card'><h3>Blocked today</h3>%s</div>"
-        % (status_html, rules_html, pass_html, blocks_html)
+        "%s"
+        "<section class='gd-list'><h3>Rules</h3>%s</section>"
+        "%s"
+        "%s"
+        "<section class='gd-list'><h3>Blocked today</h3>%s</section>"
+        "<p class='how-it-works'>Shield watches the apps and sites you use "
+        "and steps in when a rule matches. A pass pauses it &mdash; every "
+        "pass is logged, so use it honestly.</p>"
+        % (pass_note, rules_html, rule_form, pass_html, blocks_html)
     )
-    return layout("Shield", body, active="shield", help_key="shield", hero=hero_html)
-
+    return layout("Shield", body, active="shield", help_key="shield",
+                  hero=hero_html)
 
 
 @app.route("/shield/rule/add", methods=["POST"])
@@ -705,7 +882,7 @@ def shield_pass():
     reason = (request.form.get("reason") or "").strip()
     if not reason:
         return layout("Shield",
-                      "<div class='card'><p><b>A reason is required</b> -- "
+                      "<div class='card'><p><b>A reason is required</b> — "
                       "that is the whole point of the pass.</p>"
                       "<p><a href='/shield'>Back</a></p></div>",
                       active="shield", help_key="shield"), 400
@@ -775,28 +952,28 @@ def intelligence_page():
     # --- card 1: chronotype ---
     type_labels = {"morning": "a morning person",
                    "evening": "a night owl",
-                   "balanced": "balanced -- no strong pattern yet"}
+                   "balanced": "balanced — no strong pattern yet"}
     if chrono["peak_hour"] is None:
-        chrono_html = ("<p class='note'>Not enough data yet -- keep "
+        chrono_html = ("<p class='note'>Not enough data yet — keep "
                        "tracking and your rhythm will appear here.</p>")
     else:
         if chrono["type"] == "morning":
-            advice = ("You do %.0f%% of your focused work before noon -- "
+            advice = ("You do %.0f%% of your focused work before noon — "
                       "schedule your hardest work in the morning."
                       % (chrono["morning_share"] * 100))
         elif chrono["type"] == "evening":
-            advice = ("You do %.0f%% of your focused work after 6pm -- "
+            advice = ("You do %.0f%% of your focused work after 6pm — "
                       "protect your evenings for deep work."
                       % (chrono["evening_share"] * 100))
         else:
-            advice = ("Your focus is spread through the day -- watch the "
+            advice = ("Your focus is spread through the day — watch the "
                       "rhythm grid below for your personal peaks.")
         chrono_html = (
             "<p>You are <b>%s</b>. Your peak hour is "
             "<b>%02d:00</b>.</p><p class='note'>%s</p>"
             % (type_labels[chrono["type"]], chrono["peak_hour"], advice))
     chrono_card = (
-        "<div class='card'><h3>Your chronotype</h3>%s"
+        "<div class='card in-insight'><h3>Your chronotype</h3>%s"
         "<details class='how'><summary>How we compute this</summary>"
         "<p class='note'>We add up your focused minutes (scores +1/+2) per "
         "hour over the last %d days, separately for each weekday. If 55%% "
@@ -823,9 +1000,11 @@ def intelligence_page():
             % (_WEEKDAY_NAMES[weekday], "".join(cells)))
     rhythm_card = (
         "<div class='card'><h3>Rhythm by weekday</h3>"
+        "<p class='in-caption'>Rows that glow green at the same hours are "
+        "your natural rhythm — schedule hard work there.</p>"
         "<p class='note'>Your Pulse per hour, one row per weekday. Green = "
         "focused, red = distracted. Last %d days.</p>"
-        "<table>%s</table>"
+        "<div class='in-grid-scroll'><table>%s</table></div>"
         "<details class='how'><summary>How we compute this</summary>"
         "<p class='note'>Each cell is the weighted Pulse for that "
         "weekday-hour across the last %d days. Hover a cell for the "
@@ -833,19 +1012,22 @@ def intelligence_page():
         % (intel_mod.CHRONOTYPE_DAYS, "".join(rhythm_rows),
            intel_mod.CHRONOTYPE_DAYS))
 
-    # --- card 3: peak windows ---
+    # --- card 3: peak windows (identical days folded together) ---
     if peaks:
+        seen = {}
+        for w in sorted(peaks):
+            key = (peaks[w][0]["start_hour"], peaks[w][0]["end_hour"])
+            seen.setdefault(key, []).append(_WEEKDAY_NAMES[w][:3])
         peak_items = "".join(
-            "<li><b>%s:</b> %02d:00 - %02d:00 (%.0f focus minutes)</li>"
-            % (_WEEKDAY_NAMES[w], peaks[w][0]["start_hour"],
-               peaks[w][0]["end_hour"], peaks[w][0]["focus_minutes"])
-            for w in sorted(peaks))
+            "<li><b>%02d:00 - %02d:00</b> &mdash; %s</li>"
+            % (s, e, ", ".join(days)) for (s, e), days in seen.items())
     else:
-        peak_items = "<li class='note'>Not enough data yet.</li>"
+        peak_items = ("<li class='note'>Your peak hours appear here "
+                      "after a few days of tracking.</li>")
     peaks_card = (
         "<div class='card'><h3>Protect these hours</h3>"
-        "<p class='note'>The 2-hour block where each weekday does its "
-        "best focused work. Guard these like meetings.</p>"
+        "<p class='in-caption'>Your 2-hour peak blocks. Guard these "
+        "like meetings.</p>"
         "<ul>%s</ul>"
         "<details class='how'><summary>How we compute this</summary>"
         "<p class='note'>For each weekday, the 2-hour window with the "
@@ -854,7 +1036,7 @@ def intelligence_page():
 
     # --- card 4: focus depth ---
     if depth["avg_longest"] is None:
-        depth_html = ("<p class='note'>No productive stretches yet -- "
+        depth_html = ("<p class='note'>No productive stretches yet — "
                       "your longest focused runs will appear here.</p>")
     else:
         ttf_str = ("%.0f min" % ttf) if ttf is not None else "--"
@@ -868,7 +1050,7 @@ def intelligence_page():
             % (depth["avg_longest"], depth["best_day"],
                depth["best_minutes"], ttf_str, switch_str))
     depth_card = (
-        "<div class='card'><h3>Focus depth</h3>%s"
+        "<div class='card in-insight'><h3>Focus depth</h3>%s"
         "<details class='how'><summary>How we compute this</summary>"
         "<p class='note'>A 'stretch' is unbroken productive time (scores "
         "+1/+2); gaps under 5 minutes don't break it. Time-to-first-focus "
@@ -879,7 +1061,7 @@ def intelligence_page():
     if anatomy["top"]:
         max_min = anatomy["top"][0]["minutes"]
         distractor_rows = "".join(
-            "<li><b>%s</b> -- %.1fh (%.0f%%)<br>"
+            "<li><b>%s</b> &mdash; %.1fh (%.0f%%)<br>"
             "<div style='background:#eee;height:8px;width:220px'>"
             "<div style='background:#e53935;height:8px;width:%d%%'>"
             "</div></div><span class='note'>e.g. %s</span></li>"
@@ -897,8 +1079,16 @@ def intelligence_page():
             for e in anatomy["entry_points"])
     else:
         entry_rows = "<li class='note'>No entry pattern found.</li>"
+    if anatomy["top"]:
+        top_app = anatomy["top"][0]
+        anatomy_caption = (
+            "<p class='in-caption'>%s is your biggest distractor — "
+            "%.0f%% of your distracting time goes there.</p>"
+            % (escape(top_app["app"]), top_app["share"]))
+    else:
+        anatomy_caption = ""
     anatomy_card = (
-        "<div class='card'><h3>What breaks your focus</h3>"
+        "<div class='card'><h3>What breaks your focus</h3>%s"
         "<p class='note'>Where your distracting time (-1/-2) goes, and "
         "which app you were using right before each distraction "
         "started.</p><ul>%s</ul><ul>%s</ul>"
@@ -906,7 +1096,7 @@ def intelligence_page():
         "<p class='note'>Distractors are apps scoring -1/-2. An 'entry "
         "point' is the app you were using right before a distraction "
         "block started.</p></details></div>"
-        % (distractor_rows, entry_rows))
+        % (anatomy_caption, distractor_rows, entry_rows))
 
     # --- card 6: week trends ---
     tw, lw, dl = (trends["this_week"], trends["last_week"],
@@ -937,7 +1127,6 @@ def intelligence_page():
         % (trends["this_label"], trends["last_label"], trend_rows))
 
     # --- card 7: interactive day timeline ---
-    prev_day = (date.fromisoformat(sel_day) - timedelta(days=1)).isoformat()
     hour_blocks = []
     for info in timeline["hours"]:
         hour = info["hour"]
@@ -966,30 +1155,27 @@ def intelligence_page():
             "</summary><table><tr><th>App</th><th>Title</th><th>Time</th>"
             "<th>Score</th></tr>%s</table></details>"
             % (quarters, hour, info["minutes"], pulse_str, act_rows))
+    if any(info["minutes"] > 0 for info in timeline["hours"]):
+        timeline_body = ("".join(hour_blocks))
+        timeline_note = ("Click any hour to see the activities inside it.")
+    else:
+        timeline_body = (
+            "<div class='in-empty'><p><b>Nothing tracked on this day "
+            "yet.</b></p></div>")
+        timeline_note = ""
     timeline_card = (
-        "<div class='card'><h3>Day timeline</h3>"
-        "<p class='note'>Showing <b>%s</b> -- "
-        "<a href='/intelligence?day=%s'>previous day</a> | "
-        "<a href='/intelligence'>today</a>. Click any hour to see the "
-        "activities inside it.</p>%s"
+        "<div class='card'><h3>Day timeline</h3>%s%s"
         "<details class='how'><summary>How we compute this</summary>"
         "<p class='note'>Each hour splits into 15-minute blocks, colored "
         "by the dominant score (green = productive, red = distracting). "
         "Expanding an hour lists the apps and titles in it.</p>"
         "</details></div>"
-        % (sel_day, prev_day, "".join(hour_blocks)))
+        % (("<p class='note'>%s</p>" % timeline_note) if timeline_note
+           else "", timeline_body))
 
     flow_res = intel_mod.flow_index(sel_day)
     ratio_buckets = intel_mod.day_ratio_buckets(sel_day)
     switches_res = intel_mod.switch_rate(sel_day)
-
-    if flow_res.get("score") is None:
-        # FLOW-1: Insufficient data (< 15 min) -> tri-state neutral, NEVER "Flow: 0"
-        flow_hero_str = (
-            "<b style='color:var(--ink-muted)'>&mdash; (tracking begins now)</b>"
-        )
-    else:
-        flow_hero_str = "<b>%d/100 (%s)</b>" % (flow_res["score"], flow_res["label"])
 
     tot_sec = sum(ratio_buckets.values())
     deep_pct = (
@@ -997,26 +1183,47 @@ def intelligence_page():
     )
     sw_hr = switches_res.get("per_hour")
     sw_str = ("%.1f / hr" % sw_hr) if sw_hr is not None else "--"
+    prev_day = (date.fromisoformat(sel_day) - timedelta(days=1)).isoformat()
+
+    if flow_res.get("score") is None:
+        # FLOW-1: Insufficient data (< 15 min) -> tri-state neutral, NEVER "Flow: 0"
+        flow_big = (
+            "<span class='in-flow-none'>&mdash; (tracking begins now)</span>"
+        )
+    else:
+        flow_big = ("<b>%d</b><span class='in-flow-max'>/100</span> "
+                    "<span class='in-flow-label'>%s</span>"
+                    % (flow_res["score"], escape(flow_res["label"])))
 
     hero_html = (
-        "<div class='page-hero'>"
+        "<div class='page-hero in-hero-page'>"
         "<div class='page-hero-text'>"
         "<h1 class='page-title'>Deep Time</h1>"
+        "<p class='in-big in-hero-num'>Flow Index %s</p>"
         "<p class='page-sub'>"
-        "<span>Flow Index: %s</span>"
-        "<span class='page-sub-dot'>&middot;</span>"
         "<span><b>%.0f%%</b> deep work</span>"
         "<span class='page-sub-dot'>&middot;</span>"
         "<span><b>%s</b> context switches</span>"
+        "<span class='page-sub-dot'>&middot;</span>"
+        "<span>Showing <b>%s</b> — "
+        "<a href='/intelligence?day=%s'>previous day</a> | "
+        "<a href='/intelligence'>today</a></span>"
         "</p>"
         "</div>"
-        "</div>" % (flow_hero_str, deep_pct, sw_str)
+        "</div>" % (flow_big, deep_pct, sw_str, escape(sel_day), prev_day)
     )
 
 
-    body = (chrono_card + rhythm_card + peaks_card + depth_card
-            + anatomy_card + trends_card + timeline_card
-            + _phase12_cards(sel_day))
+    p12 = _phase12_cards(sel_day)
+    footnote = (
+        "<p class='in-footnote'>Deep Time reads your tracked activity "
+        "and turns it into one number — the Flow Index. The cards below "
+        "show the pieces it is made of.</p>")
+    body = (p12["coach"] + chrono_card + p12["flow"]
+            + p12["depth_timeline"] + p12["donut"] + p12["recovery"]
+            + depth_card + anatomy_card + peaks_card + rhythm_card
+            + p12["trends"] + timeline_card + p12["report_link"]
+            + footnote)
     return layout("Deep time", body, active="intelligence", hero=hero_html)
 
 
@@ -1122,7 +1329,7 @@ def _svg_donut(buckets):
         parts.append(
             "<rect x='%d' y='%d' width='14' height='14' fill='%s'/>"
             "<text x='%d' y='%d' font-size='12' fill='#1f2328'>%s "
-            "-- %.0f min</text>"
+            "· %.0f min</text>"
             % (lx, y, color, lx + 20, y + 12, key.capitalize(),
                buckets.get(key, 0)))
     parts.append("</svg>")
@@ -1205,28 +1412,98 @@ def _svg_sparkline(values, labels=()):
 
 # ===================================== Phase 12 (v1.14.0) page cards ---
 
+_KNOWN_DISTRACTORS = ("youtube.com", "facebook.com", "instagram.com",
+                      "reddit.com", "twitter.com", "x.com", "tiktok.com",
+                      "netflix.com")
+
+
+def _coach_actions(title, body):
+    """Concrete next steps for a coaching card.
+
+    coaching_cards() returns only title/body, so actions are inferred
+    from its fixed templates:
+    - "Protect your peak: HH:MM-...": starter-style focus session.
+    - "Take meetings at HH:00-HH:00": next-step text (no scheduling
+      contract exists).
+    - "Tame <app>": a Shield rule, but only when the app matches a
+      known distractor domain.
+    - Fallback: plain next-step text.
+    """
+    no_data = "About 0% of your deep work" in body
+    if title.startswith("Protect your peak"):
+        m = re.search(r"(\d{2}):00", title)
+        hour = m.group(1) if m else None
+        if no_data:
+            return ("<p class='note'>Next step: this needs a few days of "
+                    "tracked time before it means anything.</p>")
+        return (
+            "<form class='inline' method='post' action='/focus/start'>"
+            "<input type='hidden' name='label' value='Peak window work'>"
+            "<input type='hidden' name='preset' value='50'>"
+            "<button type='submit' class='chip'>Start a 50-min focus "
+            "session</button></form>"
+            "<p class='note'>Next step: move one hard task into %s:00 "
+            "today.</p>" % (hour or "your peak"))
+    if title.startswith("Take meetings at"):
+        m = re.search(r"(\d{2}):00-(\d{2}):00", title)
+        if m:
+            return ("<p class='note'>Next step: move one recurring "
+                    "meeting into %s:00-%s:00.</p>"
+                    % (m.group(1), m.group(2)))
+        return ("<p class='note'>Next step: move one recurring meeting "
+                "into this window.</p>")
+    if title.startswith("Tame "):
+        app = title[5:].strip().lower()
+        if app and any(d in app for d in _KNOWN_DISTRACTORS):
+            return (
+                "<form class='inline' method='post' "
+                "action='/shield/rule/add'>"
+                "<input type='hidden' name='name' value='Tame %s'>"
+                "<input type='hidden' name='rule_type' value='app'>"
+                "<input type='hidden' name='key' value='%s'>"
+                "<input type='hidden' name='action' value='soft'>"
+                "<input type='hidden' name='days' value='0,1,2,3,4'>"
+                "<input type='hidden' name='start_time' value='09:00'>"
+                "<input type='hidden' name='end_time' value='18:00'>"
+                "<button type='submit' class='chip'>Cap it in work "
+                "hours</button></form>"
+                % (escape(app), escape(app)))
+        return ("<p class='note'>Next step: add it as a soft Shield rule "
+                "in work hours — Shield, Add a rule.</p>")
+    return ("<p class='note'>Next step: keep tracking for a few more days "
+            "to sharpen this.</p>")
+
+
 def _phase12_cards(sel_day):
-    """Build the Phase 12 analytics cards HTML for /intelligence."""
+    """Build the Phase 12 analytics cards HTML for /intelligence.
+
+    Returns a dict of named cards so the page can order them by
+    importance (advice first, detail after).
+    """
     from focuscore import intelligence as intel_mod
     from focuscore import chronotype as chrono_mod
 
     flow = intel_mod.flow_index(sel_day)
     delta_txt = ""
     if flow["wow_delta"] is not None:
-        arrow = "▲" if flow["wow_delta"] >= 0 else "▼"
+        arrow = ("▲" if flow["wow_delta"] > 0 else
+                 "▼" if flow["wow_delta"] < 0 else "=")
         delta_txt = ("<p class='note'>%s %d vs last 7 days</p>"
                      % (arrow, abs(flow["wow_delta"])))
     if flow["score"] is None:
         flow_card = (
-            "<div class='card'><h3>Flow Index -- %s</h3>"
+            "<div class='card in-flow'><h3>Flow Index · %s</h3>"
             "<p><b>Insufficient Data</b></p><p class='note'>%s</p></div>"
             % (escape(sel_day), escape(flow["note"] or "")))
     else:
         flow_card = (
-            "<div class='card'><h3>Flow Index -- %s</h3>"
+            "<div class='card in-flow'><h3>Flow Index · %s</h3>"
             "<p style='font-size:42px;font-weight:bold;margin:4px 0'>%d"
-            "<span style='font-size:16px;color:#57606a'>/100</span></p>"
+            "<span style='font-size:16px;color:var(--ink-muted)'>/100</span></p>"
             "<p><b>%s</b></p>%s"
+            "<p class='in-caption'>One number for the whole day: deep-work "
+            "share, how fast you reach focus, and how little you switch."
+            "</p>"
             "<p class='note'>Deep work %d pts + steadiness %d pts + "
             "low switching %d pts.</p>"
             "<details class='how'><summary>How we compute this</summary>"
@@ -1257,17 +1534,27 @@ def _phase12_cards(sel_day):
         except (ValueError, TypeError, KeyError):
             continue
     timeline_card = (
-        "<div class='card'><h3>24-hour depth timeline -- %s</h3>%s"
+        "<div class='card'><h3>24-hour depth timeline · %s</h3>%s"
+        "<p class='in-caption'>The thickest bar is your deepest working "
+        "hour.</p>"
         "<p class='note'>Green = deep/productive, grey = neutral, "
-        "orange/red = distraction. Yellow band = your peak window. "
-        "Blue dashed boxes = focus sessions.</p></div>"
+        "orange/red = distraction.</p></div>"
         % (escape(sel_day),
            _svg_depth_timeline(hours, peak=peak, sessions=sessions)))
 
     buckets = intel_mod.day_ratio_buckets(sel_day)
+    _tot = sum(buckets.values())
+    if _tot > 0:
+        _deep_pct = buckets.get("deep", 0.0) / _tot * 100.0
+        donut_caption = (
+            "<p class='in-caption'>%.0f%% of the day was deep work.</p>"
+            % _deep_pct)
+    else:
+        donut_caption = (
+            "<p class='in-caption'>Nothing tracked for this day yet.</p>")
     donut_card = (
-        "<div class='card'><h3>Deep vs shallow -- %s</h3>%s</div>"
-        % (escape(sel_day), _svg_donut(buckets)))
+        "<div class='card'><h3>Deep vs shallow · %s</h3>%s%s</div>"
+        % (escape(sel_day), donut_caption, _svg_donut(buckets)))
 
     rec = intel_mod.recovery_cost(sel_day)
     friction = "".join(
@@ -1275,23 +1562,30 @@ def _phase12_cards(sel_day):
         % (escape(f["app"]), f["minutes"])
         for f in rec["top_friction"])
     recovery_card = (
-        "<div class='card'><h3>Distraction recovery cost -- %s</h3>"
+        "<section class='in-strip'><h3>Distraction recovery cost · "
+        "%s</h3>"
         "<p>About <b>%d minutes</b> lost to context recovery today "
         "(%d switches, %d distraction blocks).</p>"
         "<p class='note'>Rule of thumb: each switch costs ~1 minute, "
         "each distraction block ~10 minutes to get back into flow.</p>"
-        "%s</div>"
+        "%s</section>"
         % (escape(sel_day), rec["recovery_minutes"], rec["switches"],
            rec["distraction_blocks"],
            ("<ul>%s</ul>" % friction) if friction
-           else "<p class='note'>No friction apps today.</p>"))
+           else "<p class='note'>No friction apps today — a clean, "
+                "focused day.</p>"))
 
     coach = intel_mod.coaching_cards()
     coach_items = "".join(
-        "<div class='coach'><b>%s</b><p>%s</p></div>"
-        % (escape(c["title"]), escape(c["body"])) for c in coach)
-    coach_card = ("<div class='card'><h3>Coaching for tomorrow</h3>%s"
-                  "</div>" % coach_items)
+        "<div class='in-advice-card'><b>%s</b><p>%s</p>%s</div>"
+        % (escape(c["title"]), escape(c["body"]),
+           _coach_actions(c["title"], c["body"]))
+        for c in coach)
+    coach_card = (
+        "<div class='in-advice-head'><h2>Coaching for tomorrow</h2>"
+        "<p class='in-caption'>Advice from your last 28 days. Each card "
+        "has a concrete next step.</p></div>"
+        "<div class='in-advice'>%s</div>" % coach_items)
 
     trends = intel_mod.week_flow_trends()
     trend_txt = ("<p>This week: <b>%.1f</b>%s</p>"
@@ -1306,7 +1600,9 @@ def _phase12_cards(sel_day):
     heat = intel_mod.switch_heatmap_7x24(
         today_d - timedelta(days=27), today_d)
     trends_card = (
-        "<div class='card'><h3>Week trends</h3>%s%s"
+        "<div class='card'><h3>Week trends</h3>"
+        "<p class='in-caption'>Seven-day rolling trend: are you going "
+        "deeper or shallower?</p>%s%s"
         "<h4>Context switches by weekday and hour (4 weeks)</h4>%s"
         "</div>" % (trend_txt, spark, _svg_heatmap(heat)))
 
@@ -1316,8 +1612,10 @@ def _phase12_cards(sel_day):
         "Deep Work Intelligence Report</a> -- clean print layout, no "
         "scripts.</p></div>" % escape(sel_day))
 
-    return (flow_card + timeline_card + donut_card + recovery_card
-            + coach_card + trends_card + report_link)
+    return {"flow": flow_card, "depth_timeline": timeline_card,
+            "donut": donut_card, "recovery": recovery_card,
+            "coach": coach_card, "trends": trends_card,
+            "report_link": report_link}
 
 
 @app.route("/intelligence/report")
@@ -1340,7 +1638,7 @@ def intelligence_report():
         flow_big = ("<p><b>Insufficient Data</b></p><p>%s</p>"
                     % escape(flow["note"] or ""))
     else:
-        flow_big = ("<p style='font-size:36px;font-weight:bold'>%d/100 -- "
+        flow_big = ("<p style='font-size:36px;font-weight:bold'>%d/100 · "
                     "%s</p>" % (flow["score"], escape(flow["label"])))
     buckets = intel_mod.day_ratio_buckets(sel_day)
     hours = intel_mod.day_hourly_depth(sel_day)
@@ -1351,11 +1649,24 @@ def intelligence_report():
     coach = intel_mod.coaching_cards()
     trends = intel_mod.week_flow_trends()
 
+    def _print_step(card):
+        # Print-safe next step: strip the form markup, keep the words.
+        html = _coach_actions(card["title"], card["body"])
+        text = re.sub(r"\s+", " ",
+                      re.sub(r"<[^>]*>", " ", html)).strip()
+        parts = [p.strip().rstrip(".") for p in text.split("Next step:")
+                 if p.strip()]
+        parts = [p[0].upper() + p[1:] if p else p for p in parts]
+        return ". ".join(parts) + ("." if parts else "")
+
     coach_html = "".join(
-        "<div class='coach'><h4>%s</h4><p>%s</p></div>"
-        % (escape(c["title"]), escape(c["body"])) for c in coach)
+        "<div class='coach'><h4>%s</h4><p>%s</p>"
+        "<p class='note'>Next step: %s</p></div>"
+        % (escape(c["title"]), escape(c["body"]),
+           escape(_print_step(c)))
+        for c in coach)
     friction = "".join(
-        "<li>%s -- %.0f min</li>" % (escape(f["app"]), f["minutes"])
+        "<li>%s &mdash; %.0f min</li>" % (escape(f["app"]), f["minutes"])
         for f in rec["top_friction"])
     trend_line = ("Week mean %.1f%s"
                   % (trends["this_week"]["mean"],
@@ -1365,12 +1676,51 @@ def intelligence_report():
 
     from focuscore import __version__ as focuscore_version
 
+    tot_sec = sum(buckets.values())
+    if tot_sec > 0:
+        donut_caption = (
+            "<p class='caption'>%.0f%% of the day was deep work.</p>"
+            % (buckets.get("deep", 0.0) / tot_sec * 100.0))
+    else:
+        donut_caption = ""
+    if tot_sec == 0:
+        main_body = (
+            "<div class='empty'><p><b>Nothing tracked for this day "
+            "yet.</b></p><p>Your first report lands after a full day of "
+            "tracking. Come back tomorrow.</p></div>")
+    else:
+        main_body = (
+            "<div class='hero'><h3>Flow Index · %s</h3>%s"
+            "<p class='caption'>One number for the whole day: deep-work "
+            "share, how fast you reach focus, and how little you "
+            "switch.</p></div>"
+            "<div class='card'><h3>24-hour depth timeline</h3>"
+            "<p class='caption'>The thickest bar is your deepest working "
+            "hour.</p>%s</div>"
+            "<div class='card'><h3>Deep vs shallow</h3>%s%s</div>"
+            "<div class='card'><h3>Recovery cost</h3>"
+            "<p><b>%d minutes</b> lost to context recovery "
+            "(%d switches, %d distraction blocks).</p>"
+            "<p class='note'>Rule of thumb: each switch costs ~1 minute, "
+            "each distraction block ~10 minutes to get back into "
+            "flow.</p><ul>%s</ul></div>"
+            "<div class='card'><h3>Coaching</h3>%s</div>"
+            "<div class='card'><h3>Week trend</h3><p>%s</p>%s</div>"
+            % (escape(sel_day), flow_big,
+               _svg_depth_timeline(hours, peak=peak),
+               donut_caption, _svg_donut(buckets),
+               rec["recovery_minutes"], rec["switches"],
+               rec["distraction_blocks"], friction, coach_html,
+               escape(trend_line),
+               _svg_sparkline([d["score"] for d in trends["daily"]],
+                              [d["day"] for d in trends["daily"]])))
+
     return (
         "<!DOCTYPE html><html><head><meta charset='utf-8'>"
         "<meta http-equiv=\"Content-Security-Policy\" content=\""
         "default-src 'none'; style-src 'unsafe-inline'; img-src data:; "
         "font-src data:;\">"
-        "<title>Deep Work Intelligence Report -- %s</title>"
+        "<title>Deep Work Intelligence Report &mdash; %s</title>"
         "<style>"
         "body{font-family:system-ui,sans-serif;max-width:900px;"
         "margin:24px auto;padding:0 16px;color:#1f2328}"
@@ -1378,34 +1728,28 @@ def intelligence_report():
         "margin:16px 0;break-inside:avoid}"
         ".coach{background:#f6f8fa;border-radius:8px;padding:12px;"
         "margin:8px 0}"
+        ".hero{border:1px solid #d0d7de;border-radius:8px;padding:20px;"
+        "margin:16px 0;background:#f6f8fa;break-inside:avoid}"
+        ".caption{color:#57606a;font-style:italic;font-size:13px}"
+        ".empty{border:1px dashed #d0d7de;border-radius:8px;padding:24px;"
+        "margin:16px 0;text-align:center}"
+        ".footnote{color:#57606a;font-size:13px;margin-top:24px}"
         "h1{font-size:26px}h3{margin-top:0}"
         ".note{color:#57606a;font-size:13px}"
         "@media print{.noprint{display:none}"
         "body{margin:0;max-width:none;-webkit-print-color-adjust:exact;"
-        "print-color-adjust:exact}.card{box-shadow:none}}"
+        "print-color-adjust:exact}.card{box-shadow:none}.hero{box-shadow:none}}"
         "</style></head><body>"
         "<h1>Deep Work Intelligence Report</h1>"
         "<p class='noprint'><a href='/intelligence'>Back to Deep time"
         "</a> | Print via your browser (Ctrl+P).</p>"
-        "<div class='card'><h3>Flow Index -- %s</h3>%s"
-        "<p>%s</p></div>"
-        "<div class='card'><h3>24-hour depth timeline</h3>%s</div>"
-        "<div class='card'><h3>Deep vs shallow</h3>%s</div>"
-        "<div class='card'><h3>Recovery cost</h3>"
-        "<p><b>%d minutes</b> lost to context recovery "
-        "(%d switches, %d distraction blocks).</p><ul>%s</ul></div>"
-        "<div class='card'><h3>Coaching</h3>%s</div>"
-        "<div class='card'><h3>Week trend</h3><p>%s</p>%s</div>"
+        "%s"
+        "<p class='footnote'>This report reads your tracked activity "
+        "automatically — nothing to fill in. Details below explain how "
+        "each part is computed.</p>"
         "<footer class='note'>Generated: %s · Focus Core v%s · "
         "Schema v9</footer>"
         "</body></html>"
-        % (escape(sel_day), escape(sel_day), flow_big,
-           trend_line,
-           _svg_depth_timeline(hours, peak=peak),
-           _svg_donut(buckets), rec["recovery_minutes"],
-           rec["switches"], rec["distraction_blocks"], friction,
-           coach_html, escape(trend_line),
-           _svg_sparkline([d["score"] for d in trends["daily"]],
-                           [d["day"] for d in trends["daily"]]),
+        % (escape(sel_day), main_body,
            datetime.now().isoformat(timespec="seconds"),
            focuscore_version))

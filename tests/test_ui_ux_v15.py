@@ -12,9 +12,8 @@ from focuscore import store
 import dashboard.app as dash_app
 from dashboard.app import layout, NAV_LINKS
 from dashboard.routes.focus import (
-    _svg_ring,
-    _depth_pill,
-    _DEPTH_COLORS,
+    _fc_depth_strip,
+    _fc_ring_card,
 )
 
 
@@ -89,53 +88,49 @@ def test_theme_post_route(tmp_path, monkeypatch):
 
 
 def test_qwen_mb_pulse_inversion_and_depth_mapping():
-    """Verify Qwen M-B depth->amplitude mapping and SVG ring attributes.
-
-    Qwen M-B Mandate:
-    - Raw score written to data-depth-score
-    - CSS transfer function: --pulse-amp: calc(1 - var(--depth, 0))
-    - Clamped depth: surface=0.0, deep=0.5, flow=1.0, unmeasured=0.0
-    - Gray = unmeasured (FLOW-1 satisfied)
-    - Full ARIA string present without aria-live
+    """Verify the Focus craft depth strip: plain-English label per state,
+    state color carried by the meter bar only (never the text), and the
+    unmeasured state reads as 'Measuring focus' — never a failure red.
     """
-    # Surface
-    html_surf = _svg_ring(1500, 1500, depth="surface")
-    assert "data-depth-score='0.0'" in html_surf
-    assert "aria-label='Surface focus" in html_surf
-    assert "data-pulse" in html_surf
-    assert "<line " in html_surf  # tick marks present
+    depth = {"state": "surface", "switches_15m": 0, "uninterrupted_min": 2.0}
 
-    # Deep
-    html_deep = _svg_ring(750, 1500, depth="deep")
-    assert "data-depth-score='0.5'" in html_deep
-    assert "aria-label='Deep work" in html_deep
+    surf = _fc_depth_strip("s1", {**depth, "state": "surface"})
+    assert "Surface focus" in surf
+    assert "#94a3b8" in surf  # slate state color lives in the meter
 
-    # Flow
-    html_flow = _svg_ring(300, 1500, depth="flow")
-    assert "data-depth-score='1.0'" in html_flow
-    assert "aria-label='Flow state" in html_flow
+    deep = _fc_depth_strip("s1", {**depth, "state": "deep"})
+    assert "Deep work" in deep
 
-    # Unmeasured (FLOW-1 Tri-state)
-    html_unm = _svg_ring(0, 1500, depth="unmeasured")
-    assert "data-depth-score='0.0'" in html_unm
-    assert "aria-label='Focus not yet measured" in html_unm
-    assert _DEPTH_COLORS["unmeasured"][0] == "#64748b"  # slate, not failure red
+    flow = _fc_depth_strip("s1", {**depth, "state": "flow"})
+    assert "Flow state" in flow
+    assert "#22c55e" in flow  # accent meter for flow
+
+    unm = _fc_depth_strip("s1", {**depth, "state": "unmeasured"})
+    assert "Measuring focus" in unm
+    assert "#64748b" in unm  # slate, not failure red
+    assert "fc-depth-label" in unm
+    # No aria-live chatter: the poll only swaps the label text.
+    assert "aria-live" not in unm
 
 
 def test_merlin_break_pill_refinement():
-    """Verify Merlin directive: on break, pill shows '☕ On Break' without score."""
-    # Active focus pill
+    """Verify the craft directive: on break, the depth strip shows a plain
+    'On break' label with no scores and no emoji; work mode shows the
+    plain-English state plus the switch count."""
+    # Active focus strip
     depth_data = {"state": "flow", "switches_15m": 1, "uninterrupted_min": 25.0}
-    pill_work = _depth_pill("sess1", depth_data, on_break=False)
-    assert "Flow State" in pill_work
-    assert "1 app switch" in pill_work
+    strip_work = _fc_depth_strip("sess1", depth_data, on_break=False)
+    assert "Flow state" in strip_work
+    assert "1 app switch" in strip_work
 
-    # Break mode pill
-    pill_break = _depth_pill("sess1", depth_data, on_break=True)
-    assert "On Break" in pill_break
-    assert "is-break" in pill_break
-    assert "Resting your focus rhythm" in pill_break
-    assert "app switch" not in pill_break  # number removed per Merlin directive
+    # Break mode strip
+    strip_break = _fc_depth_strip("sess1", depth_data, on_break=True)
+    assert "On break" in strip_break
+    assert "Resting your focus rhythm" in strip_break
+    assert "app switch" not in strip_break  # number removed per directive
+    # No emoji icons anywhere on the craft page.
+    for glyph in ("\u2615", "\U0001f3c5", "\U0001f389", "\U0001f507"):
+        assert glyph not in strip_break, glyph
 
 
 
@@ -181,8 +176,8 @@ def test_shield_and_intelligence_heroes(tmp_path, monkeypatch):
     res_shield = client.get("/shield")
     assert res_shield.status_code == 200
     html_s = res_shield.get_data(as_text=True)
-    assert "<h1 class='page-title'>Shield</h1>" in html_s
-    assert "distraction(s) blocked today" in html_s
+    assert "Shield is " in html_s  # Guard batch: dominant on/off hero
+    assert "blocked today" in html_s
 
     # Deep Time hero (FLOW-1 Tri-state)
     res_intel = client.get("/intelligence")
@@ -318,15 +313,18 @@ def test_qwen_rv7_whcm_and_depth_truth_table():
     assert "stroke: GrayText;" in css
     assert "fill: CanvasText;" in css
 
-    # Depth mapping truth table
-    s_ring = _svg_ring(100, 100, depth="surface")
-    assert "data-depth-score='0.0'" in s_ring
+    # Depth mapping truth table (craft strip, not the old SVG ring)
+    s_ring = _fc_depth_strip("s", {"state": "surface", "switches_15m": 0,
+                                  "uninterrupted_min": 1.0})
+    assert "Surface focus" in s_ring
 
-    d_ring = _svg_ring(50, 100, depth="deep")
-    assert "data-depth-score='0.5'" in d_ring
+    d_ring = _fc_depth_strip("s", {"state": "deep", "switches_15m": 0,
+                                  "uninterrupted_min": 10.0})
+    assert "Deep work" in d_ring
 
-    f_ring = _svg_ring(20, 100, depth="flow")
-    assert "data-depth-score='1.0'" in f_ring
+    f_ring = _fc_depth_strip("s", {"state": "flow", "switches_15m": 0,
+                                  "uninterrupted_min": 20.0})
+    assert "Flow state" in f_ring
 
 
 def test_qwen_rv8_hygiene_trio():
@@ -336,10 +334,12 @@ def test_qwen_rv8_hygiene_trio():
     win32_tests = pathlib.Path("tests/test_win32.py").read_text(encoding="utf-8")
     assert 'reason="graceful-degradation checks are for non-Windows"' in win32_tests
 
-    # (b) Coffee emoji wrapped in aria-hidden
+    # (b) No emoji icons on the craft Focus page — break strip included
     depth_data = {"state": "flow", "switches_15m": 0, "uninterrupted_min": 10.0}
-    pill = _depth_pill("s1", depth_data, on_break=True)
-    assert "<span aria-hidden='true'>\u2615</span> On Break" in pill
+    strip = _fc_depth_strip("s1", depth_data, on_break=True)
+    assert "On break" in strip
+    for glyph in ("\u2615", "\U0001f3c5", "\U0001f389", "\U0001f507"):
+        assert glyph not in strip, glyph
 
     # (c) Token-swap transition scoped to color properties (NOT transition: all)
     css = pathlib.Path("dashboard/static/style.css").read_text(encoding="utf-8")

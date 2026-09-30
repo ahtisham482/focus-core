@@ -18,6 +18,7 @@ from dashboard.app import (
     _alert_target_text,
     _goal_manage_buttons,
     _goal_progress_html,
+    _living_tabs,
     _parse_day,
     day_page,
     home_page,
@@ -51,24 +52,30 @@ def welcome():
     info = WELCOME_STEPS[step - 1]
 
     dots = "".join(
-        "<div class='step%s'>%d</div>" % (" now" if i == step else "", i)
+        "<span class='hm-dot%s' aria-hidden='true'>%d</span>"
+        % (" on" if i == step else "", i)
         for i in range(1, len(WELCOME_STEPS) + 1))
 
     if step < len(WELCOME_STEPS):
-        action = ("<p><a class='btn' href='/welcome?step=%d'>Next</a></p>"
+        action = ("<p class='hm-welcome-actions'>"
+                  "<a class='hm-btn' href='/welcome?step=%d'>Next</a></p>"
                   % (step + 1))
     else:
         action = (
+            "<div class='hm-welcome-actions'>"
             "<form method='post' action='/welcome/finish' class='inline'>"
             "<input type='hidden' name='next' value='/activities'>"
-            "<button type='submit'>Review my activities</button></form> "
+            "<button type='submit' class='hm-btn'>Review my activities</button>"
+            "</form> "
             "<form method='post' action='/welcome/finish' class='inline'>"
             "<input type='hidden' name='next' value='/'>"
-            "<button type='submit' class='secondary'>Skip for now</button>"
-            "</form>")
+            "<button type='submit' class='hm-btn-ghost'>Skip for now</button>"
+            "</form></div>")
 
-    check_html = ("<p class='note'><b>Check:</b> %s</p>" % escape(info["check"])
+    check_html = ("<p class='hm-check'><b>Check:</b> %s</p>" % escape(info["check"])
                   if info["check"] else "")
+    todo_html = ("<p class='hm-todo'>%s</p>" % escape(info["todo"])
+                 if info.get("todo") else "")
     extra_html = ""
     if step == 2:
         # The ActivityWatch step adapts to reality: a green confirmation
@@ -79,12 +86,18 @@ def welcome():
         aw_state = aw_mod.detection_state(status=aw_status)
         extra_html = ob_mod.welcome_step_html(
             aw_state, version=aw_status.get("version"))
+    icon_html = (
+        "<svg class='hm-wicon' width='44' height='44' aria-hidden='true'>"
+        "<use href='/static/icons.svg#icon-%s'/></svg>" % info["icon"])
     body = (
-        "<div class='card'><div class='steps'>%s</div>"
-        "<div class='big-emoji'>%s</div><h2>%s</h2><p>%s</p>%s%s%s</div>"
-        % (dots, info["emoji"], escape(info["title"]),
-           escape(info["text"]), check_html, extra_html, action))
-    return layout("Welcome", body, refresh=3600, help_key="welcome")
+        "<div class='hm-wrap'><div class='hm-welcome'>"
+        "<div class='hm-dots' aria-label='Step %d of %d'>%s</div>"
+        "%s<h2 class='hm-wtitle'>%s</h2><p class='hm-wtext'>%s</p>"
+        "%s%s%s%s"
+        "</div></div>"
+        % (step, len(WELCOME_STEPS), dots, icon_html, escape(info["title"]),
+           escape(info["text"]), check_html, todo_html, extra_html, action))
+    return layout("Welcome", body, refresh=3600, help_key="welcome", hero="")
 
 
 @app.route("/setup/activitywatch")
@@ -115,7 +128,7 @@ def help_article(key):
     article = help_mod.get_article(key)
     if article is None:
         body = ("<div class='card'><p>There's no help article for "
-                "'%s' yet -- here is everything we have:</p></div>"
+                "'%s' yet — here is everything we have:</p></div>"
                 % escape(key)) + help_mod.index_html()
         return layout("Help", body, active="help")
     return layout(article["title"] + " - Help", help_mod.article_html(key),
@@ -178,15 +191,55 @@ def activities():
                (row["duration"] or 0) / 60.0,
                day, escape(row["match_key"] or ""), options)
         )
+    # --- today's story: one human sentence from the raw rows ---
+    story_html = ""
+    if rows:
+        mins = {2: 0.0, 1: 0.0, 0: 0.0, -1: 0.0, -2: 0.0}
+        for row in rows:
+            mins[row.get("score") or 0] += (row.get("duration") or 0) / 60.0
+
+        def _h(m):
+            return ("%.1f hours" % (m / 60.0)) if m >= 90 \
+                else ("%d minutes" % round(m))
+
+        parts = []
+        if mins[2]:
+            parts.append("%s of focused work" % _h(mins[2]))
+        if mins[1]:
+            parts.append("%s of other work" % _h(mins[1]))
+        if mins[-1] + mins[-2]:
+            parts.append("%s of personal and distracting time"
+                         % _h(mins[-1] + mins[-2]))
+        if mins[0] and not parts:
+            parts.append("%s of neutral time" % _h(mins[0]))
+        total = sum(mins.values())
+        story_html = (
+            "<div class='wk-story' role='status'>Today you tracked "
+            "<b>%s</b>%s.</div>"
+            % (_h(total), (": " + ", ".join(parts)) if parts else ""))
+    else:
+        story_html = (
+            "<p class='wk-empty'>Nothing tracked this day yet. Once "
+            "ActivityWatch records your day, every app and site shows up "
+            "here with a score you can correct.</p>")
+
     body = (
-        "<div class='card'><h3>Activities -- %s</h3>"
-        "<p class='note'>Setting a score here overrides the category default "
-        "for this activity, today and on future days.</p>"
-        "<table><tr><th>Time</th><th>Title</th><th>App</th><th>Site</th>"
-        "<th>Category</th><th>Min</th><th>Score override</th></tr>%s</table></div>"
-        % (day, "".join(body_rows)
-           or "<tr><td colspan='7' class='note'>"
-              "No activities stored for this day.</td></tr>")
+        "%s"
+        "<form class='wk-daybar' method='get' action='/activities'>"
+        "<label>Day <input type='date' name='day' value='%s'></label> "
+        "<button type='submit' class='secondary'>Show</button></form>"
+        "<section class='wk-section'><h2>What you did</h2>"
+        "<div class='wk-strip'><table>"
+        "<tr><th>Time</th><th>Title</th><th>App</th><th>Site</th>"
+        "<th>Category</th><th>Min</th><th>Score override</th></tr>%s</table>"
+        "</div></section>"
+        "<p class='how-it-works'>Setting a score here overrides the "
+        "category default for this activity, today and on future days. "
+        "Teach Focus Core once and it remembers.</p>"
+        % (story_html, day, "".join(body_rows)
+           if body_rows else
+           "<tr><td colspan='7' class='note'>"
+           "No activities stored for this day.</td></tr>")
     )
     return layout("Activities " + day, body, day, active="review")
 
@@ -219,7 +272,8 @@ def goals_page():
             % (_goal_progress_html(ev, wrap=False),
                _goal_manage_buttons(goal)))
     goals_html = "".join(rows) or \
-        "<p class='note'>No goals yet -- add your first one below.</p>"
+        "<p class='note'>Nothing here yet &mdash; your goals will appear " \
+        "here as today unfolds.</p>"
 
     categories = sorted(store.get_categories().keys())
     target_options = (
@@ -228,28 +282,67 @@ def goals_page():
                 % (escape(c), escape(c)) for c in categories
                 if c != "Uncategorized"))
 
+    # One-tap starter goals: the empty state as onboarding. Only shown
+    # before the first goal exists; each chip posts the same fields as
+    # the form below, so /goals/add needs no changes.
+    starters = []
+    if not rows:
+        def _starter_cat(*words):
+            for c in categories:
+                cl = c.lower()
+                if any(w in cl for w in words):
+                    return c
+            return None
+        dev_cat = _starter_cat("develop", "design", "business", "writ")
+        social_cat = _starter_cat("social", "entertain", "news", "video")
+        if dev_cat:
+            starters.append(("4h deep work", "Deep work", "more_than",
+                              "category:" + dev_cat, "240"))
+        if social_cat:
+            starters.append(("Under 1h social", "Less social media",
+                              "less_than", "category:" + social_cat, "60"))
+        starters.append(("Pulse above 70", "Strong day", "more_than",
+                          "pulse", "70"))
+    starters_html = "".join(
+        "<form class='inline' method='post' action='/goals/add'>"
+        "<input type='hidden' name='name' value='%s'>"
+        "<input type='hidden' name='direction' value='%s'>"
+        "<input type='hidden' name='target' value='%s'>"
+        "<input type='hidden' name='threshold' value='%s'>"
+        "<button type='submit' class='chip'>%s</button></form>"
+        % (escape(name), direction, escape(target), threshold, escape(label))
+        for label, name, direction, target, threshold in starters)
+    starters_block = (
+        "<p class='goal-starters-label'>Or start with one of these:</p>"
+        "<div class='goal-starters'>%s</div>" % starters_html
+    ) if starters_html else ""
+
     body = (
-        "<div class='card'><h3>Today's progress</h3>%s"
-        "<p class='note'>Progress is live: this page refreshes every 5 minutes "
-        "and re-reads today's tracked data on every load.</p></div>"
-        "<div class='card'><h3>Add a goal</h3>"
-        "<form method='post' action='/goals/add'>"
-        "<p><label>Name <input type='text' name='name' required "
+        "<div class='card goal-create'><h3>Add a goal</h3>%s"
+        "<form method='post' action='/goals/add' class='sentence-form'>"
+        "<p class='sentence'>I want "
+        "<select name='direction' aria-label='Direction'>"
+        "<option value='more_than' selected>more than</option>"
+        "<option value='less_than'>less than</option></select> "
+        "<input type='number' name='threshold' min='0' step='0.5' required "
+        "placeholder='e.g. 240' aria-label='Amount'> "
+        "<select name='target' aria-label='Target'>%s</select> "
+        "<span class='nowrap'>each day.</span></p>"
+        "<p><label class='sentence-name'>Name it "
+        "<input type='text' name='name' required "
         "placeholder='e.g. Deep work' size='24'></label></p>"
-        "<p><label><input type='radio' name='direction' value='more_than' "
-        "checked> More than</label> "
-        "<label><input type='radio' name='direction' value='less_than'> "
-        "Less than</label></p>"
-        "<p><label>Target <select name='target'>%s</select></label> "
-        "<label>Amount <input type='number' name='threshold' min='0' "
-        "step='0.5' required style='width:90px'></label> "
-        "<span class='note'>minutes for a category, 0-100 for Pulse</span></p>"
-        "<p><label><input type='checkbox' name='pinned' value='1'> "
-        "Pin to the top of the Today page</label></p>"
+        "<p class='note'>Minutes for a category, 0&ndash;100 for Pulse.</p>"
         "<p><button type='submit'>Add goal</button></p>"
         "</form></div>"
-        % (goals_html, target_options)
+        "<section class='progress-strip'><h3>Today's progress</h3>%s"
+        "<p class='note'>Live: this page re-reads today's tracked data on "
+        "every load.</p></section>"
+        "<p class='how-it-works'>Goals watch today's tracked time and update "
+        "by themselves. Pin one to see it on the Today page.</p>"
+        % (starters_block, target_options, goals_html)
     )
+    body += ("<div class='hm-tabspace' aria-hidden='true'></div>"
+             + _living_tabs("goals"))
     return layout("Goals", body, active="goals")
 
 
@@ -316,72 +409,122 @@ def alerts_page():
     alert_rows = []
     for alert in store.list_alerts():
         alert_rows.append(
-            "<tr><td><b>%s</b><br><span class='note'>%s</span></td>"
-            "<td>%s</td><td>%.0f min</td><td>%.0f min</td>"
-            "<td><form class='inline' method='post' action='/alerts/toggle'>"
+            "<div class='gd-strip'>"
+            "<div class='gd-strip-main'><b>%s</b>"
+            "<span class='gd-strip-sub'>%s &middot; past %.0f min "
+            "&middot; repeats every %.0f min</span></div>"
+            "<span class='gd-state gd-state--%s'>%s</span>"
+            "<form class='inline' method='post' action='/alerts/toggle'>"
             "<input type='hidden' name='id' value='%d'>"
             "<input type='hidden' name='enabled' value='%d'>"
-            "<button type='submit'>%s</button></form></td>"
-            "<td><form class='inline' method='post' action='/alerts/delete' "
+            "<button type='submit' class='gd-strip-btn'>%s</button></form>"
+            "<form class='inline' method='post' action='/alerts/delete' "
             "onsubmit=\"return confirm('Delete this alert?');\">"
             "<input type='hidden' name='id' value='%d'>"
-            "<button type='submit'>Delete</button></form></td></tr>"
-            % (escape(alert["name"]), escape(alert["message"] or "-"),
+            "<button type='submit' class='gd-strip-btn'>Delete</button></form>"
+            "</div>"
+            % (escape(alert["name"] or "Unnamed alert"),
                _alert_target_text(alert), alert["threshold_minutes"],
-               alert["cooldown_minutes"], alert["id"],
-               0 if alert["enabled"] else 1,
-               "Disable" if alert["enabled"] else "Enable", alert["id"]))
-    alerts_table = (
-        "<table><tr><th>Alert</th><th>Watches</th><th>Threshold</th>"
-        "<th>Cooldown</th><th>Status</th><th></th></tr>%s</table>"
-        % ("".join(alert_rows)
-           or "<tr><td colspan='6' class='note'>No alerts yet.</td></tr>"))
+               alert["cooldown_minutes"],
+               "on" if alert["enabled"] else "off",
+               "On" if alert["enabled"] else "Off",
+               alert["id"], 0 if alert["enabled"] else 1,
+               "Pause" if alert["enabled"] else "Resume", alert["id"]))
+    alerts_html = "".join(alert_rows) or \
+        "<p class='note'>No alerts yet &mdash; nothing to watch, nothing " \
+        "to miss.</p>"
 
     firing_rows = "".join(
-        "<tr><td>%s</td><td>%s</td><td>%.1f min</td></tr>"
-        % (escape(f["name"] or "deleted alert"), escape(f["fired_at"][:16]),
+        "<div class='gd-strip gd-strip--quiet'>"
+        "<div class='gd-strip-main'><b>%s</b>"
+        "<span class='gd-strip-sub'>fired %s &middot; %.1f min on "
+        "target</span></div>"
+        "</div>"
+        % (escape(f["name"] or "deleted alert"),
+           escape((f["fired_at"][:16] or "").replace("T", " ")),
            f["current_minutes"] or 0)
         for f in store.recent_firings())
-    firings_table = (
-        "<table><tr><th>Alert</th><th>Fired at</th><th>Time on target</th></tr>"
-        "%s</table>"
-        % (firing_rows
-           or "<tr><td colspan='3' class='note'>Nothing fired yet.</td></tr>"))
+    firings_html = firing_rows or \
+        "<p class='note'>Nothing fired yet &mdash; you'll see it here " \
+        "when an alert goes off.</p>"
 
-    categories = sorted(store.get_categories().keys())
+    # One-tap starter alerts: the empty state as onboarding. Only shown
+    # before the first alert exists; each chip posts the same fields as
+    # the form below, so /alerts/add needs no changes.
+    starters = []
+    if not alert_rows:
+        cats = {c.lower(): c for c in store.get_categories().keys()}
+        for label, cat_word, threshold, cooldown, message in (
+                ("Social apps over 60 min", "social", "60", "60",
+                 "Time to get back to work!"),
+                ("Entertainment over 90 min", "entertain", "90", "120",
+                 "Evening plans are waiting."),
+                ("Shopping over 45 min", "shop", "45", "60",
+                 "Do you really need it?")):
+            cat = next((c for cl, c in cats.items() if cat_word in cl),
+                       None)
+            if cat:
+                starters.append((label, label, "category", cat, threshold,
+                                 cooldown, message))
+    starters_html = "".join(
+        "<form class='inline' method='post' action='/alerts/add'>"
+        "<input type='hidden' name='name' value='%s'>"
+        "<input type='hidden' name='target_type' value='%s'>"
+        "<input type='hidden' name='target_name' value='%s'>"
+        "<input type='hidden' name='threshold_minutes' value='%s'>"
+        "<input type='hidden' name='cooldown_minutes' value='%s'>"
+        "<input type='hidden' name='message' value='%s'>"
+        "<button type='submit' class='chip'>%s</button></form>"
+        % (escape(name), ttype, escape(tname), thr, cd, escape(msg),
+           escape(label))
+        for label, name, ttype, tname, thr, cd, msg in starters)
+    starters_block = (
+        "<p class='goal-starters-label'>Or start with one of these:</p>"
+        "<div class='goal-starters'>%s</div>" % starters_html
+    ) if starters_html else ""
+
     cat_options = "".join(
-        '<option value="category:%s">%s</option>' % (escape(c), escape(c))
-        for c in categories if c != "Uncategorized")
+        '<option value="%s">%s</option>' % (escape(c), escape(c))
+        for c in sorted(store.get_categories().keys())
+        if c != "Uncategorized")
 
     body = (
-        "<div class='card'><h3>Alerts</h3>%s"
-        "<p class='note'>Alerts are checked against today's data. For "
-        "real-time desktop pop-ups, run <code>watch-alerts.bat</code> "
-        "(double-click it on Windows) -- it checks every 5 minutes.</p></div>"
-        "<div class='card'><h3>Add an alert</h3>"
-        "<form method='post' action='/alerts/add'>"
-        "<p><label>Name <input type='text' name='name' required "
-        "placeholder='e.g. Too much social media' size='28'></label></p>"
-        "<p><label>Watch <select name='target_type'>"
+        "<div class='card gd-create'><h3>Add an alert</h3>%s"
+        "<form method='post' action='/alerts/add' class='sentence-form'>"
+        "<p class='sentence'>Warn me when "
+        "<input type='text' name='target_name' list='catlist' required "
+        "placeholder='Social Networking or app:chrome' size='24' "
+        "aria-label='What to watch'> "
+        "<span class='nowrap'>passes</span> "
+        "<input type='number' name='threshold_minutes' min='1' step='1' "
+        "placeholder='60' required style='width:80px' aria-label='Minutes'> "
+        "<span class='nowrap'>minutes.</span></p>"
+        "<p class='gd-form-row'><label>Watching "
+        "<select name='target_type' aria-label='Watch type'>"
         "<option value='category'>a category</option>"
-        "<option value='activity'>one activity</option>"
-        "</select></label> "
-        "<label>Which <input type='text' name='target_name' list='catlist' "
-        "required placeholder='Entertainment or app:chrome' size='28'></label>"
-        "<datalist id='catlist'>%s</datalist><br>"
-        "<span class='note'>Category: pick from the list. Activity: use the "
-        "key from the Activities page, e.g. <code>app:chrome</code> or "
-        "<code>domain:youtube.com</code>.</span></p>"
-        "<p><label>Warn me at <input type='number' name='threshold_minutes' "
-        "min='1' step='1' required style='width:80px'> minutes</label> "
-        "<label>Don't repeat for <input type='number' name='cooldown_minutes' "
-        "min='0' step='5' value='60' style='width:80px'> minutes</label></p>"
-        "<p><label>Message <input type='text' name='message' size='40' "
+        "<option value='activity'>one activity</option></select></label> "
+        "<label>Don't repeat for "
+        "<input type='number' name='cooldown_minutes' min='0' step='5' "
+        "value='60' style='width:70px' aria-label='Cooldown minutes'> "
+        "min</label></p>"
+        "<p><label class='sentence-name'>Name it "
+        "<input type='text' name='name' "
+        "placeholder='e.g. Too much social media' size='24'></label> "
+        "<label>Message (optional) "
+        "<input type='text' name='message' size='30' "
         "placeholder='e.g. Time to get back to work!'></label></p>"
+        "<p class='note'>Category: pick from the list. Activity: the key "
+        "from the Activities page, e.g. <code>app:chrome</code> or "
+        "<code>domain:youtube.com</code>.</p>"
         "<p><button type='submit'>Add alert</button></p>"
-        "</form></div>"
-        "<div class='card'><h3>Recent firings</h3>%s</div>"
-        % (alerts_table, cat_options, firings_table)
+        "<datalist id='catlist'>%s</datalist></form></div>"
+        "<section class='gd-list'><h3>Your alerts</h3>%s</section>"
+        "<section class='gd-list'><h3>Recent firings</h3>%s</section>"
+        "<p class='how-it-works'>Alerts watch today's tracked time and go "
+        "off when you cross a threshold. For desktop pop-ups on Windows, "
+        "double-click <code>watch-alerts.bat</code> &mdash; it checks "
+        "every 5 minutes.</p>"
+        % (starters_block, cat_options, alerts_html, firings_html)
     )
     return layout("Alerts", body, active="alerts")
 

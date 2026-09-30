@@ -30,13 +30,44 @@ def invoices_page():
         status=status if status in inv_mod.STATUSES else None)
     rows = []
     outstanding = 0
+    draft_cards = []
+    history_rows = []
     for inv in invoices:
         currency = (inv.get("currency") or "USD").upper()
         if inv["status"] == "sent":
             outstanding += inv["balance_minor"]
         title = inv["number"] or "DRAFT #%d" % inv["id"]
+        if inv["status"] == "draft":
+            # Draft totals are computed live on the detail page; the stored
+            # row is only filled in at send time, so compute here for an
+            # honest figure (read-only, no backend change).
+            try:
+                dt = inv_mod.get_invoice(inv["id"])
+                draft_total = dt["invoice"]["totals"]["total_minor"]
+            except Exception:
+                draft_total = inv.get("total_minor") or 0
+            draft_cards.append(
+                "<div class='wk-inv-draft'>"
+                "<div class='wk-inv-draft-info'>"
+                "<b><a href='/invoices/%d'>%s</a></b>"
+                "<span>%s &middot; %s &middot; "
+                "<span data-financial>%s</span></span></div>"
+                "<div class='wk-inv-draft-actions'>"
+                "<form class='inline' method='post' "
+                "action='/invoices/%d/send' "
+                "onsubmit=\"return confirm('Send this invoice? It will be "
+                "numbered and frozen.');\">"
+                "<button type='submit'>Send</button></form> "
+                "<a class='btn secondary' href='/invoices/%d'>"
+                "Keep editing</a></div></div>"
+                % (inv["id"], escape(title),
+                   escape(inv.get("project_name") or ""),
+                   escape(inv.get("client") or ""),
+                   money_mod.format_minor(draft_total, currency),
+                   inv["id"], inv["id"]))
+            continue
         overdue = " <strong>OVERDUE</strong>" if inv["overdue"] else ""
-        rows.append(
+        history_rows.append(
             "<tr><td><a href='/invoices/%d'>%s</a></td>"
             "<td>%s</td><td>%s</td><td>%s</td>"
             "<td style='text-align:right' data-financial>%s</td>"
@@ -48,26 +79,38 @@ def invoices_page():
                money_mod.format_minor(inv.get("total_minor") or 0, currency),
                money_mod.format_minor(inv["balance_minor"], currency),
                overdue))
+    drafts_html = (
+        "<section class='wk-section'><h2>Finish these first</h2>%s</section>"
+        % "".join(draft_cards)
+        if draft_cards else
+        "<p class='wk-empty'>No drafts waiting. Start a new invoice when "
+        "you have billable hours to send.</p>")
+    history_html = (
+        "<table class='tbl'><tr><th>Invoice</th><th>Project</th>"
+        "<th>Client</th><th>Status</th><th style='text-align:right'>Total</th>"
+        "<th style='text-align:right'>Balance</th><th></th></tr>%s</table>"
+        % ("".join(history_rows)
+           or "<tr><td colspan='7' class='note'>Nothing sent yet.</td></tr>"))
     body = (
-        "<div class='card'><h3>Invoices</h3>"
-        "%s"
-        "<p><a class='btn' href='/invoices/new'>New invoice</a> "
-        "&nbsp;<a href='/invoices'>All</a>"
+        "<div class='wk-inv-hero'>"
+        "<div><span class='note'>Outstanding on sent invoices</span><br>"
+        "<b data-financial>%s</b></div>"
+        "<a class='btn' href='/invoices/new'>New invoice</a></div>"
+        "%s%s"
+        "<section class='wk-section'><h2>History</h2>"
+        "<p class='wk-filters'><a href='/invoices'>All</a>"
         " &middot; <a href='/invoices?status=draft'>Drafts</a>"
         " &middot; <a href='/invoices?status=sent'>Sent</a>"
         " &middot; <a href='/invoices?status=paid'>Paid</a>"
         " &middot; <a href='/invoices?status=void'>Void</a></p>"
-        "<p class='fine'>Outstanding on sent invoices: "
-        "<strong data-financial>%s</strong>. "
-        "Invoices are numbered when sent; sent invoices are frozen and "
-        "can only be voided, never edited.</p>"
-        "<table class='tbl'><tr><th>Invoice</th><th>Project</th>"
-        "<th>Client</th><th>Status</th><th style='text-align:right'>Total</th>"
-        "<th style='text-align:right'>Balance</th><th></th></tr>%s</table>"
-        "</div>"
-        % ("<p class='msg'>%s</p>" % escape(msg) if msg else "",
-           money_mod.format_minor(outstanding),
-           "".join(rows) or "<tr><td colspan='7'>No invoices yet.</td></tr>"))
+        "%s</section>"
+        "<p class='how-it-works'>Invoices are numbered when sent; sent "
+        "invoices are frozen and can only be voided, never edited. Drafts "
+        "can be changed freely until you send them.</p>"
+        % (money_mod.format_minor(outstanding),
+           "<p class='msg'>%s</p>" % escape(msg) if msg else "",
+           drafts_html, history_html)
+    )
     return layout("Invoices", body, active="invoices")
 
 
@@ -87,12 +130,15 @@ def invoice_new_page():
     projects = store.list_projects()
 
     filter_form = (
-        "<form method='get' action='/invoices/new' class='inline'>"
-        "<label>Project <select name='project_id'>"
-        "<option value=''>-- choose --</option>%s</select></label> "
-        "<label>From <input type='date' name='from' value='%s'></label> "
-        "<label>To <input type='date' name='to' value='%s'></label> "
-        "<button type='submit'>Show entries</button></form>"
+        "<form method='get' action='/invoices/new' class='sentence-form'>"
+        "<p class='sentence'>I want to bill "
+        "<select name='project_id' aria-label='Project'>"
+        "<option value=''>-- choose --</option>%s</select> "
+        "for work from "
+        "<input type='date' name='from' value='%s' aria-label='From'> "
+        "to <input type='date' name='to' value='%s' aria-label='To'>"
+        "<span class='nowrap'>.</span></p>"
+        "<p><button type='submit'>Show entries</button></p></form>"
         % ("".join(
             "<option value='%d'%s>%s</option>"
             % (p["id"], " selected" if p["id"] == project_id else "",
@@ -122,21 +168,23 @@ def invoice_new_page():
                 badge = (" <span class='pill'>%s</span>"
                          % escape(e["rate_status"] or ""))
                 rows.append(
-                    "<tr><td><input type='checkbox' name='entry_id' "
-                    "value='%d' checked></td><td>%s</td><td>%s%s</td>"
-                    "<td style='text-align:right'>%s</td>"
-                    "<td style='text-align:right'>%s</td></tr>"
+                    "<label class='wk-pick'>"
+                    "<input type='checkbox' name='entry_id' "
+                    "value='%d' checked>"
+                    "<span class='wk-pick-info'><b>%s</b>"
+                    "<span>%s%s &middot; %s</span></span>"
+                    "<b data-financial>%s</b></label>"
                     % (e["id"], escape(e["day"]), escape(label), badge,
                        money_mod.format_duration(seconds),
                        money_mod.format_minor(amount, currency)))
             entries_html += (
-                "<form method='post' action='/invoices/create'>"
+                "<form method='post' action='/invoices/create' "
+                "class='wk-create-form'>"
                 "<input type='hidden' name='project_id' value='%d'>"
                 "<input type='hidden' name='from' value='%s'>"
                 "<input type='hidden' name='to' value='%s'>"
-                "<table class='tbl'><tr><th></th><th>Day</th><th>Entry</th>"
-                "<th style='text-align:right'>Time</th>"
-                "<th style='text-align:right'>Amount</th></tr>%s</table>"
+                "<h3>Tick what goes on the invoice</h3>"
+                "<div class='wk-pick-list'>%s</div>"
                 "<p><label>Notes<br><textarea name='notes' rows='2' "
                 "cols='60'></textarea></label></p>"
                 "<p><label>Tax %% <input type='text' name='tax_pct' size='4' "
@@ -148,14 +196,18 @@ def invoice_new_page():
                 % (project_id, escape(day_from), escape(day_to),
                    "".join(rows)))
         else:
-            entries_html = ("<p class='fine'>No uninvoiced billable entries "
-                            "with a rate in that range.</p>")
+            entries_html = ("<p class='wk-empty'>No uninvoiced billable "
+                            "entries with a rate in that range. Log time on "
+                            "the Timesheet page first, or widen the dates.</p>")
 
-    body = ("<div class='card'><h3>New invoice</h3>"
-            "<p class='fine'>A draft is created first: no invoice number "
+    body = ("<section class='wk-section wk-create'>"
+            "<p class='note'>A draft is created first: no invoice number "
             "until you send it, and drafts can be edited freely. One "
             "currency per invoice.</p>"
-            "%s%s</div>" % (filter_form, entries_html))
+            "%s%s</section>"
+            "<p class='how-it-works'>Pick the entries to bill, then a draft "
+            "invoice is made from them. You send it when it looks right."
+            "</p>" % (filter_form, entries_html))
     return layout("New invoice", body, active="invoices")
 
 

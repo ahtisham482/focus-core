@@ -32,39 +32,43 @@ def timesheet_page():
     projects = store.list_projects()
     locked = store.day_is_locked(day)
 
-    # --- suggested blocks (only suggest; accepted ones live below) ---
-    sug_rows = []
+    # --- suggested blocks: the page's primary action, one-tap accept rows ---
+    sug_items = []
     for i, block in enumerate(suggestions):
-        sug_rows.append(
-            "<tr id='sug-%d'><td>%s - %s</td><td>%.1f</td><td>%s</td><td>%s</td>"
-            "<td class='title-cell' title='%s'>%s</td>"
-            "<td><form class='inline' method='post' "
-            "action='/timesheet/accept'>"
-            "<input type='hidden' name='day' value='%s'>"
-            "<input type='hidden' name='start_ts' value='%s'>"
-            "<input type='hidden' name='end_ts' value='%s'>"
-            "<input type='hidden' name='minutes' value='%.1f'>"
-            "<input type='hidden' name='category' value='%s'>"
-            "<input type='hidden' name='app' value='%s'>"
-            "<input type='hidden' name='title_hint' value='%s'>"
-            "<select name='project_id'>%s</select> "
-            "<input type='text' name='task' placeholder='task' size='10'> "
-            "<button type='submit'>Accept</button></form></td></tr>"
-            % (i, escape(block["start_ts"][11:]), escape(block["end_ts"][11:]),
-               block["minutes"], escape(block["category"]),
-               escape(block["app"]), escape(block["title_hint"]),
-               escape(block["title_hint"][:50]),
-               day, escape(block["start_ts"]), escape(block["end_ts"]),
-               block["minutes"], escape(block["category"]),
-               escape(block["app"]), escape(block["title_hint"]),
-               _project_options()))
-    sug_table = (
-        "<table><tr><th>Time</th><th>Min</th><th>Category</th><th>App</th>"
-        "<th>Title</th><th>Accept as</th></tr>%s</table>"
-        % ("".join(sug_rows)
-           or "<tr><td colspan='6' class='note'>"
-              "No blocks to suggest for this day. (Blocks shorter than 5 "
-              "minutes are skipped.)</td></tr>"))
+        if locked:
+            accept_form = ("<span class='note'>Day locked</span>")
+        else:
+            accept_form = (
+                "<form class='inline wk-accept' method='post' "
+                "action='/timesheet/accept'>"
+                "<input type='hidden' name='day' value='%s'>"
+                "<input type='hidden' name='start_ts' value='%s'>"
+                "<input type='hidden' name='end_ts' value='%s'>"
+                "<input type='hidden' name='minutes' value='%.1f'>"
+                "<input type='hidden' name='category' value='%s'>"
+                "<input type='hidden' name='app' value='%s'>"
+                "<input type='hidden' name='title_hint' value='%s'>"
+                "<select name='project_id' aria-label='Project'>%s</select> "
+                "<input type='text' name='task' placeholder='task' size='10' "
+                "aria-label='Task'> "
+                "<button type='submit'>Accept</button></form>"
+                % (day, escape(block["start_ts"]), escape(block["end_ts"]),
+                   block["minutes"], escape(block["category"]),
+                   escape(block["app"]), escape(block["title_hint"]),
+                   _project_options()))
+        sug_items.append(
+            "<div class='wk-sug' id='sug-%d'>"
+            "<div class='wk-sug-info'><b>%s</b>"
+            "<span>%s&ndash;%s &middot; %.0f min &middot; %s</span></div>"
+            "%s</div>"
+            % (i, escape(block["category"]),
+               escape(block["start_ts"][11:]), escape(block["end_ts"][11:]),
+               block["minutes"], escape(block["app"]), accept_form))
+    sug_block = (
+        "<div class='wk-sug-list'>%s</div>" % "".join(sug_items)
+        if sug_items else
+        "<p class='wk-empty'>Nothing to suggest for this day yet. Tracked "
+        "activity shows up here as blocks you can accept with one tap.</p>")
     timeline_html = _suggestion_timeline(suggestions)
 
     # --- my entries ---
@@ -78,8 +82,8 @@ def timesheet_page():
                 "draft #%d" % entry["invoice_id"])
             inv_badge = (
                 " <span class='pill' title='This entry is invoiced. Editing "
-                "it will not change the invoice -- the invoice keeps its "
-                "own snapshot of the line.'>Invoiced on %s -- locked</span>"
+                "it will not change the invoice — the invoice keeps its "
+                "own snapshot of the line.'>Invoiced on %s — locked</span>"
                 % escape(inv_label))
         if entry["locked"]:
             actions = "<span class='note'>locked</span>"
@@ -132,13 +136,16 @@ def timesheet_page():
                    entry["id"], escape(entry["note"]),
                    escape(entry["status"]), inv_badge, actions))
         entry_rows.append("<tr>" + row_form + "</tr>")
-    entries_table = (
-        "<table><tr><th>Time</th><th>Category</th><th>App</th>"
-        "<th>Project</th><th>Task</th><th>Note</th><th>Status</th>"
-        "<th></th></tr>%s</table>"
-        % ("".join(entry_rows)
-           or "<tr><td colspan='8' class='note'>No entries yet -- accept a "
-              "suggestion above or add one manually below.</td></tr>"))
+    if entry_rows:
+        entries_table = (
+            "<div class='wk-strip'><table>"
+            "<tr><th>Time</th><th>Category</th><th>App</th>"
+            "<th>Project</th><th>Task</th><th>Note</th><th>Status</th>"
+            "<th></th></tr>%s</table></div>" % "".join(entry_rows))
+    else:
+        entries_table = (
+            "<p class='wk-empty'>No entries yet &mdash; accept a suggestion "
+            "above or add one yourself.</p>")
 
     # --- projects (Phase 9: rate + budget cards) ---
     projects_html = _project_cards_html(day)
@@ -149,51 +156,63 @@ def timesheet_page():
     msg = escape(request.args.get("msg") or "")
     msg_html = ("<div class='card'><p><b>%s</b></p></div>" % msg) if msg else ""
 
+    # Day-lock state: unmistakable either way.
     lock_html = (
-        "<p class='note'>This day is locked -- entries cannot be changed. "
-        "Locking is permanent.</p>" if locked else
-        "<form method='post' action='/timesheet/lock' "
+        "<div class='wk-locked' role='status'>"
+        "<b>This day is locked.</b> Entries can't be changed any more. "
+        "Locking is permanent.</div>" if locked else
+        "<form method='post' action='/timesheet/lock' class='wk-lock-form' "
         "onsubmit=\"return confirm('Lock this day? Entries cannot be edited "
         "afterwards.');\">"
         "<input type='hidden' name='day' value='%s'>"
-        "<button type='submit'>Lock day</button></form>" % day)
+        "<button type='submit' class='secondary'>Lock day</button> "
+        "<span class='note'>Locking is permanent.</span></form>" % day)
 
     body = (
         "%s"
-        "<div class='card'><h3>Timesheet -- %s</h3>"
-        "<form class='inline' method='get' action='/timesheet'>"
+        "<div class='wk-daybar'>"
+        "<form method='get' action='/timesheet'>"
         "<label>Day <input type='date' name='day' value='%s'></label> "
-        "<button type='submit'>Show</button></form> "
-        "<a href='/timesheet/export/client?from=%s&to=%s'>Export this day as CSV</a>"
-        "<p class='note'>Suggested blocks merge consecutive tracked "
-        "activities of the same category (gaps over 5 minutes split a "
-        "block). Accept one to add it to your timesheet.</p></div>"
-        "<div class='card'><h3>Suggested blocks</h3>%s%s</div>"
-        "<div class='card'><h3>My entries</h3>%s%s</div>"
-        "<div class='card'><h3>Add entry manually</h3>"
-        "<form method='post' action='/timesheet/add'>"
+        "<button type='submit' class='secondary'>Show</button></form> "
+        "<a href='/timesheet/export/client?from=%s&to=%s'>"
+        "Export this day as CSV</a></div>"
+        "<section class='wk-section'><h2>Suggested blocks</h2>%s%s</section>"
+        "<section class='wk-section wk-create'><h2>Add it yourself</h2>"
+        "<form method='post' action='/timesheet/add' class='sentence-form'>"
         "<input type='hidden' name='day' value='%s'>"
-        "<p><label>Start <input type='text' name='start_ts' required "
-        "placeholder='2026-09-25T09:00' size='18'></label> "
-        "<label>End <input type='text' name='end_ts' required "
-        "placeholder='2026-09-25T10:30' size='18'></label></p>"
-        "<p><label>Category <select name='category'>%s</select></label> "
-        "<label>App <input type='text' name='app' size='12'></label> "
-        "<label>Title <input type='text' name='title' size='18'></label></p>"
+        "<p class='sentence'>I worked "
+        "<input type='text' name='start_ts' required size='16' "
+        "placeholder='2026-09-25T09:00' aria-label='Start'> &ndash; "
+        "<input type='text' name='end_ts' required size='16' "
+        "placeholder='2026-09-25T10:30' aria-label='End'> "
+        "on <select name='category' aria-label='Category'>%s</select>"
+        "<span class='nowrap'>, doing "
+        "<input type='text' name='task' size='14' placeholder='what was it' "
+        "aria-label='Task'>.</span></p>"
+        "<details class='wk-details'><summary>More details "
+        "(optional)</summary>"
         "<p><label>Project <select name='project_id'>%s</select></label> "
-        "<label>Task <input type='text' name='task' size='14'></label> "
+        "<label>App <input type='text' name='app' size='12'></label> "
+        "<label>Title <input type='text' name='title' size='18'></label> "
         "<label>Note <input type='text' name='note' size='18'></label></p>"
+        "</details>"
         "<p><button type='submit'>Add entry</button></p>"
-        "</form></div>"
-        "<div class='card'><h3>Projects, rates &amp; budgets</h3>"
+        "</form></section>"
+        "<section class='wk-section'><h2>Your entries</h2>%s%s</section>"
+        "<details class='wk-more'><summary>"
+        "Projects, rates &amp; budgets &middot; Client exports</summary>"
+        "<h3>Projects, rates &amp; budgets</h3>"
         "<p class='note'>Set an hourly rate per project; new time entries "
         "use it automatically. Budgets are advisory only and every change "
-        "is kept in history.</p>%s</div>"
-        "<div class='card'><h3>Client exports</h3>%s</div>"
-        % (msg_html, day, day, day, day, timeline_html, sug_table, entries_table,
-           lock_html, day,
-           _category_options(), _project_options(), projects_html,
-           export_html)
+        "is kept in history.</p>%s"
+        "<h3>Client exports</h3>%s</details>"
+        "<p class='how-it-works'>Suggested blocks are built from today's "
+        "tracked activity &mdash; consecutive time in the same category "
+        "becomes one block. Accepting copies a block into your timesheet; "
+        "anything odd can be added by hand instead.</p>"
+        % (msg_html, day, day, day, timeline_html, sug_block, day,
+           _category_options(), _project_options(),
+           lock_html, entries_table, projects_html, export_html)
     )
 
     total_minutes = sum(float(e.get("minutes", 0)) for e in entries)

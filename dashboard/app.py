@@ -249,40 +249,92 @@ def legend(seconds_by_level):
     return '<div class="legend">' + "".join(items) + "</div>"
 
 
+
+def hm_target_strips(day):
+    """Pinned goals as thin live-strip rows.
+
+    Craft treatment: progress gets a strip treatment, structurally
+    different from creation cards. Empty string when nothing is pinned.
+    """
+    from focuscore import goals as goals_mod
+
+    summary = store.get_day_summary(day)
+    pinned = [g for g in goals_mod.evaluate_all(summary) if g["pinned"]]
+    if not pinned:
+        return ""
+    _STATUS_WORD = {"on_track": "On track", "behind": "Behind pace",
+                    "achieved": "Achieved", "missed": "Missed"}
+    rows = []
+    for g in pinned[:3]:
+        rows.append(
+            "<div class='hm-strip-row'>"
+            "<div class='hm-strip-top'>"
+            "<span class='hm-strip-name'>%s</span>"
+            "<span class='hm-strip-status'>%s</span></div>"
+            "<div class='hm-strip-bar'><div style='width:%.1f%%'></div></div>"
+            "<p class='hm-strip-val'>%s of %s %s</p>"
+            "</div>"
+            % (escape(g["name"]),
+               escape(_STATUS_WORD.get(g["status"], g["status"])),
+               min(100.0, g["pct"] or 0),
+               "%.0f" % (g["current"] or 0),
+               "%.0f" % (g["target"] or 0), escape(g["unit"])))
+    return "".join(rows)
+
+
 def day_page(day):
+    """Today's story first (Pulse + pinned targets), details second."""
+    today = date.today().isoformat()
+    is_today = (day == today)
     aw_note = ""
-    if day == date.today().isoformat():
+    if is_today:
         # Live progress: refresh today's tracked data on every page load.
         try:
             run_day(date.today())
-        except ActivityWatchError as exc:
+        except ActivityWatchError:
+            # Plain words, never a raw exception dump.
             aw_note = (
-                "<div class='card'><p><b>Tracker not running.</b></p>"
-                "<p class='note'>Could not reach ActivityWatch: %s<br>"
-                "Start ActivityWatch and reload this page -- or "
+                "<div class='hm-wrap'><div class='hm-alert'><p><b>"
+                "ActivityWatch isn't running.</b></p>"
+                "<p>Start ActivityWatch and reload this page &mdash; or "
                 "<a href='/setup/activitywatch'>set it up</a> if it isn't "
-                "installed yet. "
-                "Your saved data is still shown below.</p></div>"
-                % escape(str(exc)))
+                "installed yet. Your saved data is still shown below.</p>"
+                "</div></div>")
     summary = store.get_day_summary(day)
     pulse = productivity_pulse(summary["seconds_by_level"])
     total = summary["total_seconds"]
 
+    try:
+        dateline = datetime.strptime(day, "%Y-%m-%d").strftime("%A, %B %d")
+    except ValueError:
+        dateline = day
+    head = (
+        "<div class='hm-wrap'><p class='hm-dateline'>%s</p>"
+        "<h1 class='hm-h1'>%s</h1></div>"
+        % (dateline, "Today so far" if is_today else "Day in review"))
+
     if total <= 0:
-        if aw_note:
-            # A stranger with no data and no tracker: plain words, not CLI.
+        if is_today:
             empty = (
-                "<div class='card'><p>No tracked data for this day yet.</p>"
-                "<p class='note'>ActivityWatch isn't running, so nothing "
-                "was recorded. <a href='/setup/activitywatch'>Set up "
-                "ActivityWatch</a> to start tracking.</p></div>")
+                "<div class='hm-wrap'><div class='hm-empty'>"
+                "<p class='hm-empty-title'>Nothing tracked yet today.</p>"
+                "<p>Your day's story appears here as time gets tracked "
+                "&mdash; or start it yourself right now:</p>"
+                "<form class='hm-start' method='post' action='/focus/start'>"
+                "<input type='hidden' name='preset' value='25'>"
+                "<button type='submit' class='hm-btn'>"
+                "Start a 25-minute session</button></form>"
+                "<p class='hm-quiet'><a href='/setup/activitywatch'>"
+                "Set up ActivityWatch</a> and your whole day is tracked "
+                "by itself.</p></div></div>")
         else:
             empty = (
-                "<div class='card'><p>No tracked data for this day yet.</p>"
-                "<p class='note'>Run <code>python -m focuscore.pipeline "
-                "--day %s</code> (add <code>--demo</code> to try it without "
-                "ActivityWatch).</p></div>" % day)
-        return layout("Day " + day, aw_note + empty, day, help_key="day")
+                "<div class='hm-wrap'><div class='hm-empty'>"
+                "<p class='hm-empty-title'>No tracked data for this day.</p>"
+                "<p>Days with tracked time show their full story here.</p>"
+                "</div></div>")
+        return layout("Day " + day, aw_note + head + empty, day,
+                      help_key="day", hero="")
 
     cat_rows = "".join(
         "<tr><td>%s</td><td>%s (%+d)</td><td>%.2fh</td><td>%.1f%%</td></tr>"
@@ -298,31 +350,54 @@ def day_page(day):
         % (escape(item["match_key"]), escape(item["app"] or "?"),
            _hours(item["seconds"]))
         for item in summary["uncategorized"][:10]
-    ) or "<tr><td colspan='3' class='note'>Nothing waiting -- all clear.</td></tr>"
+    ) or ("<tr><td colspan='3' class='hm-quiet'>Nothing waiting "
+           "&mdash; all clear.</td></tr>")
 
-    body = (
-        aw_note +
-        pinned_goals_html(day) +
-        "<div class='card'><div>Pulse for %s</div>"
-        "<div class='pulse %s'>%.1f</div>"
-        "<div class='note'>Weighted 0-100 score. Green 60+, amber 40-59, "
-        "red below 40. %.2fh tracked.</div>"
-        "%s%s</div>"
-        "<div class='card'><h3>By category</h3>"
-        "<table><tr><th>Category</th><th>Score</th><th>Time</th><th>Share</th></tr>"
-        "%s</table></div>"
-        "<div class='card'><h3>Uncategorized queue</h3>"
-        "<p class='note'>These counted as Neutral in the Pulse. "
-        "Review them on the <a href='/activities?day=%s'>Activities</a> page "
-        "and set a score -- or fix their category for next time.</p>"
-        "<table><tr><th>Activity</th><th>App</th><th>Time</th></tr>%s</table></div>"
-        "<div class='card note'>AFK/idle time (%.2fh) is excluded from the Pulse.</div>"
-        % (day, _pulse_band(pulse), pulse, _hours(total),
+    pulse_html = (
+        "<section class='hm-wrap' aria-label='Pulse'>"
+        "<div class='hm-pulse'>"
+        "<div class='hm-pulse-left'>"
+        "<p class='hm-label'>Productivity Pulse</p>"
+        "<p class='hm-pulse-num hm-%s'>%.0f</p>"
+        "<p class='hm-quiet'>Weighted 0&ndash;100 score of everything you "
+        "did. Green 60+, amber 40&ndash;59, red below 40. %.2fh tracked.</p>"
+        "</div>"
+        "<div class='hm-pulse-right'>%s%s</div>"
+        "</div></section>"
+        % (_pulse_band(pulse), pulse, _hours(total),
            bucket_bar(summary["seconds_by_level"], total),
-           legend(summary["seconds_by_level"]), cat_rows, day, uncat_rows,
-           _hours(summary["afk_seconds"]))
-    )
-    return layout("Day " + day, body, day, help_key="day")
+           legend(summary["seconds_by_level"])))
+
+    strips = hm_target_strips(day)
+    targets_html = (
+        "<section class='hm-wrap' aria-label='Today&rsquo;s targets'>"
+        "<h2 class='hm-sec'>Pinned targets</h2>"
+        "<div class='hm-strip'>%s</div></section>" % strips) if strips else ""
+
+    detail_html = (
+        "<section class='hm-wrap'>"
+        "<div class='hm-detail'>"
+        "<h2 class='hm-sec'>By category</h2>"
+        "<div class='hm-tablewrap'><table class='hm-table'>"
+        "<tr><th>Category</th><th>Score</th><th>Time</th><th>Share</th></tr>"
+        "%s</table></div></div>"
+        "<div class='hm-detail'>"
+        "<h2 class='hm-sec'>Uncategorized queue</h2>"
+        "<p class='hm-quiet'>These counted as Neutral in the Pulse. "
+        "Review them on the <a href='/activities?day=%s'>Activities</a> page "
+        "and set a score &mdash; or fix their category for next time.</p>"
+        "<div class='hm-tablewrap'><table class='hm-table'>"
+        "<tr><th>Activity</th><th>App</th><th>Time</th></tr>%s</table></div>"
+        "</div>"
+        "<p class='hm-footnote'>AFK/idle time (%.2fh) is excluded from the "
+        "Pulse. This page re-reads today's tracked data on every load "
+        "&mdash; the numbers above are always live.</p>"
+        "</section>"
+        % (cat_rows, day, uncat_rows, _hours(summary["afk_seconds"])))
+
+    body = aw_note + head + pulse_html + targets_html + detail_html
+    return layout("Day " + day, body, day, help_key="day", hero="")
+
 
 
 def _category_score(name, _seconds):
@@ -392,7 +467,7 @@ _BLOCKED_PAGE = (
     "not come from Focus Core itself.</p>"
     "<p>Please go back and use the button on the Focus Core page. If you "
     "clicked a button inside Focus Core and still see this, a browser "
-    "extension may be changing the request -- try the Focus Core desktop "
+    "extension may be changing the request — try the Focus Core desktop "
     "window instead.</p>"
     "<p><a href='/'>Back to Home</a></p>")
 
@@ -507,8 +582,8 @@ def _living_tabs(active):
 
 
 def home_page():
-    """Command center: today's Pulse, key stats, and one attention card
-    per thing that needs the user -- each with exactly one button."""
+    """Home: one clear action first (start a 25-minute session), then
+    today's live story as a strip -- never a wall of identical cards."""
     from focuscore import home as home_mod
     from focuscore import activitywatch as aw_mod
     from focuscore import chronotype, focus as focus_mod
@@ -530,9 +605,7 @@ def home_page():
     streak = focus_mod.current_streak()
     peak_lbl = chronotype.window_label()
 
-    # ── Living Instrument hero (slice 1) ──
-    # Pulse card data: today's completed focus sessions.
-    # H:MM is summed completed session time (spec), not tracked activity.
+    # ── Session totals: completed focus sessions today (H:MM) ──
     day_sessions = store.get_day_sessions(today)
     n_sessions = len(day_sessions)
     longest_min = 0
@@ -553,84 +626,38 @@ def home_page():
     else:
         pulse_sub = "No sessions yet &mdash; your first one starts the story."
 
-    # Shield pill: armed exactly when Shield enforcement is actually on.
-    # The authoritative signal is the daemon mutex (in-memory/OS state, no
-    # SQLite — Invariant I-1), the same source the /shield page uses. An
-    # active focus session alone does not prove the Shield is armed.
+    # Shield pill: armed exactly when Shield enforcement is actually on
+    # (daemon mutex, in-memory -- Invariant I-1).
     from focuscore import shield as shield_mod
     _shield_armed = (shield_mod.shield_daemon_running()
                      and not shield_mod.shield_killswitch_on())
     shield_cls = "armed" if _shield_armed else "ready"
     shield_label = "Shield armed" if _shield_armed else "Shield ready"
 
-    # ── Living rings + targets (slice 2) ──
-    # Rings: the real Focus daily ring + the user's own pinned goals.
-    # (No movement ring: Focus Core doesn't track movement — nothing invented.)
+    # ── Focus ring only in the hero (pinned goals live in the strip) ──
     from focuscore import gamification as gam_mod
-    from focuscore import goals as goals_mod
     _ring = gam_mod.daily_ring(today)
-    _evals = goals_mod.evaluate_all(summary)
-    _pinned = [g for g in _evals if g["pinned"]]
 
     def _num(v):
         return "%.0f" % (v or 0)
-    rings = [("Focus", _ring["minutes"], _ring["target"], "min",
-              _ring["fraction"])]
-    for _g in _pinned[:2]:
-        rings.append((_g["name"], _g["current"], _g["target"], _g["unit"],
-                      min(1.0, (_g["pct"] or 0) / 100.0)))
-    rings_html = "".join(
+    _frac = min(max(_ring["fraction"] or 0.0, 0.0), 1.0)
+    rings_html = (
         "<div class='lv-ring'>"
         "<svg viewBox='0 0 120 120' role='img' aria-label='%s'>"
         "<circle class='track' cx='60' cy='60' r='52'></circle>"
         "<circle class='fill' cx='60' cy='60' r='52' "
-        "style='stroke-dasharray:326.7;stroke-dashoffset:%.1f;--d:%dms'></circle>"
+        "style='stroke-dasharray:326.7;stroke-dashoffset:%.1f;--d:560ms'></circle>"
         "</svg>"
-        "<p class='lv-ring-name'>%s</p>"
-        "<p class='lv-ring-val'>%s</p>"
+        "<p class='lv-ring-name'>Focus</p>"
+        "<p class='lv-ring-val'>%s / %s min</p>"
         "</div>"
-        % (escape("%s: %s of %s %s" % (name, _num(cur), _num(tgt), unit)),
-           326.7 * (1 - min(max(frac, 0.0), 1.0)), 560 + i * 150,
-           escape(name), escape("%s / %s %s" % (_num(cur), _num(tgt), unit)))
-        for i, (name, cur, tgt, unit, frac) in enumerate(rings)
+        % (escape("Focus: %s of %s min" % (_num(_ring["minutes"]),
+                                          _num(_ring["target"]))),
+           326.7 * (1 - _frac),
+           _num(_ring["minutes"]), _num(_ring["target"]))
     )
 
-    # Targets section: pinned goals as living cards (replaces the old card).
-    _STATUS_WORD = {"on_track": "On track", "behind": "Behind pace",
-                    "achieved": "Achieved", "missed": "Missed"}
-    if _pinned[:3]:
-        _cards = "".join(
-            "<div class='lv-target-card'>"
-            "<p class='lv-target-label'>%s</p>"
-            "<p class='lv-target-val'>%s <span>/ %s %s</span></p>"
-            "<p class='lv-target-note%s'>%s</p>"
-            "<div class='lv-bar'><div style='--w:%.1f%%;--d:%dms'></div></div>"
-            "</div>"
-            % (escape(_g["name"]), _num(_g["current"]),
-               _num(_g["target"]), _g["unit"],
-               " ok" if _g["status"] in ("on_track", "achieved") else "",
-               _STATUS_WORD.get(_g["status"], _g["status"]),
-               min(100.0, _g["pct"] or 0), 800 + i * 120)
-            for i, _g in enumerate(_pinned[:3])
-        )
-        targets_html = (
-            "<section class='lv-wrap' aria-label='Targets'>"
-            "<div class='lv-targets st' style='--d:700ms'>"
-            "<h2 class='lv-sec-title'>Targets</h2>"
-            "<div class='lv-target-grid'>%s</div>"
-            "</div></section>" % _cards
-        )
-    else:
-        targets_html = (
-            "<section class='lv-wrap' aria-label='Targets'>"
-            "<div class='lv-targets st' style='--d:700ms'>"
-            "<h2 class='lv-sec-title'>Targets</h2>"
-            "<p class='lv-target-empty'>No targets yet. "
-            "<a href='/goals'>Pin your first goal</a> and it will live here.</p>"
-            "</div></section>"
-        )
-
-    # ── Living rhythm (slice 3): today's calendar events ──
+    # ── Living rhythm: today's calendar events ──
     from focuscore import calendar_feed as cal_mod
     try:
         _cal_events, _cal_state = cal_mod.today_events(today)
@@ -643,33 +670,33 @@ def home_page():
     if _cal_state == "unconfigured":
         rhythm_inner = (
             "%s"
-            "<p class='lv-cal-quiet'>Connect your calendar to see "
+            "<p class='hm-quiet'>Connect your calendar to see "
             "today's rhythm here.</p>"
-            "<form class='lv-cal-form' method='post' "
+            "<form class='hm-cal-form' method='post' "
             "action='/settings/calendar'>"
             "<input type='url' name='ical_url' required "
             "placeholder='Paste your Google Calendar secret iCal URL' "
             "autocomplete='off'>"
-            "<button type='submit'>Connect</button>"
+            "<button type='submit' class='hm-btn-sm'>Connect</button>"
             "</form>"
-            "<p class='lv-cal-hint'>Google Calendar &rarr; Settings &rarr; "
+            "<p class='hm-hint'>Google Calendar &rarr; Settings &rarr; "
             "Integrate calendar &rarr; Secret address in iCal format. "
             "It never leaves this PC.</p>" % _cal_note
         )
     else:
         if _cal_state == "unreachable":
-            _cal_list = ("<p class='lv-cal-quiet'>Couldn't reach your "
+            _cal_list = ("<p class='hm-quiet'>Couldn't reach your "
                          "calendar right now.</p>")
         elif _cal_events:
-            _cal_list = ("<ul class='lv-cal'>%s</ul>" % "".join(
+            _cal_list = ("<ul class='hm-cal'>%s</ul>" % "".join(
                 "<li class='lv-cal-ev lv-cal-%s'>"
-                "<span class='lv-cal-time'>%s</span>"
-                "<span class='lv-cal-name'>%s</span></li>"
+                "<span class='hm-cal-time'>%s</span>"
+                "<span class='hm-cal-name'>%s</span></li>"
                 % (e.get("state", "next"), escape(e["time"]),
                    escape(e["summary"]))
                 for e in _cal_events[:3]))
         else:
-            _cal_list = ("<p class='lv-cal-quiet'>Nothing on the calendar "
+            _cal_list = ("<p class='hm-quiet'>Nothing on the calendar "
                          "today.</p>")
         if _cal_state == "stale":
             _cal_list = ("<p class='lv-cal-stale'>Couldn't refresh your "
@@ -677,18 +704,17 @@ def home_page():
                          + _cal_list)
         rhythm_inner = (
             _cal_note + "%s"
-            "<form class='lv-cal-change' method='post' "
+            "<form class='hm-cal-change' method='post' "
             "action='/settings/calendar'>"
             "<input type='hidden' name='ical_url' value=''>"
-            "<button type='submit' class='lv-linkbtn'>"
+            "<button type='submit' class='hm-linkbtn'>"
             "Disconnect calendar</button>"
             "</form>" % _cal_list
         )
     rhythm_html = (
-        "<section class='lv-wrap' aria-label='Rhythm'>"
-        "<div class='lv-rhythm st' style='--d:640ms'>"
-        "<h2 class='lv-sec-title'>Rhythm</h2>%s"
-        "</div></section>" % rhythm_inner
+        "<section class='hm-wrap' aria-label='Rhythm'>"
+        "<h2 class='hm-sec'>Rhythm</h2>%s"
+        "</section>" % rhythm_inner
     )
 
     cold_start = total <= 0 and streak == 0
@@ -709,8 +735,8 @@ def home_page():
         h1_lines = (
             "<span class='mask'><span class='line' style='--d:120ms'>"
             "Your day,</span></span>"
-            "<span class='mask'><span class='line' style='--d:200ms'>in "
-            "<em class='lv-ember-i'>focus</em>.</span></span>"
+            "<span class='mask'><span class='line' style='--d:200ms'>"
+            "in <em class='lv-ember-i'>focus</em>.</span></span>"
         )
         if chronotype.is_peak_now():
             subcopy = ("You're in your peak window (%s) &mdash; a good moment "
@@ -719,6 +745,17 @@ def home_page():
             subcopy = ("Your peak window is %s &mdash; your hardest work "
                        "belongs there." % escape(peak_lbl))
 
+    # The north-star action: one tap starts a real 25-minute session.
+    # Existing /focus/start contract (preset=25); label left blank.
+    cta_html = (
+        "<form class='hm-start' method='post' action='/focus/start'>"
+        "<input type='hidden' name='preset' value='25'>"
+        "<button type='submit' class='lv-btn lv-magnet'>"
+        "Begin focus session</button></form>"
+        "<a class='lv-ghost lv-magnet' href='/day/%s'>Today's plan</a>"
+        % today
+    )
+
     nav_html = _living_nav("home", shield_cls, shield_label)
     hero_html = (
         "<section class='lv-wrap' aria-label='Today at a glance'><div class='lv-hero'>"
@@ -726,10 +763,7 @@ def home_page():
         "<p class='lv-dateline st' style='--d:60ms'>%s</p>"
         "<h1 class='lv-h1'>%s</h1>"
         "<p class='lv-sub st' style='--d:340ms'>%s</p>"
-        "<div class='lv-ctas st' style='--d:420ms'>"
-        "<a class='lv-btn lv-magnet' href='/focus'>Begin focus session</a>"
-        "<a class='lv-ghost lv-magnet' href='/day/%s'>Today's plan</a>"
-        "</div>"
+        "<div class='lv-ctas st' style='--d:420ms'>%s</div>"
         "</div>"
         "<div class='lv-pulse st' style='--d:500ms'>"
         "<p class='lv-pulse-label'><span class='lv-live-dot' aria-hidden='true'></span>"
@@ -739,7 +773,7 @@ def home_page():
         "<div class='lv-rings'>%s</div>"
         "</div>"
         "</div></section>"
-        % (dateline, h1_lines, subcopy, today,
+        % (dateline, h1_lines, subcopy, cta_html,
            focus_seconds, pulse_hmm, pulse_sub, rings_html)
     )
     foot_html = (
@@ -748,104 +782,110 @@ def home_page():
         "</div></footer>" % (("%d-day streak" % streak) if streak else "Day 1")
     )
 
-
-    if total > 0:
-        mix_html = bucket_bar(seconds_by_level, total) + legend(seconds_by_level)
+    # ── Today's progress: pinned goals as a live strip ──
+    strips = hm_target_strips(today)
+    if strips:
+        targets_html = (
+            "<section class='hm-wrap' aria-label='Today&rsquo;s progress'>"
+            "<h2 class='hm-sec'>Today's progress</h2>"
+            "<div class='hm-strip'>%s</div></section>" % strips)
     else:
-        mix_html = ("<p class='note'>No tracked time yet today -- your "
-                    "productivity mix will appear here.</p>")
-    today_html = (
-        "<div class='card st' style='--d:660ms'><h3>Today</h3>"
-        "<div class='grid today-grid'>"
-        "<div class='stat'><div class='num' data-live data-tabular>%.1f</div>"
-        "<div class='lbl'>tracked hours</div></div>"
-        "<div class='stat'><div class='num' data-live data-tabular>%.1f</div>"
-        "<div class='lbl'>focused hours</div></div>"
-        "</div>%s</div>"
-        % (_hours(total), focus_hours, mix_html))
+        targets_html = (
+            "<section class='hm-wrap' aria-label='Today&rsquo;s progress'>"
+            "<h2 class='hm-sec'>Today's progress</h2>"
+            "<p class='hm-empty-inline'>Nothing here yet &mdash; your targets "
+            "will appear here as today unfolds. "
+            "<a href='/goals'>Pin a goal</a> to start.</p></section>")
 
     cards = home_mod.attention_cards(aw_state=aw_state)
     if cards:
         banner_rows = "".join(
-            "<li><b>%s</b> -- %s "
+            "<li><b>%s</b> &mdash; %s "
             "<a class='btn btn-sm' href='%s'>%s</a></li>"
             % (escape(c["title"]), escape(c["detail"]),
                escape(c["button_href"]), escape(c["button_text"]))
             for c in cards)
         attention_html = (
-            "<div class='card attention-banner st' style='--d:600ms'>"
-            "<h3>What needs your attention</h3><ul>%s</ul></div>"
-            % banner_rows)
+            "<section class='hm-wrap'><div class='hm-attention'>"
+            "<h2 class='hm-sec'>What needs your attention</h2><ul>%s</ul>"
+            "</div></section>" % banner_rows)
     else:
         attention_html = (
-            "<div class='card attention ok st' style='--d:600ms'>"
-            "<h3>All clear -- you're on track.</h3>"
-            "<p class='note'>Nothing needs you right now.</p>"
-            "</div>")
+            "<section class='hm-wrap'><div class='hm-attention'>"
+            "<h2 class='hm-sec'>All clear &mdash; you're on track.</h2>"
+            "<p class='hm-quiet'>Nothing needs you right now.</p>"
+            "</div></section>")
 
-    # targets_html (Living section) replaced the old pinned-goals card above.
-    if chronotype.is_peak_now():
-        insight_text = ("&#9889; You're in your peak window (%s) -- "
-                        "a good moment to start a session."
-                        % escape(peak_lbl))
+    if total > 0:
+        mix_html = bucket_bar(seconds_by_level, total) + legend(seconds_by_level)
     else:
-        insight_text = ("Your peak window is %s -- your hardest work "
-                        "belongs there." % escape(peak_lbl))
-    insight_html = (
-        "<div class='card st' style='--d:780ms'><h3>Insight</h3><p>%s</p>"
-        "<p><a href='/coaching'>More in Coaching &rarr;</a></p></div>"
-        % insight_text)
+        mix_html = ("<p class='hm-quiet'>No tracked time yet today &mdash; your "
+                    "productivity mix will appear here.</p>")
+    today_html = (
+        "<section class='hm-wrap'><div class='hm-today'>"
+        "<h2 class='hm-sec'>Today</h2>"
+        "<div class='hm-stats'>"
+        "<div class='hm-stat'><div class='hm-stat-num' data-live data-tabular>%.1f</div>"
+        "<div class='hm-stat-lbl'>tracked hours</div></div>"
+        "<div class='hm-stat'><div class='hm-stat-num' data-live data-tabular>%.1f</div>"
+        "<div class='hm-stat-lbl'>focused hours</div></div>"
+        "</div>%s"
+        "<p class='hm-links'><a href='/day/%s'>See today's full details</a> "
+        "&middot; <a href='/timesheet?day=%s'>Today's timesheet</a></p>"
+        "</div></section>"
+        % (_hours(total), focus_hours, mix_html, today, today))
 
-    legacy_html = (attention_html + today_html + insight_html
-                   + "<div class='card st' style='--d:840ms'>"
-                     "<p><a href='/day/%s'>See today's full details</a> &middot; "
-                     "<a href='/timesheet?day=%s'>Today's timesheet</a></p></div>"
-                     % (today, today))
-    body = (nav_html + hero_html + rhythm_html + targets_html
-            + "<div class='lv-wrap'>" + legacy_html + "</div>"
-            + foot_html + _living_tabs("home"))
+    footnote_html = (
+        "<section class='hm-wrap'>"
+        "<p class='hm-footnote'>Focus Core scores your time by itself. "
+        "Start a session and everything above fills in on its own.</p>"
+        "</section>")
+
+    body = (nav_html + hero_html + targets_html + rhythm_html
+            + attention_html + today_html + footnote_html
+            + foot_html
+            + "<div class='hm-tabspace' aria-hidden='true'></div>"
+            + _living_tabs("home"))
     return layout("Home", body, day=today, active="home",
                   body_class="living",
                   extra_css="<link rel='stylesheet' href='/static/living.css'>",
                   extra_js="<script src='/static/living-home.js'></script>")
 
 
-
 # ------------------------------------------------------------ welcome ---
 
 WELCOME_STEPS = [
-    {"emoji": "\U0001f512",
+    {"icon": "shield",
      "title": "Your data stays on this computer.",
-     "text": "Focus Core has no account, no sign-in, and sends nothing "
-             "to the internet -- there is no server that can see your "
-             "data. Everything lives in one file (focuscore.db) on this "
-             "PC. If you turn on Drive backups, a copy of that file is "
+     "text": "No account, no sign-in, nothing sent to the internet. "
+             "Everything lives in one file (focuscore.db) on this PC. "
+             "If you turn on Drive backups, a copy of that file is "
              "placed in your own Google Drive folder and nowhere else.",
-     "check": None},
-    {"emoji": "\U0001f440",
-     "title": "Your activity is tracked by ActivityWatch; Focus Core scores it.",
-     "text": "Focus Core does not watch anything itself. It reads from "
-             "ActivityWatch, a free, open-source tracker that records "
-             "which app or website you were using. That is why "
-             "ActivityWatch must be running -- without it, there is "
-             "nothing for Focus Core to score.",
+     "check": None,
+     "todo": "Nothing to do here — press Next."},
+    {"icon": "timesheet",
+     "title": "ActivityWatch does the watching.",
+     "text": "Focus Core records nothing by itself. It reads ActivityWatch, "
+             "a free tracker that notes which app or website you were using. "
+             "Keep it running and your days score themselves.",
      "check": "Look at the bottom-right of your Windows taskbar, near "
               "the clock. You should see the ActivityWatch icon. If it "
-              "is missing, open ActivityWatch from the Start menu -- it "
-              "should start with Windows by itself."},
-    {"emoji": "\U0001f4ca",
-     "title": "It scores your time from -2 to +2.",
-     "text": "Very productive work is +2, productive +1, neutral 0, "
-             "personal -1, very distracting -2. Your Pulse (0-100) is "
-             "the weighted mix of everything you did. Green (60+) is a "
-             "good day.",
-     "check": None},
-    {"emoji": "\U0001f3af",
-     "title": "Teach it once: review uncategorized activities.",
-     "text": "New apps start as Neutral. When you tell Focus Core what "
-             "an activity really is, it remembers -- so your score gets "
-             "more accurate every day.",
-     "check": None},
+              "is missing, open ActivityWatch from the Start menu.",
+     "todo": "Make sure ActivityWatch is running, then press Next."},
+    {"icon": "report",
+     "title": "Your time gets a score from -2 to +2.",
+     "text": "Real work is +2, good work +1, neutral 0, personal time -1, "
+             "distractions -2. Your Pulse (0-100) mixes it all together. "
+             "Above 60 is a good day.",
+     "check": None,
+     "todo": "Nothing to do here — press Next."},
+    {"icon": "target",
+     "title": "Teach it once — it remembers.",
+     "text": "New apps start as neutral. Tell Focus Core what an app really "
+             "is, and it remembers forever, so your scores get sharper "
+             "every day.",
+     "check": None,
+     "todo": "Press the button below to review what was tracked."},
 ]
 
 
@@ -916,7 +956,7 @@ def _pomodoro_active_page(active, streak_html, cues_form, focus_mod):
             note = ("Blocking is on. The page refreshes every 10 seconds; "
                     "a sound cue plays when the block ends.")
         else:
-            headline = "Break -- relax"
+            headline = "Break — relax"
             controls = (
                 "<form class='inline' method='post' "
                 "action='/focus/cycle/break/end'>"
@@ -935,7 +975,7 @@ def _pomodoro_active_page(active, streak_html, cues_form, focus_mod):
     else:
         cycle_html = (
             "<p><b>Target reached: %d work blocks.</b> End the session "
-            "whenever you are ready -- well done.</p>"
+            "whenever you are ready — well done.</p>"
             "<p>%s</p>" % _session_buttons())
     tired_card = (("<div class='card'><p><b>%s</b></p></div>"
                    % escape(tired_msg)) if tired else "")
@@ -1251,7 +1291,7 @@ def _project_cards_html(day):
         "size='4' value='%d'></label> "
         "<button type='submit'>Save</button> "
         "<span class='fine'>Max unused hours that roll into a project's "
-        "next period, as %% of its base hour cap. Hours only -- money never "
+        "next period, as %% of its base hour cap. Hours only &mdash; money never "
         "rolls over. Changing this re-computes every rollover display "
         "because rollover is computed, not stored.</span></form>"
         % (day, cap_pct))
@@ -1327,10 +1367,10 @@ def json_dumps(payload):
 # ------------------------------------------------ Phase 10: invoicing ---
 
 def _invoice_status_badge(status):
-    colors = {"draft": "#616161", "sent": "#1565c0", "paid": "#2e7d32",
-              "void": "#c62828"}
+    colors = {"draft": "var(--ink-faint)", "sent": "var(--accent)",
+              "paid": "var(--success)", "void": "var(--danger)"}
     return ("<span class='pill' style='background:%s'>%s</span>"
-            % (colors.get(status, "#616161"), escape(status.upper())))
+            % (colors.get(status, "var(--ink-faint)"), escape(status.upper())))
 
 
 def _invoice_detail_body(detail):
@@ -1499,21 +1539,32 @@ def _invoice_detail_body(detail):
                    "tax and discount cannot be changed. Void and reissue to "
                    "correct.</p>" if inv["is_frozen"] and inv["status"] != "void"
                    else "")
+    # Craft pass (work batch): totals hero first, lines second, payments,
+    # actions last. All forms keep their contracts; only HTML is reordered.
     return (
-        "<div class='card'><h3>%s %s</h3>"
-        "<p class='fine'>Project: %s &middot; Client: %s &middot; "
-        "Issued: %s &middot; Due: %s</p>"
-        "%s"
-        "<table class='tbl'><tr><th>Date</th><th>Description</th>"
+        "<section class='wk-inv-hero'>"
+        "<div class='wk-inv-hero-top'><h2>%s</h2>%s</div>"
+        "<div class='wk-inv-hero-nums'>"
+        "<div><span class='note'>Total</span><br>"
+        "<b data-financial>%s</b></div>"
+        "<div><span class='note'>Balance due</span><br>"
+        "<b data-financial>%s</b></div></div>"
+        "<p class='note'>Project: %s &middot; Client: %s &middot; "
+        "Issued: %s &middot; Due: %s</p>%s</section>"
+        "<section class='wk-section'><h2>Lines</h2>"
+        "<div class='wk-strip'><table class='tbl'>"
+        "<tr><th>Date</th><th>Description</th>"
         "<th style='text-align:right'>Hours</th>"
         "<th style='text-align:right'>Rate</th>"
-        "<th style='text-align:right'>Amount</th><th></th></tr>%s</table>"
-        "%s"
-        "<h4>Payments</h4>%s"
-        "<p><a class='btn' href='/invoices/%d/print' target='_blank'>"
-        "Print / save PDF</a></p>"
-        "%s%s</div>"
+        "<th style='text-align:right'>Amount</th><th></th></tr>%s</table></div></section>"
+        "<section class='wk-section'><h2>Totals</h2>%s</section>"
+        "<section class='wk-section'><h2>Payments</h2>%s</section>"
+        "<section class='wk-section wk-create'><h2>Actions</h2>%s"
+        "<p><a class='btn secondary' href='/invoices/%d/print' "
+        "target='_blank'>Print / save PDF</a></p>%s</section>"
         % (escape(title), _invoice_status_badge(inv["status"]),
+           money_mod.format_minor(t["total_minor"], currency),
+           money_mod.format_minor(inv["balance_minor"], currency),
            escape(inv.get("project_name") or ""),
            escape(inv.get("client") or ""),
            escape(inv.get("issued_at") or "--"),
@@ -1524,7 +1575,7 @@ def _invoice_detail_body(detail):
            ("<table class='tbl'><tr><th>Date</th>"
             "<th style='text-align:right'>Amount</th><th>Note</th></tr>%s</table>"
             % pay_rows) if pay_rows else "<p class='fine'>No payments yet.</p>",
-           inv["id"], actions,
+           actions, inv["id"],
            ("<p class='fine'>Notes: %s</p>" % escape(inv["notes"])
             if inv.get("notes") else "")))
 
