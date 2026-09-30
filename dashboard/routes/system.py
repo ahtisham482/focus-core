@@ -122,6 +122,15 @@ def backup_page():
         "<p class='how-it-works'>Focus Core also backs up by itself every "
         "day when you start it (only if the last backup is older than 24 "
         "hours).</p>"
+        "<section class='wk-section'><h2>Something not working?</h2>"
+        "<p>Export a small diagnostics file and send it when you ask for "
+        "help. It holds your Focus Core version, a short recent log, and "
+        "your settings with secrets hidden. Your database and your "
+        "activity data are never included.</p>"
+        "<p><a class='btn' href='/backup/diagnostics'>"
+        "<svg width='14' height='14' aria-hidden='true'>"
+        "<use href='/static/icons.svg#icon-download'/></svg> "
+        "Export diagnostics</a></p></section>"
         "<details class='wk-more'><summary>"
         "Your data &middot; Moving to a new laptop</summary>"
         "<h3>Your data</h3>"
@@ -140,6 +149,24 @@ def backup_page():
         % (last_html, table, where_html)
     )
     return layout("Backup", body, active="backup")
+
+
+@app.route("/backup/diagnostics")
+def backup_diagnostics():
+    """Roadmap 0.4: one-click diagnostics export.
+
+    A small zip with version/OS info, an anonymized log tail, settings
+    with secrets redacted, and a data-folder listing (names + sizes).
+    The database and activity data are never included -- see
+    focuscore/diagnostics.py for the hard privacy rules.
+    """
+    from flask import Response
+    from focuscore import diagnostics
+    return Response(
+        diagnostics.build_diagnostics_zip(),
+        mimetype="application/zip",
+        headers={"Content-Disposition": "attachment; filename=%s"
+                 % diagnostics.zip_filename()})
 
 
 @app.route("/backup/now", methods=["POST"])
