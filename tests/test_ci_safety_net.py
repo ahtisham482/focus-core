@@ -204,6 +204,8 @@ def test_ratchet_cli_rejects_a_malformed_baseline(tmp_path):
     assert "baseline" in result.stderr.lower()
 
 
+# Local-only guard: GitHub's test job does not install ruff, so this test
+# skips there by design; CI enforcement lives in the lint job's ratchet step.
 @pytest.mark.skipif(shutil.which("ruff") is None, reason="ruff not installed")
 def test_committed_baseline_matches_a_fresh_ruff_measurement():
     baseline = ratchet.parse_baseline(BASELINE_PATH.read_text())
