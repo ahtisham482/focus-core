@@ -23,17 +23,6 @@ def _fake_status(available=False):
 
 
 @pytest.fixture()
-def dash(tmp_path, monkeypatch):
-    """Flask test client with an isolated settings DB."""
-    pytest.importorskip("flask")
-    db = str(tmp_path / "t.db")
-    monkeypatch.setattr(store, "DEFAULT_DB_PATH", db)
-    import dashboard.app as dash_app
-    dash_app.app.config["TESTING"] = True
-    return dash_app.app.test_client()
-
-
-@pytest.fixture()
 def no_update(monkeypatch):
     import focuscore.updater as updater_mod
     monkeypatch.setattr(updater_mod, "check_for_update",

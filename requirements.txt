@@ -1,6 +1,7 @@
 flask>=3.0
 requests>=2.2
 pytest>=8.0
+pytest-cov==7.1.0  # dev-only coverage gate (roadmap 1.8); CI-only like pytest above -- never add to requirements-lock.txt (the installer ships runtime deps only)
 plyer>=2.0
 pystray>=0.19
 Pillow>=10.0

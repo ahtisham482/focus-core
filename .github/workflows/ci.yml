@@ -74,8 +74,14 @@ jobs:
           python-version: "3.12"
       - name: Install dependencies
         run: pip install -r requirements.txt
+      # Coverage gate (roadmap 1.8): term-missing report, floor of 69
+      # measured 71.9% total over focuscore+dashboard on 2026-10-01
+      # (focuscore 72.2%, dashboard 70.8%); the floor is the measured
+      # total minus 2 points so ordinary platform jitter cannot fail
+      # the gate. Ratchet: raise the floor as coverage improves --
+      # never lower it to pass a failing run.
       - name: Run test suite
-        run: pytest -q
+        run: pytest -q --cov=focuscore --cov=dashboard --cov-report=term-missing --cov-fail-under=69
 
   artifact:
     name: Build release zip

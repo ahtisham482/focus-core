@@ -113,16 +113,6 @@ def test_data_dir_listing_names_and_sizes_only(env):
     assert DB_MARKER not in listing       # contents are not
 
 
-@pytest.fixture()
-def dash(tmp_path, monkeypatch):
-    pytest.importorskip("flask")
-    db = str(tmp_path / "t.db")
-    monkeypatch.setattr(store, "DEFAULT_DB_PATH", db)
-    import dashboard.app as dash_app
-    dash_app.app.config["TESTING"] = True
-    return dash_app.app.test_client()
-
-
 def test_route_serves_a_zip(dash):
     resp = dash.get("/backup/diagnostics")
     assert resp.status_code == 200

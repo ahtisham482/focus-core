@@ -2,20 +2,7 @@
 
 import sqlite3
 
-import pytest
-
 from focuscore import invoices, store
-
-
-@pytest.fixture()
-def client(tmp_path, monkeypatch):
-    db = str(tmp_path / "routes.db")
-    monkeypatch.setattr(store, "DEFAULT_DB_PATH", db)
-    # dashboard.app reads store.DEFAULT_DB_PATH at request time
-    from dashboard import app as app_mod
-    app_mod.app.config["TESTING"] = True
-    with app_mod.app.test_client() as c:
-        yield c, db
 
 
 def _seed(db):
