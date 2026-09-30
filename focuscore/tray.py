@@ -205,6 +205,13 @@ class TrayApp:
         import subprocess
         from . import launcher, updater
         try:
+            # Roadmap 1.4 / blocked on 0.5: before launching, verify the
+            # Authenticode signature of pending["installer"] with
+            # focuscore.authenticode.verify_authenticode() and refuse to
+            # launch (delete the file, log, tell the user) when it does
+            # not pass. NOT wired yet: the signing identity does not
+            # exist (SignPath application not submitted), so a hard gate
+            # here would refuse every legitimate update today.
             bat = updater.write_update_launcher(pending["installer"])
             subprocess.Popen(["cmd", "/c", str(bat)],
                              stdout=subprocess.DEVNULL,

@@ -271,9 +271,9 @@ def download_installer(asset_url, dest_path, expected_size=0,
     Honest scope (roadmap 0.1): this detects accidental corruption and
     truncation only. It does NOT stop a compromised release — an attacker
     who owns the release replaces the exe AND the SHA256SUMS file together,
-    and the hash check passes happily. That release-pipeline-compromise
-    path is closed by the Authenticode signature check (roadmap 1.4), not
-    by this function.
+    and the hash check passes happily. The Authenticode verifier for that
+    path exists (focuscore/authenticode.py, roadmap 1.4 partial); it is
+    not enforced yet because no signing identity exists (roadmap 0.5).
     """
     dest_path = Path(dest_path)
     req = urllib.request.Request(asset_url,
