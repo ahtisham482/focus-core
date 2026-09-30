@@ -1,5 +1,6 @@
 """Phase 9: exports. Qwen audit M1.6/M4/M5/F + constraints E/G."""
 
+import datetime
 import json
 
 from focuscore import budgets, exports, store
@@ -222,7 +223,10 @@ def test_statement_declares_budget_cap(tmp_path):
                                      project_id=pid, path=db)
     manifest = exports.redaction_manifest()
     totals = exports.compute_totals(rows, path=db)
-    start, _ = budgets.period_bounds("month", "2026-09-21")
+    # set_budget stamps the *current* period; query that same period so the
+    # test never depends on the calendar date it runs on. (It broke the day
+    # October 2026 began, when a fixed September ref day no longer matched.)
+    start, _ = budgets.period_bounds("month", datetime.date.today().isoformat())
     cap = budgets.get_cap_for_period(pid, "month", start, path=db)
     page_html = exports.rows_to_statement_html(
         rows, totals, {"from": "2026-09-21", "to": "2026-09-22"},
