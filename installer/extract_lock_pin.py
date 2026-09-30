@@ -1,8 +1,9 @@
 """Print the exact pinned requirement line for one package from the lock.
 
-Both installer workflows use this to install their build-machine Pillow
-from requirements-lock.txt, so the extraction logic lives in one tested
-place instead of drifting between workflow files.
+The pin extraction lives here, tested once. Both installer workflows
+install their build-machine tools via installer/install_locked_pin.py,
+which builds on extract_lock_pin() below to install the pin with hash
+checking.
 
 Usage (from the repo root):
     python installer/extract_lock_pin.py Pillow

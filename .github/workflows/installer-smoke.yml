@@ -28,22 +28,13 @@ jobs:
         with:
           python-version: "3.12"
 
+      # Build-machine Pillow comes from the hash-locked pin in
+      # requirements-lock.txt via the tested installer/install_locked_pin.py
+      # (pip only accepts --hash inside a requirements file, so the helper
+      # installs with --require-hashes -r; the same helper serves the
+      # release workflow, so the two cannot drift).
       - name: Install build deps
-        shell: python
-        run: |
-          import subprocess
-          import sys
-
-          # Same locked Pillow pin as the release workflow, via the one
-          # tested helper (installer/extract_lock_pin.py).
-          line = subprocess.check_output(
-              [sys.executable, "installer/extract_lock_pin.py", "Pillow"],
-              text=True,
-          ).strip()
-          subprocess.check_call(
-              [sys.executable, "-m", "pip", "install", "--require-hashes",
-               *line.split()]
-          )
+        run: python installer/install_locked_pin.py Pillow
 
       - name: Stage the app (embedded Python + code)
         run: python installer/build.py --version "0.0.0.${{ github.run_number }}" --repo "${{ github.repository }}"

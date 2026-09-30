@@ -167,13 +167,18 @@ def test_install_locked_dependencies_uses_the_lock_and_require_hashes(
 
 def test_installer_workflows_install_pillow_from_the_lock():
     # Both installer workflows must get their build-machine Pillow from
-    # the shared lock-pin helper, never a floating install. (The smoke
-    # workflow's `pip install playwright` is a CI test harness, not a
-    # shipped dependency, and stays out of scope.)
+    # the hash-locked install helper, never a floating install. (The
+    # smoke workflow's `pip install playwright` is a CI test harness,
+    # not a shipped dependency, and stays out of scope.)
+    # The pip invocation must live in the tested helper, not inline in
+    # the YAML: pip rejects `--hash` on the command line ("no such
+    # option: --hash"), which is how the inline form broke CI.
     for name in ("installer.yml", "installer-smoke.yml"):
         workflow = (ROOT / ".github" / "workflows" / name).read_text()
         assert "pip install pillow" not in workflow, name
-        assert "extract_lock_pin.py" in workflow, name
+        assert "installer/install_locked_pin.py" in workflow, name
+        assert "line.split()" not in workflow, name
+        assert "extract_lock_pin.py" not in workflow, name
 
 
 def _run_helper(*args):
@@ -352,3 +357,89 @@ def test_main_verifies_each_download_before_using_it(tmp_path, monkeypatch):
 def test_build_py_docstring_points_at_the_locked_pillow_install():
     assert "pip install pillow" not in build.__doc__
     assert "--require-hashes" in build.__doc__
+
+
+INSTALL_PATH = ROOT / "installer" / "install_locked_pin.py"
+
+
+def _load_install_locked_pin():
+    install_spec = importlib.util.spec_from_file_location(
+        "install_locked_pin", INSTALL_PATH
+    )
+    mod = importlib.util.module_from_spec(install_spec)
+    assert install_spec.loader is not None
+    install_spec.loader.exec_module(mod)
+    return mod
+
+
+def test_install_locked_pin_installs_via_a_requirements_file():
+    # pip only accepts --hash inside a requirements file; on the
+    # command line it exits with "no such option: --hash" (this broke
+    # the installer smoke workflow in CI). The helper must therefore
+    # write the pin to a temp file and install with -r.
+    mod = _load_install_locked_pin()
+    seen = {}
+
+    def fake_runner(cmd):
+        seen["cmd"] = cmd
+        req_path = Path(cmd[-1])
+        seen["req_path"] = req_path
+        # The requirements file must exist while pip runs.
+        seen["req_text"] = req_path.read_text()
+
+    assert mod.install("Pillow", runner=fake_runner) == 0
+
+    cmd = seen["cmd"]
+    assert cmd[:4] == [sys.executable, "-m", "pip", "install"]
+    assert "--require-hashes" in cmd
+    assert cmd[-2] == "-r"
+    assert "--hash" not in cmd
+    version, digest = _lock_entries()["pillow"]
+    assert seen["req_text"] == "Pillow==%s --hash=sha256:%s\n" % (
+        version,
+        digest,
+    )
+    # Temp file cleaned up after the install.
+    assert not seen["req_path"].exists()
+
+
+def test_install_locked_pin_propagates_pip_failure_and_cleans_up():
+    mod = _load_install_locked_pin()
+    seen = {}
+
+    def bad_runner(cmd):
+        seen["req_path"] = Path(cmd[-1])
+        raise subprocess.CalledProcessError(2, cmd)
+
+    with pytest.raises(subprocess.CalledProcessError):
+        mod.install("Pillow", runner=bad_runner)
+
+    assert not seen["req_path"].exists()
+
+
+def test_install_locked_pin_rejects_unknown_package_without_calling_pip():
+    mod = _load_install_locked_pin()
+    calls = []
+
+    with pytest.raises(ValueError):
+        mod.install(
+            "definitely-not-a-package-zzz",
+            runner=lambda cmd: calls.append(cmd),
+        )
+
+    assert calls == []
+
+
+def test_install_locked_pin_main_maps_failures_to_exit_codes(monkeypatch, capsys):
+    mod = _load_install_locked_pin()
+
+    # Unknown package: error on stderr, exit 2, pip never invoked.
+    assert mod.main(["definitely-not-a-package-zzz"]) == 2
+    assert "no pinned entry" in capsys.readouterr().err
+
+    # pip failure: the pip exit code comes back, not a traceback.
+    def bad_check_call(cmd):
+        raise subprocess.CalledProcessError(2, cmd)
+
+    monkeypatch.setattr(mod.subprocess, "check_call", bad_check_call)
+    assert mod.main(["Pillow"]) == 2
