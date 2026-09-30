@@ -16,11 +16,15 @@ Usage:
 """
 
 import argparse
+import logging
 import time
 from datetime import datetime, timedelta
 
 from . import store
 from .scoring import productivity_pulse
+
+# Roadmap 0.3: log failures that used to be swallowed silently.
+logger = logging.getLogger(__name__)
 
 BLOCK_LEVELS = {
     "strict": frozenset({-1, -2}),
@@ -140,6 +144,9 @@ def end_session(db_path=None, now=None):
         from . import gamification as gami_mod
         xp = gami_mod.award_session_xp(session["id"], db_path=db_path)
     except Exception:
+        # Roadmap 0.3: lost XP used to fail with no trace.
+        logger.exception("award_session_xp failed for session %s",
+                         session["id"])
         xp = {}
     return {"session": session,
             "summary": session_summary(session["id"], db_path=db_path,
@@ -522,6 +529,9 @@ def _close_active_cycle(session_id, status, now, db_path):
                             now.isoformat(timespec="seconds"),
                             path=db_path)
     except Exception:
+        # Roadmap 0.3: a stuck-open cycle used to fail with no trace.
+        logger.exception("close_active_cycle failed for session %s",
+                         session_id)
         pass
 
 

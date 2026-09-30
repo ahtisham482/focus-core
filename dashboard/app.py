@@ -20,6 +20,7 @@ Routes:
 
 import sys
 import json as _json
+import logging
 from datetime import date, datetime
 from html import escape
 from pathlib import Path
@@ -36,6 +37,9 @@ from focuscore.pipeline import run_day  # noqa: E402
 from focuscore.scoring import UI_LABELS, productivity_pulse  # noqa: E402
 
 app = Flask(__name__)
+
+# Roadmap 0.3: module logger for the error handlers below.
+logger = logging.getLogger(__name__)
 
 ONBOARDED_FLAG = paths.onboarded_flag()
 
@@ -515,6 +519,42 @@ def _add_security_headers(response):
             "img-src 'self' data:"
         )
     return response
+
+
+# --------------------------------------------------- friendly errors ---
+# Roadmap 0.3: branded 404/500 pages. Plain English, calm, with a
+# recovery link -- never a traceback or internals. The 500 handler
+# still logs the exception server-side so field failures leave a trace.
+
+def _error_page(code, headline, detail):
+    """Branded error page inside the normal page shell."""
+    body = (
+        "<div class='hm-wrap'><div class='hm-empty'>"
+        "<p class='hm-empty-title'>%s</p>"
+        "<p>%s</p>"
+        "<p><a href='/'>Back to Home</a></p>"
+        "</div></div>"
+        % (escape(headline), detail))
+    return layout("%s (%d)" % (headline, code), body, active="home")
+
+
+@app.errorhandler(404)
+def _page_not_found(_err):
+    return _error_page(
+        404,
+        "This page doesn't exist.",
+        "The link may be old, or the address may have a typo. "
+        "Your data is untouched."), 404
+
+
+@app.errorhandler(500)
+def _internal_error(_err):
+    logger.exception("Unhandled exception while serving %s", request.path)
+    return _error_page(
+        500,
+        "Something went wrong on our side.",
+        "Your data is safe. Head back home and carry on &mdash; if this "
+        "keeps happening, the details are in the app log."), 500
 
 
 _TARGET_SVG = (

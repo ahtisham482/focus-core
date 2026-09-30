@@ -8,6 +8,7 @@ Craft pass (v1.15.x): action-first layout, sentence forms, live strip,
 starter chips. Same POST contracts, restructured HTML only.
 """
 from html import escape
+import logging
 
 from flask import jsonify, redirect, request
 
@@ -17,6 +18,9 @@ from dashboard.app import (
     _living_tabs,
     layout,
 )
+
+# Roadmap 0.3: log failures that used to be swallowed silently.
+logger = logging.getLogger(__name__)
 
 # Craft pass: per-page stylesheet (merged by the orchestrator).
 
@@ -615,7 +619,8 @@ def focus_page():
     try:
         focus_mod.settle_session()
     except Exception:
-        pass
+        # Roadmap 0.3: a stuck session used to fail with no trace.
+        logger.exception("settle_session failed on /focus page view")
     active = focus_mod.get_active_session()
     if active:
         body = _fc_active_page(active, focus_mod)
@@ -774,7 +779,8 @@ def focus_cues_toggle():
     try:
         store_mod.set_setting("audio_cues", enabled)
     except Exception:
-        pass
+        # Roadmap 0.3: the user's toggle choice was silently dropped.
+        logger.exception("set_setting('audio_cues') failed on /focus/cues")
     return redirect("/focus")
 
 

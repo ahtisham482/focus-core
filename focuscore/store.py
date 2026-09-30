@@ -6,9 +6,13 @@ wherever the folder is placed -- no absolute paths anywhere.
 """
 
 import sqlite3
+import logging
 from datetime import date, datetime, timedelta
 
 from . import paths
+
+# Roadmap 0.3: log failures that used to be swallowed silently.
+logger = logging.getLogger(__name__)
 
 DEFAULT_DB_PATH = paths.db_path()
 
@@ -1274,6 +1278,8 @@ def set_setting(key, value, path=None):
         finally:
             conn.close()
     except Exception:
+        # Roadmap 0.3: a failed preference write used to vanish.
+        logger.exception("set_setting(%r) failed", key)
         pass
 
 
@@ -1438,6 +1444,9 @@ def get_active_pass(now=None, path=None):
             except (ValueError, TypeError):
                 continue
     except Exception:
+        # Roadmap 0.3: a failed pass lookup used to vanish (pass silently
+        # treated as inactive).
+        logger.exception("get_active_pass failed")
         pass
     return None
 

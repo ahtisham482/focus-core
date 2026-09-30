@@ -30,6 +30,7 @@ Usage:
 import argparse
 import dataclasses
 import json
+import logging
 import os
 import queue
 import subprocess
@@ -40,6 +41,9 @@ from datetime import datetime, timedelta
 
 from . import paths
 from .win32 import ELEVATED_UNKNOWN, FALLBACK_POLL_SECONDS
+
+# Roadmap 0.3: log failures that used to be swallowed silently.
+logger = logging.getLogger(__name__)
 
 # ---------------------------------------------------------------------------
 # Named constants (documented, Phase 6 precedent)
@@ -148,7 +152,8 @@ def _build_snapshot(db_path):
     try:
         focus_mod.settle_session(db_path=db_path)
     except Exception:
-        pass
+        # Roadmap 0.3: refresher-thread settle used to fail with no trace.
+        logger.exception("refresher settle_session failed")
     try:
         rules = store.get_block_rules(path=db_path, only_enabled=True)
     except Exception:
@@ -172,6 +177,8 @@ def _build_snapshot(db_path):
     try:
         active_pass = pass_active(now=datetime.now(), db_path=db_path)
     except Exception:
+        # Roadmap 0.3: the pass check used to fail with no trace.
+        logger.exception("snapshot pass_active lookup failed")
         active_pass = None
     try:
         hud_enabled = store.get_setting("hud_enabled", "1",
@@ -456,6 +463,9 @@ def pass_active(now=None, db_path=None):
         if p:
             return p
     except Exception:
+        # Roadmap 0.3: primary pass lookup failure was silent before the
+        # in-memory fallback.
+        logger.exception("get_active_pass failed; trying memory fallback")
         pass
     with _MEMORY_LOCK:
         mem = list(_MEMORY_PASSES)
@@ -467,6 +477,8 @@ def pass_active(now=None, db_path=None):
             if _pass_covers(p, now):
                 return p
     except Exception:
+        # Roadmap 0.3: JSONL fallback failure was silent.
+        logger.exception("fallback pass file read failed")
         pass
     return None
 
@@ -615,6 +627,9 @@ def shield_once(state, client, categorize_fn, db_path=None, now=None,
             else:
                 active_pass = pass_active(now=now, db_path=db_path)
         except Exception:
+            # Roadmap 0.3: the decide-path pass check used to fail with
+            # no trace (fail-open by design; now fail-open AND logged).
+            logger.exception("decide pass lookup failed")
             active_pass = None
         if active_pass:
             return {"action": "allow", "reason": "emergency pass",

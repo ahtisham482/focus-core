@@ -17,7 +17,11 @@ Qwen audit (2026-09-27) remediation notes, implemented here:
 """
 
 import os
+import logging
 import threading
+
+# Roadmap 0.3: log failures that used to be swallowed silently.
+logger = logging.getLogger(__name__)
 
 # ---------------------------------------------------------------------------
 # Constants
@@ -524,6 +528,8 @@ def pump_messages(stop_event, timeout_ms=500):
                     user32.TranslateMessage(byref(msg))
                     user32.DispatchMessageW(byref(msg))
             except Exception:
+                # Roadmap 0.3: pump failures used to fail with no trace.
+                logger.exception("win32 message pump iteration failed")
                 pass
             stop_event.wait(timeout_ms / 1000.0)
     except Exception:
@@ -562,6 +568,8 @@ def install_keyboard_swallow():
                     if vk == VK_TAB and (kbd.flags & LLKHF_ALTDOWN):
                         return 1  # swallow Alt+Tab
             except Exception:
+                # Roadmap 0.3: hook callback failures used to vanish.
+                logger.exception("keyboard hook callback failed")
                 pass
             return user32.CallNextHookEx(None, n_code, w_param,
                                          l_param)

@@ -249,6 +249,9 @@ def _total_rowcount(conn):
             total += conn.execute(
                 'SELECT COUNT(*) FROM "%s"' % table).fetchone()[0]
         except Exception:
+            # Roadmap 0.3: a bad table used to skew the fingerprint
+            # silently.
+            logger.exception("row count failed for table %r", table)
             pass
     return total
 

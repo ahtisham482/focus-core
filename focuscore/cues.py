@@ -15,11 +15,16 @@ system temp dir once per process — no binary assets in the repo.
 """
 
 import math
+import logging
 import os
 import struct
 import sys
 import tempfile
 import wave
+
+# Roadmap 0.3: log failures that used to be swallowed silently (R6
+# keeps cues best-effort; they must still leave a trace).
+logger = logging.getLogger(__name__)
 
 # cue name -> (frequency Hz, seconds)
 CUES = {
@@ -81,11 +86,13 @@ def play_cue(name, enabled=True):
                 winsound.PlaySound(
                     path, winsound.SND_ASYNC | winsound.SND_FILENAME)
             except Exception:
-                pass  # fail completely silent (R6)
+                logger.exception("cue playback failed for %r", name)
+                pass  # fail silent to the user (R6), logged server-side
 
         import threading
         threading.Thread(target=_runner, daemon=True,
                          name="focuscore-cue").start()
         return True
     except Exception:
-        return False  # fail completely silent (R6)
+        logger.exception("cue thread failed to start for %r", name)
+        return False  # fail silent to the user (R6), logged server-side

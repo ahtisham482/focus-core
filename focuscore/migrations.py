@@ -498,6 +498,8 @@ def _migration_0007_seed_legacy(conn: sqlite3.Connection) -> None:
                     (pid, monday.isoformat(), cap_seconds, now_utc, now_utc),
                 )
     except Exception:
+        # Roadmap 0.3: seed failures on exotic DBs were silent.
+        logger.exception("legacy budget-ledger seeding failed")
         # Legacy columns may not exist on exotic DBs; seeding is best-effort.
         pass
 

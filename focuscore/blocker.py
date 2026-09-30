@@ -16,11 +16,15 @@ Usage:
 """
 
 import argparse
+import logging
 import sys
 from datetime import datetime, timedelta
 
 from .focus import BLOCK_LEVELS
 from .ingest import BROWSER_APPS
+
+# Roadmap 0.3: log failures that used to be swallowed silently.
+logger = logging.getLogger(__name__)
 
 # Dedupe: app key -> datetime of the last block notification/overlay.
 # One distraction = one pop-up per minute, not one per 5-second poll.
@@ -97,6 +101,9 @@ def get_current_window(client, now=None,
                 events = client.get_events(
                     bucket_id, start_s, end_s) or []
             except Exception:
+                # Roadmap 0.3: a dead bucket used to fail with no trace.
+                logger.exception("get_events failed for bucket %r",
+                                 bucket_id)
                 continue
             for raw in events:
                 try:
@@ -271,6 +278,8 @@ def show_block_overlay(label, app, session_id, db_path=None):
                   command=end_session, padx=20, pady=8).pack()
         root.mainloop()
     except Exception:
+        # Roadmap 0.3: a broken overlay used to fail with no trace.
+        logger.exception("block overlay failed")
         return  # overlay is best-effort; never crash enforcement
 
 

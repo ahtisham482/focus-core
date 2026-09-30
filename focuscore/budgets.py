@@ -12,9 +12,13 @@ Binding rules:
 """
 
 from datetime import date, datetime, timedelta
+import logging
 
 from focuscore import money as money_mod
 from focuscore import store
+
+# Roadmap 0.3: log failures that used to be swallowed silently.
+logger = logging.getLogger(__name__)
 
 PERIOD_TYPES = ("week", "month")
 
@@ -98,6 +102,8 @@ def log_finance_event(entity_type, entity_id, event_type, payload=None, path=Non
         finally:
             conn.close()
     except Exception:
+        # Roadmap 0.3: a dropped ledger write was silent.
+        logger.exception("budget ledger write failed")
         pass
 
 
