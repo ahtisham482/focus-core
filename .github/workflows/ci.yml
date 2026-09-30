@@ -4,6 +4,11 @@ on:
   push:
     branches: ["**"]
   pull_request:
+  # Weekly run (roadmap 1.2): catches windows-latest image drift and
+  # newly published CVEs even when nothing is pushed for a while.
+  # Monday 06:00 UTC. Scheduled runs only fire from the default branch.
+  schedule:
+    - cron: "0 6 * * 1"
 
 jobs:
   lint:
@@ -14,15 +19,46 @@ jobs:
       - uses: actions/setup-python@v5
         with:
           python-version: "3.12"
-      - name: Install ruff (CI-only; not in requirements.txt)
-        run: pip install ruff
+      - name: Install ruff (pinned, roadmap 1.2; CI-only tool)
+        run: pip install ruff==0.16.9
       # Lint policy (orchestrator decision, Sprint 1): error-level rules only
       # (E = pycodestyle errors, F = pyflakes). The full default ruleset
-      # reports ~300 pre-existing style nits (mostly UP031 %-formatting)
+      # reports ~1.3k pre-existing style nits (mostly UP031 %-formatting)
       # across this codebase; cleaning those is parked in ROADMAP.md.
       # The gate below enforces zero real errors.
       - name: Ruff check
         run: ruff check --select E,F focuscore dashboard tests
+      # Ratchet (roadmap 1.2): the full-default-ruleset violation count
+      # may only shrink. Baseline in .ruff-baseline (ruff version and
+      # count move together); refresh after an intentional cleanup with
+      # `python installer/check_ruff_ratchet.py --refresh` and commit
+      # .ruff-baseline. Never raise the count to pass a failing run.
+      - name: Ruff ratchet (full default ruleset can only shrink)
+        run: python installer/check_ruff_ratchet.py
+
+  pip-audit:
+    name: pip-audit (dependency vulnerabilities)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Install pip-audit (pinned, roadmap 1.2; CI-only tool)
+        run: pip install pip-audit==2.10.1
+      # Both files, on purpose: requirements.txt is what this CI tests
+      # (floating ranges), requirements-lock.txt is what the installer
+      # ships (hash-locked, roadmap 1.1). A known vulnerability in
+      # either fails the job.
+      - name: Audit requirements.txt (what CI tests)
+        run: pip-audit -r requirements.txt
+      # --disable-pip: audit the lock's pinned versions exactly as
+      # written. The lock's hashes name the Windows wheels, so a Linux
+      # runner must not resolve-and-install it (it would pick Linux
+      # wheels and fail the hash check); hash enforcement happens in
+      # the installer build on Windows (roadmap 1.1).
+      - name: Audit requirements-lock.txt (what the installer ships)
+        run: pip-audit --disable-pip -r requirements-lock.txt
 
   test:
     name: pytest (Python 3.12, ${{ matrix.os }})

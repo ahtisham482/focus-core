@@ -1,0 +1,27 @@
+# Ruff ratchet baseline -- roadmap 1.2.
+#
+# CI (.github/workflows/ci.yml, lint job) runs
+# installer/check_ruff_ratchet.py, which measures the violation count of
+# ruff's FULL default ruleset over `focuscore dashboard tests installer`
+# and fails if the count is above the baseline recorded here. The count
+# may only ever shrink: cleanups lower it, new violations are rejected.
+# (The separate E,F check in the same job is the zero-tolerance hard
+# gate for real errors; this ratchet guards the parked style nits --
+# UP031 %-formatting, blind excepts, naive datetimes, etc.)
+#
+# The measurement is config-free so the pyproject E,F selection cannot
+# narrow it:
+#   ruff check --isolated --target-version py311 \
+#       --output-format json focuscore dashboard tests installer
+#
+# Refresh procedure (after an intentional cleanup, or a deliberate ruff
+# version bump in ci.yml -- the version below and the ci.yml pin must
+# always match):
+#   1. python installer/check_ruff_ratchet.py --refresh
+#   2. Commit .ruff-baseline together with the cleanup.
+# Never raise the count to make a failing run pass; fix the new
+# violations instead.
+#
+# Measured 2026-09-30 with the pinned ruff below over the paths above.
+ruff_version: 0.16.9
+count: 1355
