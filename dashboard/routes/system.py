@@ -282,7 +282,8 @@ def update_start():
     dest = Path(tempfile.gettempdir()) / asset["name"]
     try:
         updater_mod.download_installer(asset["url"], dest,
-                                       asset["size"])
+                                       asset["size"],
+                                       asset.get("checksums_url"))
     except updater_mod.UpdateError as exc:
         return layout(
             "Updates",

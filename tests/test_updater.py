@@ -1,7 +1,9 @@
 """Tests for focuscore/updater.py (Sprint 2, Phase 3: one-click updates)."""
 
+import hashlib
 import io
 import json
+import time
 import urllib.error
 
 import pytest
@@ -88,6 +90,9 @@ def fake_release(tag="v1.4.0", assets=True):
             {"name": "FocusCore-Setup-1.4.0.exe",
              "browser_download_url": "https://example.com/setup.exe",
              "size": 24200000},
+            {"name": "SHA256SUMS",
+             "browser_download_url": "https://example.com/SHA256SUMS",
+             "size": 100},
             {"name": "notes.txt",
              "browser_download_url": "https://example.com/notes.txt",
              "size": 10},
@@ -98,11 +103,25 @@ def fake_release(tag="v1.4.0", assets=True):
 def test_latest_release_picks_installer_asset(monkeypatch):
     monkeypatch.setattr(updater, "_http_get_json",
                         lambda url: fake_release())
-    tag, name, url, size = updater.latest_release("someone/focus-core")
+    tag, name, url, size, checksums_url = updater.latest_release(
+        "someone/focus-core")
     assert tag == "v1.4.0"
     assert name == "FocusCore-Setup-1.4.0.exe"
     assert url == "https://example.com/setup.exe"
     assert size == 24200000
+    assert checksums_url == "https://example.com/SHA256SUMS"
+
+
+def test_latest_release_no_checksums_asset_gives_none(monkeypatch):
+    payload = {"tag_name": "v1.4.0", "assets": [
+        {"name": "FocusCore-Setup-1.4.0.exe",
+         "browser_download_url": "https://example.com/setup.exe",
+         "size": 24200000},
+    ]}
+    monkeypatch.setattr(updater, "_http_get_json", lambda url: payload)
+    _tag, _name, _url, _size, checksums_url = updater.latest_release(
+        "someone/focus-core")
+    assert checksums_url is None
 
 
 def test_latest_release_no_asset_raises(monkeypatch):
@@ -209,14 +228,8 @@ class _FakeResponse:
         return False
 
 
-def test_download_installer_ok(tmp_path, monkeypatch):
-    data = b"x" * 1000
-    monkeypatch.setattr("urllib.request.urlopen",
-                        lambda req, timeout=None: _FakeResponse(data))
-    dest = tmp_path / "setup.exe"
-    assert updater.download_installer("https://example.com/s.exe", dest,
-                                      expected_size=1000) == dest
-    assert dest.read_bytes() == data
+# (happy-path download is covered by test_download_hash_ok below —
+#  checksums_url is now required for a successful download)
 
 
 def test_download_size_mismatch_raises(tmp_path, monkeypatch):
@@ -227,6 +240,194 @@ def test_download_size_mismatch_raises(tmp_path, monkeypatch):
         updater.download_installer("https://example.com/s.exe",
                                    tmp_path / "setup.exe",
                                    expected_size=1000)
+
+
+def test_download_size_mismatch_deletes_partial_file(tmp_path, monkeypatch):
+    """A size-rejected download must not litter the temp dir."""
+    monkeypatch.setattr(
+        "urllib.request.urlopen",
+        lambda req, timeout=None: _FakeResponse(b"x" * 10))
+    dest = tmp_path / "setup.exe"
+    with pytest.raises(updater.UpdateError, match="[Ii]ncomplete"):
+        updater.download_installer("https://example.com/s.exe", dest,
+                                   expected_size=1000)
+    assert not dest.exists()
+
+
+# --- SHA-256 verification (roadmap 0.1) --------------------------------
+
+
+def _sha256sums(entries):
+    """Build a SHA256SUMS body from {filename: bytes}."""
+    lines = []
+    for name, data in entries.items():
+        lines.append("%s  %s" % (hashlib.sha256(data).hexdigest(), name))
+    return ("\n".join(lines) + "\n").encode("utf-8")
+
+
+def _fake_urlopen_files(files):
+    """Route urlopen by URL to canned byte bodies."""
+    def fake(req, timeout=None):
+        url = req.full_url if hasattr(req, "full_url") else req
+        if url not in files:
+            raise urllib.error.URLError("unknown url: %s" % url)
+        return _FakeResponse(files[url])
+    return fake
+
+
+def test_download_hash_ok(tmp_path, monkeypatch):
+    data = b"x" * 1000
+    monkeypatch.setattr(
+        "urllib.request.urlopen",
+        _fake_urlopen_files({
+            "https://example.com/s.exe": data,
+            "https://example.com/SHA256SUMS":
+                _sha256sums({"setup.exe": data}),
+        }))
+    dest = tmp_path / "setup.exe"
+    assert updater.download_installer(
+        "https://example.com/s.exe", dest, expected_size=1000,
+        checksums_url="https://example.com/SHA256SUMS") == dest
+    assert dest.read_bytes() == data  # verified file is kept
+
+
+def test_download_hash_mismatch_raises_and_deletes(tmp_path, monkeypatch):
+    good = b"x" * 1000
+    bad = b"x" * 999 + b"y"  # one flipped byte, same size
+    monkeypatch.setattr(
+        "urllib.request.urlopen",
+        _fake_urlopen_files({
+            "https://example.com/s.exe": bad,
+            "https://example.com/SHA256SUMS":
+                _sha256sums({"setup.exe": good}),
+        }))
+    dest = tmp_path / "setup.exe"
+    with pytest.raises(updater.UpdateError, match="[Ii]ntegrity check"):
+        updater.download_installer(
+            "https://example.com/s.exe", dest, expected_size=1000,
+            checksums_url="https://example.com/SHA256SUMS")
+    assert not dest.exists()  # tampered/corrupt file is not left behind
+
+
+def test_download_missing_checksums_url_fails_closed(tmp_path, monkeypatch):
+    monkeypatch.setattr(
+        "urllib.request.urlopen",
+        lambda req, timeout=None: _FakeResponse(b"x" * 1000))
+    dest = tmp_path / "setup.exe"
+    with pytest.raises(updater.UpdateError, match="[Cc]hecksum"):
+        updater.download_installer("https://example.com/s.exe", dest,
+                                   expected_size=1000,
+                                   checksums_url=None)
+    assert not dest.exists()
+
+
+def test_download_checksums_missing_entry_fails_closed(tmp_path, monkeypatch):
+    data = b"x" * 1000
+    monkeypatch.setattr(
+        "urllib.request.urlopen",
+        _fake_urlopen_files({
+            "https://example.com/s.exe": data,
+            "https://example.com/SHA256SUMS":
+                _sha256sums({"other-file.exe": data}),
+        }))
+    dest = tmp_path / "setup.exe"
+    with pytest.raises(updater.UpdateError, match="[Cc]hecksum"):
+        updater.download_installer(
+            "https://example.com/s.exe", dest, expected_size=1000,
+            checksums_url="https://example.com/SHA256SUMS")
+    assert not dest.exists()
+
+
+def test_download_checksums_fetch_failure_fails_closed(tmp_path, monkeypatch):
+    data = b"x" * 1000
+
+    def fake(req, timeout=None):
+        url = req.full_url if hasattr(req, "full_url") else req
+        if url == "https://example.com/SHA256SUMS":
+            raise urllib.error.URLError("nope")
+        return _FakeResponse(data)
+
+    monkeypatch.setattr("urllib.request.urlopen", fake)
+    dest = tmp_path / "setup.exe"
+    with pytest.raises(updater.UpdateError, match="[Cc]hecksum"):
+        updater.download_installer(
+            "https://example.com/s.exe", dest, expected_size=1000,
+            checksums_url="https://example.com/SHA256SUMS")
+    assert not dest.exists()
+
+
+def test_parse_checksums_tolerates_format_variants():
+    data = b"hello"
+    digest = hashlib.sha256(data).hexdigest()
+    body = (
+        "# a comment line\n"
+        "\n"
+        "%s *setup.exe\n"        # binary-mode marker
+        "%s  other.exe\n"        # text-mode marker
+        % (digest, digest)
+    )
+    entries = updater.parse_checksums(body)
+    assert entries == {"setup.exe": digest, "other.exe": digest}
+
+
+def test_parse_checksums_ignores_garbage_lines():
+    entries = updater.parse_checksums(
+        b"not a checksum line\nzzzz  bad.exe\n")
+    assert entries == {}
+
+
+def test_check_carries_checksums_url(app_root, monkeypatch):
+    write_update_info(app_root, version="1.3.0")
+    monkeypatch.setattr(updater, "_http_get_json",
+                        lambda url: fake_release("v1.4.0"))
+    result = updater.check_for_update()
+    assert result["asset"]["checksums_url"] == \
+        "https://example.com/SHA256SUMS"
+
+
+def _write_cache(app_root, payload):
+    (app_root / updater.CHECK_CACHE_NAME).write_text(json.dumps(payload))
+
+
+def test_check_old_cache_without_checksums_url_is_stale(
+        app_root, monkeypatch):
+    """A cache written before 0.1 must be re-checked, not trusted."""
+    write_update_info(app_root, version="1.3.0")
+    _write_cache(app_root, {
+        "status": "ok", "current": "1.3.0", "latest": "v1.4.0",
+        "update_available": True,
+        "asset": {"name": "FocusCore-Setup-1.4.0.exe",
+                  "url": "https://example.com/setup.exe",
+                  "size": 24200000},  # no checksums_url: old format
+        "checked_at": time.time(),
+    })
+    calls = []
+    monkeypatch.setattr(
+        updater, "_http_get_json",
+        lambda url: calls.append(url) or fake_release("v1.4.0"))
+    result = updater.check_for_update()
+    assert calls  # stale -> the API was hit again
+    assert result["asset"]["checksums_url"] == \
+        "https://example.com/SHA256SUMS"
+
+
+def test_check_asset_null_cache_is_stale_not_crash(
+        app_root, monkeypatch):
+    """A hand-corrupted cache ("asset": null) must not TypeError."""
+    write_update_info(app_root, version="1.3.0")
+    _write_cache(app_root, {
+        "status": "ok", "current": "1.3.0", "latest": "v1.4.0",
+        "update_available": True, "asset": None,
+        "checked_at": time.time(),
+    })
+    calls = []
+    monkeypatch.setattr(
+        updater, "_http_get_json",
+        lambda url: calls.append(url) or fake_release("v1.4.0"))
+    result = updater.check_for_update()
+    assert calls  # stale -> re-checked instead of crashing
+    assert result["asset"]["checksums_url"] == \
+        "https://example.com/SHA256SUMS"
 
 
 # --- pending flag ----------------------------------------------------

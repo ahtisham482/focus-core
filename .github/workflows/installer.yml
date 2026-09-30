@@ -59,17 +59,33 @@ jobs:
             installer\installer.iss /DAppVersion="${{ env.VERSION }}"
           Get-ChildItem installer\FocusCore-Setup-*.exe
 
+      - name: Write SHA256SUMS
+        shell: pwsh
+        run: |
+          $exe = Get-ChildItem installer\FocusCore-Setup-*.exe |
+            Select-Object -First 1
+          $hash = (Get-FileHash $exe.FullName -Algorithm SHA256).Hash.ToLower()
+          "$hash  $($exe.Name)" |
+            Out-File -FilePath installer\SHA256SUMS -Encoding ascii
+          Get-Content installer\SHA256SUMS
+
       - name: Upload installer artifact
         uses: actions/upload-artifact@v4
         with:
           name: FocusCore-Setup-${{ env.VERSION }}
-          path: installer/FocusCore-Setup-*.exe
+          path: |
+            installer/FocusCore-Setup-*.exe
+            installer/SHA256SUMS
 
       - name: Attach to GitHub Release
         if: github.ref_type == 'tag'
         uses: softprops/action-gh-release@v2
         with:
-          files: installer/FocusCore-Setup-*.exe
+          # The updater verifies the exe against SHA256SUMS before
+          # executing it (roadmap 0.1); both files must ship together.
+          files: |
+            installer/FocusCore-Setup-*.exe
+            installer/SHA256SUMS
           # Professional release page: one obvious download, no confusion
           # with GitHub's auto-attached "Source code (zip)" (raw code only).
           body: |

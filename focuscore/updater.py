@@ -20,6 +20,8 @@ Notes:
   the update page says so.
 """
 
+import hashlib
+import hmac
 import json
 import tempfile
 import time
@@ -38,6 +40,7 @@ USER_AGENT = "FocusCore-Updater"
 REQUEST_TIMEOUT = 20
 CHECK_TTL_SECONDS = 24 * 3600
 INSTALLER_PREFIX = "FocusCore-Setup-"
+CHECKSUMS_NAME = "SHA256SUMS"
 
 
 class UpdateError(Exception):
@@ -93,7 +96,11 @@ def _http_get_json(url):
 
 
 def latest_release(repo):
-    """``(tag, asset_name, asset_url, asset_size)`` for the newest release.
+    """``(tag, asset_name, asset_url, asset_size, checksums_url)``.
+
+    ``checksums_url`` is the download URL of the release's ``SHA256SUMS``
+    asset, or None when the release has none. The updater refuses to
+    install from a release without one (fail closed).
 
     Raises UpdateError when the API can't be reached, the repo is
     private, or no installer asset is attached.
@@ -118,13 +125,19 @@ def latest_release(repo):
         raise UpdateError("GitHub answered with bad data.") from exc
     if not isinstance(data, dict) or "tag_name" not in data:
         raise UpdateError("GitHub answered with bad data.")
+    installer = None
+    checksums_url = None
     for asset in data.get("assets") or []:
         name = asset.get("name") or ""
-        if name.startswith(INSTALLER_PREFIX) and name.endswith(".exe"):
-            return (data["tag_name"], name,
-                    asset.get("browser_download_url"),
-                    asset.get("size") or 0)
-    raise UpdateError("The newest release has no installer attached yet.")
+        if name == CHECKSUMS_NAME:
+            checksums_url = asset.get("browser_download_url")
+        elif name.startswith(INSTALLER_PREFIX) and name.endswith(".exe"):
+            installer = (data["tag_name"], name,
+                         asset.get("browser_download_url"),
+                         asset.get("size") or 0)
+    if installer is None:
+        raise UpdateError("The newest release has no installer attached yet.")
+    return installer + (checksums_url,)
 
 
 def _cache_file():
@@ -151,19 +164,24 @@ def check_for_update(force=False):
         return {"status": "dev-copy"}
     if not force:
         cached = read_cached_check()
+        # A cache written before SHA-256 verification existed has no
+        # checksums_url in the asset dict — treat it as stale.
         if cached and isinstance(cached, dict) and \
                 time.time() - cached.get("checked_at", 0) < CHECK_TTL_SECONDS \
-                and cached.get("current") == info["version"]:
+                and cached.get("current") == info["version"] and (
+                    cached.get("status") != "ok"
+                    or "checksums_url" in (cached.get("asset") or {})):
             return cached
     try:
-        tag, asset_name, asset_url, asset_size = latest_release(info["repo"])
+        tag, asset_name, asset_url, asset_size, checksums_url = \
+            latest_release(info["repo"])
         result = {
             "status": "ok",
             "current": info["version"],
             "latest": tag,
             "update_available": is_newer(info["version"], tag),
             "asset": {"name": asset_name, "url": asset_url,
-                      "size": asset_size},
+                      "size": asset_size, "checksums_url": checksums_url},
             "checked_at": time.time(),
         }
     except UpdateError as exc:
@@ -176,8 +194,82 @@ def check_for_update(force=False):
     return result
 
 
-def download_installer(asset_url, dest_path, expected_size=0):
-    """Download the installer exe. Raises UpdateError on failure."""
+def parse_checksums(body):
+    """Parse a ``SHA256SUMS`` file body into ``{filename: hex_digest}``.
+
+    Tolerates the standard variants: the ``*`` binary-mode marker, blank
+    lines, and ``#`` comments. Garbage lines are skipped; returns {} for
+    garbage input. ``body`` may be bytes or str.
+    """
+    if isinstance(body, bytes):
+        body = body.decode("utf-8", errors="replace")
+    entries = {}
+    for line in body.splitlines():
+        line = line.strip()
+        if not line or line.startswith("#"):
+            continue
+        bits = line.split(None, 1)
+        if len(bits) != 2:
+            continue
+        digest, fname = bits
+        fname = fname.lstrip(" *")
+        if len(digest) != 64 or not fname:
+            continue
+        try:
+            int(digest, 16)
+        except ValueError:
+            continue
+        entries[fname] = digest.lower()
+    return entries
+
+
+def _fetch_checksums(checksums_url):
+    """Fetch + parse the release's SHA256SUMS file. Raises UpdateError."""
+    req = urllib.request.Request(checksums_url,
+                                 headers={"User-Agent": USER_AGENT})
+    try:
+        with urllib.request.urlopen(req,
+                                    timeout=REQUEST_TIMEOUT) as resp:
+            body = resp.read()
+    except (urllib.error.URLError, TimeoutError, OSError) as exc:
+        raise UpdateError(
+            "Couldn't fetch the release's checksum file (%s)." % exc
+        ) from exc
+    entries = parse_checksums(body)
+    if not entries:
+        raise UpdateError(
+            "The release's checksum file had no usable entries.")
+    return entries
+
+
+def _sha256_file(path):
+    """SHA-256 hex digest of a file, read in chunks. Stdlib only."""
+    digest = hashlib.sha256()
+    with open(path, "rb") as handle:
+        for chunk in iter(lambda: handle.read(1024 * 256), b""):
+            digest.update(chunk)
+    return digest.hexdigest()
+
+
+def _discard(path):
+    """Best-effort delete of an unverified download."""
+    try:
+        Path(path).unlink()
+    except OSError:
+        pass
+
+
+def download_installer(asset_url, dest_path, expected_size=0,
+                       checksums_url=None):
+    """Download the installer exe and verify its SHA-256. Raises UpdateError.
+
+    Honest scope (roadmap 0.1): this detects accidental corruption and
+    truncation only. It does NOT stop a compromised release — an attacker
+    who owns the release replaces the exe AND the SHA256SUMS file together,
+    and the hash check passes happily. That release-pipeline-compromise
+    path is closed by the Authenticode signature check (roadmap 1.4), not
+    by this function.
+    """
     dest_path = Path(dest_path)
     req = urllib.request.Request(asset_url,
                                  headers={"User-Agent": USER_AGENT})
@@ -196,9 +288,34 @@ def download_installer(asset_url, dest_path, expected_size=0):
     if got == 0:
         raise UpdateError("The download came back empty.")
     if expected_size and got != expected_size:
+        _discard(dest_path)
         raise UpdateError(
             "The download looks incomplete (got %d of %d bytes)."
             % (got, expected_size))
+    # Fail closed: no checksum file, no install — never silently skip the
+    # check. The downloaded file is deleted, not left lying around.
+    if not checksums_url:
+        _discard(dest_path)
+        raise UpdateError(
+            "The release is missing its checksum file (SHA256SUMS), so "
+            "the download can't be verified. Nothing was installed.")
+    try:
+        entries = _fetch_checksums(checksums_url)
+    except UpdateError:
+        _discard(dest_path)
+        raise
+    expected = entries.get(dest_path.name)
+    if expected is None:
+        _discard(dest_path)
+        raise UpdateError(
+            "The release's checksum file has no entry for %s, so the "
+            "download can't be verified. Nothing was installed."
+            % dest_path.name)
+    if not hmac.compare_digest(_sha256_file(dest_path), expected):
+        _discard(dest_path)
+        raise UpdateError(
+            "The download failed its integrity check (SHA-256 mismatch) "
+            "— it may be corrupted. Nothing was installed.")
     return dest_path
 
 
