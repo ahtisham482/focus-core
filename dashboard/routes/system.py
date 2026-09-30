@@ -16,7 +16,6 @@ from dashboard.app import (
     _SCORE_CELL_COLORS,
     _WEEKDAY_NAMES,
     _cat_color,
-    _delta_str,
     _parse_day,
     _pulse_cell_color,
     _rule_schedule_text,
@@ -931,7 +930,6 @@ def intelligence_page():
     depth = intel_mod.depth_summary(day_from, today)
     ttf = intel_mod.median_time_to_focus(day_from, today)
     anatomy = intel_mod.distraction_anatomy(day_from, today)
-    trends = intel_mod.week_trends()
 
     rates = []
     d = day_from
@@ -1097,34 +1095,6 @@ def intelligence_page():
         "point' is the app you were using right before a distraction "
         "block started.</p></details></div>"
         % (anatomy_caption, distractor_rows, entry_rows))
-
-    # --- card 6: week trends ---
-    tw, lw, dl = (trends["this_week"], trends["last_week"],
-                  trends["deltas"])
-    def _fmt(value, suffix=""):
-        if value is None:
-            return "--"
-        return "%.1f%s" % (value, suffix)
-    trend_rows = "".join(
-        "<tr><td>%s</td><td>%s</td><td>%s</td><td>%s</td></tr>"
-        % (label, _fmt(lw[key], suffix), _fmt(tw[key], suffix),
-           _delta_str(dl[key]))
-        for label, key, suffix in [
-            ("Tracked hours", "hours", "h"),
-            ("Average Pulse", "avg_pulse", ""),
-            ("Focus minutes", "focus_minutes", ""),
-            ("Switches / hour", "switches_per_hour", ""),
-            ("Avg longest stretch (min)", "longest_stretch_avg", "")])
-    trends_card = (
-        "<div class='card'><h3>This week vs last week</h3>"
-        "<p class='note'>%s vs %s.</p>"
-        "<table><tr><th></th><th>Last week</th><th>This week</th>"
-        "<th>Change</th></tr>%s</table>"
-        "<details class='how'><summary>How we compute this</summary>"
-        "<p class='note'>This week runs Monday to today; last week is "
-        "Monday to Sunday. Change is this week minus last week.</p>"
-        "</details></div>"
-        % (trends["this_label"], trends["last_label"], trend_rows))
 
     # --- card 7: interactive day timeline ---
     hour_blocks = []

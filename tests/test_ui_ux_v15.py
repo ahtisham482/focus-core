@@ -11,10 +11,7 @@ Verifies consensus directives from Quad-Agent Council:
 from focuscore import store
 import dashboard.app as dash_app
 from dashboard.app import layout, NAV_LINKS
-from dashboard.routes.focus import (
-    _fc_depth_strip,
-    _fc_ring_card,
-)
+from dashboard.routes.focus import _fc_depth_strip
 
 
 def test_nav_links_have_icons():

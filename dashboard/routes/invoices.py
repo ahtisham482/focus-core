@@ -28,7 +28,6 @@ def invoices_page():
     msg = request.args.get("msg") or ""
     invoices = inv_mod.list_invoices(
         status=status if status in inv_mod.STATUSES else None)
-    rows = []
     outstanding = 0
     draft_cards = []
     history_rows = []
