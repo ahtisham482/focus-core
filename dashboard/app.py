@@ -1738,7 +1738,13 @@ def create_app(config=None):
     app.after_request(_add_security_headers)
     app.register_error_handler(404, _page_not_found)
     app.register_error_handler(500, _internal_error)
-    app.logger.addFilter(_DropFlaskDuplicateTraceback())
+    # The app logger is a shared per-name singleton, so attach the
+    # filter only once (Roadmap 1.6 repair, critic Objection 2).
+    if not any(
+        isinstance(f, _DropFlaskDuplicateTraceback)
+        for f in app.logger.filters
+    ):
+        app.logger.addFilter(_DropFlaskDuplicateTraceback())
     from dashboard.routes import (
         budgets,
         core,
@@ -1761,7 +1767,21 @@ def create_app(config=None):
     return app
 
 
-app = create_app()
+def __getattr__(name):
+    # PEP 562 lazy module attribute (Roadmap 1.6 repair): the compat
+    # global ``app`` is created on first access, never at import
+    # time, so a routes-first import finishes defining its
+    # blueprint before the factory runs and the global app always
+    # carries the complete route map in every import order.
+    if name == "app":
+        instance = create_app()
+        globals()["app"] = instance
+        return instance
+    raise AttributeError("module %r has no attribute %r" % (__name__, name))
+
+
+def __dir__():
+    return sorted(set(globals()) | {"app"})
 
 
 if __name__ == "__main__":
