@@ -338,6 +338,58 @@ def backup_encryption_unlock():
     return redirect("/backup")
 
 
+def _legacy_restore_confirm_html(name):
+    """Roadmap 1.9: the confirmation step for a legacy backup.
+
+    Shown when a restore is asked for a backup with no checksum
+    sidecar (made before safety checks existed). The first POST
+    restores nothing; only a second POST carrying the checkbox
+    consent below restores. ``novalidate`` because the server, not
+    the browser, decides whether consent was given.
+    """
+    return (
+        "<div class='card'><h3>Before you restore this backup</h3>"
+        "<p>You asked to restore <code>%s</code>.</p>"
+        "<p>This backup was made before safety checks were added, so "
+        "Focus Core cannot check it. Newer backups carry a small "
+        "checkfile: if one of those is changed after it is made, the "
+        "checkfile no longer matches and the restore is stopped. "
+        "This older backup has no checkfile, so there is no way to "
+        "tell whether it is still exactly as it was made.</p>"
+        "<p>Restoring replaces your current data with the data in "
+        "this backup, and that cannot be undone. First, Focus Core "
+        "saves a safety copy of your current data &mdash; that safety "
+        "copy is the only way back.</p>"
+        "<form method='post' action='/backup/restore' novalidate>"
+        "<input type='hidden' name='name' value='%s'>"
+        "<p><label><input type='checkbox' "
+        "name='confirm_legacy_restore' value='on'> "
+        "I understand this backup could not be checked, because it "
+        "was made before safety checks were added.</label></p>"
+        "<p><input type='submit' value='Restore this backup anyway'>"
+        "</p></form>"
+        "<p><a href='/backup'>Back</a></p></div>"
+        % (escape(name), escape(name)))
+
+
+def _tampered_restore_html(name):
+    """Roadmap 1.9: hard stop for a backup whose checkfile disagrees.
+
+    A backup that looks damaged or changed is never offered a way
+    through this page -- no consent form, no override. The words
+    mirror the engine's own refusal (focuscore/backup.py), which is
+    the backstop if this page is ever bypassed.
+    """
+    return (
+        "<div class='card'><h3>Restore stopped</h3>"
+        "<p>The backup <code>%s</code> failed its safety check: it "
+        "looks damaged or was changed after it was made, so restoring "
+        "it was stopped to protect your data.</p>"
+        "<p>Please pick a different backup from the list.</p>"
+        "<p><a href='/backup'>Back</a></p></div>"
+        % escape(name))
+
+
 @bp.route("/backup/restore", methods=["POST"])
 def backup_restore():
     import warnings
@@ -345,6 +397,30 @@ def backup_restore():
 
     name = (request.form.get("name") or "").strip()
     passphrase = request.form.get("passphrase") or None
+    # Roadmap 1.9: consent is exactly what the confirmation form's
+    # checkbox submits ("on"); anything else -- absent, "false",
+    # any other value -- is not consent. Classification is always
+    # server-side (classify_backup); no client flag is trusted.
+    consent = request.form.get("confirm_legacy_restore") == "on"
+
+    classification = None
+    if backup_mod.BACKUP_NAME_PATTERN.match(name):
+        try:
+            classification = backup_mod.classify_backup(name)
+        except FileNotFoundError:
+            classification = None  # restore below keeps today's 400
+    if classification is not None and not classification["ok"]:
+        if classification["reason"].startswith("legacy"):
+            if not consent:
+                return layout("Restore backup",
+                              _legacy_restore_confirm_html(name),
+                              active="backup"), 200
+        else:
+            # Tampered (or unreadable): hard stop, never a form.
+            # restore_backup would refuse too -- this page is the
+            # plain-language surface of that same refusal.
+            return layout("Backup", _tampered_restore_html(name),
+                          active="backup"), 400
     try:
         with warnings.catch_warnings(record=True) as caught:
             warnings.simplefilter("always")

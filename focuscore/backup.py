@@ -43,7 +43,10 @@ Durability guarantees (FC-001):
       audit the whole backup folder at once, e.g. before trusting a
       restore. A missing sidecar is reported as a legacy backup whose
       integrity is not verifiable; a digest that does not match is
-      reported as a checksum mismatch.
+      reported as a checksum mismatch. ``classify_backup()`` is the
+      single-backup version of the same classification (roadmap 1.9);
+      ``verify_all_backups()`` is built on it so the reason strings
+      can never drift apart.
 
 All functions are dependency-free (stdlib only). ``dest_dir`` parameters
 exist so tests can point at a temporary folder; normal use never passes
@@ -678,6 +681,50 @@ def _repair_invoice_counters(db_path):
         conn.close()
 
 
+def classify_backup(name, dest_dir=None):
+    """Integrity classification for ONE backup: {"name", "ok", "reason"}.
+
+    The single-backup version of :func:`verify_all_backups` (roadmap
+    1.9), sharing its reason strings exactly:
+
+    * ``ok`` True, ``"checksum matches"`` -- the SHA256 sidecar exists
+      and matches the file.
+    * ``ok`` False, ``"legacy backup, integrity not verifiable"`` --
+      no sidecar at all (backup created before integrity checks
+      existed).
+    * ``ok`` False, ``"checksum mismatch"`` -- a sidecar exists but
+      its digest does not match the file (corrupt or tampered backup).
+    * ``ok`` False with a ``"could not read ..."`` reason -- the
+      backup or its sidecar could not be read from disk.
+
+    Never raises on a bad file: problems are reported, not thrown.
+    Raises ValueError for a name that is not a plain backup file name
+    and FileNotFoundError when no such backup exists -- the same
+    contract as :func:`restore_backup`.
+    """
+    if not BACKUP_NAME_PATTERN.match(name or ""):
+        raise ValueError("Not a valid backup name: %r" % (name,))
+    path = backup_dir(dest_dir) / name
+    if not path.exists():
+        raise FileNotFoundError("Backup not found: %s" % name)
+    try:
+        stored = _read_stored_checksum(path)
+    except OSError:
+        return {"name": name, "ok": False,
+                "reason": "could not read checksum sidecar"}
+    if stored is None:
+        return {"name": name, "ok": False,
+                "reason": "legacy backup, integrity not verifiable"}
+    try:
+        actual = _sha256_of(path)
+    except OSError:
+        return {"name": name, "ok": False,
+                "reason": "could not read backup file"}
+    if stored != actual:
+        return {"name": name, "ok": False, "reason": "checksum mismatch"}
+    return {"name": name, "ok": True, "reason": "checksum matches"}
+
+
 def verify_all_backups(dest_dir=None):
     """Re-verify the SHA256 integrity of every stored backup.
 
@@ -699,46 +746,8 @@ def verify_all_backups(dest_dir=None):
     This function never raises on a bad file: problems are reported in
     the returned dicts, never thrown. It is the on-demand way to audit
     the whole backup folder at once, while ``restore_backup()`` checks
-    one backup at restore time.
+    one backup at restore time. Built on :func:`classify_backup` so
+    the two can never disagree about a backup.
     """
-    results = []
-    for entry in list_backups(dest_dir=dest_dir):
-        path = Path(entry["path"])
-        try:
-            stored = _read_stored_checksum(path)
-        except OSError:
-            results.append({
-                "name": entry["name"],
-                "ok": False,
-                "reason": "could not read checksum sidecar",
-            })
-            continue
-        if stored is None:
-            results.append({
-                "name": entry["name"],
-                "ok": False,
-                "reason": "legacy backup, integrity not verifiable",
-            })
-            continue
-        try:
-            actual = _sha256_of(path)
-        except OSError:
-            results.append({
-                "name": entry["name"],
-                "ok": False,
-                "reason": "could not read backup file",
-            })
-            continue
-        if stored != actual:
-            results.append({
-                "name": entry["name"],
-                "ok": False,
-                "reason": "checksum mismatch",
-            })
-        else:
-            results.append({
-                "name": entry["name"],
-                "ok": True,
-                "reason": "checksum matches",
-            })
-    return results
+    return [classify_backup(entry["name"], dest_dir=dest_dir)
+            for entry in list_backups(dest_dir=dest_dir)]
