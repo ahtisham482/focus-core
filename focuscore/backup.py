@@ -707,12 +707,17 @@ def classify_backup(name, dest_dir=None):
     path = backup_dir(dest_dir) / name
     if not path.exists():
         raise FileNotFoundError("Backup not found: %s" % name)
+    sidecar = _checksum_path(path)
+    sidecar_exists = sidecar.exists()
     try:
         stored = _read_stored_checksum(path)
     except OSError:
         return {"name": name, "ok": False,
                 "reason": "could not read checksum sidecar"}
     if stored is None:
+        if sidecar_exists:
+            return {"name": name, "ok": False,
+                    "reason": "could not read checksum sidecar"}
         return {"name": name, "ok": False,
                 "reason": "legacy backup, integrity not verifiable"}
     try:

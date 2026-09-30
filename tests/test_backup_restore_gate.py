@@ -271,3 +271,79 @@ def test_restore_bad_name_still_400(dash_env):
                                     data={"name": "../evil.db"})
     assert resp.status_code == 400
     assert "Could not restore" in resp.data.decode()
+
+
+# ------------------------------------------------ repair 1.9 follow-ups
+
+def test_legacy_confirmation_checkbox_has_no_value_attribute(dash_env):
+    """The consent checkbox carries no value attribute (critic obj 1).
+
+    Browsers submit "on" for a valueless checked checkbox; the route
+    checks exactly that string, so the attribute is redundant and
+    the assignment letter forbids it.
+    """
+    import re
+
+    path = _make_backup(dash_env, sidecar="drop")
+    resp = dash_env["client"].post("/backup/restore",
+                                    data={"name": path.name})
+    assert resp.status_code == 200
+    html = resp.data.decode()
+    m = re.search(r"<input[^>]*confirm_legacy_restore[^>]*>", html)
+    assert m is not None, "confirmation page must contain the consent checkbox"
+    tag = m.group(0)
+    assert "type='checkbox'" in tag
+    assert "name='confirm_legacy_restore'" in tag
+    assert "value=" not in tag
+
+
+def _make_unreadable_sidecar_backup(env):
+    """Backup whose .sha256 sidecar is a directory (exists-unreadable)."""
+    path = backup.create_backup(db_path=env["db"], dest_dir=env["bdir"])
+    sidecar = path.parent / (path.name + ".sha256")
+    sidecar.unlink()
+    sidecar.mkdir()
+    _make_db(env["db"], "changed")
+    return path
+
+
+def test_unreadable_sidecar_classify_could_not_read(dash_env):
+    path = _make_unreadable_sidecar_backup(dash_env)
+    result = backup.classify_backup(path.name, dest_dir=dash_env["bdir"])
+    assert result == {"name": path.name, "ok": False,
+                      "reason": "could not read checksum sidecar"}
+    # verify_all_backups delegates to classify_backup.
+    results = {r["name"]: r
+               for r in backup.verify_all_backups(dest_dir=dash_env["bdir"])}
+    assert results[path.name]["reason"] == "could not read checksum sidecar"
+    assert results[path.name]["ok"] is False
+
+
+def test_unreadable_sidecar_restore_hard_stop_no_consent(dash_env):
+    path = _make_unreadable_sidecar_backup(dash_env)
+    before = dash_env["db"].read_bytes()
+
+    resp = dash_env["client"].post("/backup/restore",
+                                     data={"name": path.name})
+    assert resp.status_code == 400
+    html = resp.data.decode()
+    assert "Restore stopped" in html
+    assert "confirm_legacy_restore" not in html
+    assert "Restore this backup anyway" not in html
+    assert "Backup restored" not in html
+    assert dash_env["db"].read_bytes() == before
+    assert _marker(dash_env["db"]) == "changed"
+    assert not list(dash_env["tmp"].glob("*.pre-restore-*"))
+
+    # Forged consent must not open the gate either.
+    resp = dash_env["client"].post(
+        "/backup/restore",
+        data={"name": path.name, "confirm_legacy_restore": "on"})
+    assert resp.status_code == 400
+    html = resp.data.decode()
+    assert "Restore stopped" in html
+    assert "confirm_legacy_restore" not in html
+    assert dash_env["db"].read_bytes() == before
+    assert _marker(dash_env["db"]) == "changed"
+    assert not list(dash_env["tmp"].glob("*.pre-restore-*"))
+

@@ -363,7 +363,7 @@ def _legacy_restore_confirm_html(name):
         "<form method='post' action='/backup/restore' novalidate>"
         "<input type='hidden' name='name' value='%s'>"
         "<p><label><input type='checkbox' "
-        "name='confirm_legacy_restore' value='on'> "
+        "name='confirm_legacy_restore'> "
         "I understand this backup could not be checked, because it "
         "was made before safety checks were added.</label></p>"
         "<p><input type='submit' value='Restore this backup anyway'>"
