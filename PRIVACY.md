@@ -69,8 +69,22 @@ Google account.
   above travels with it: window titles and website addresses in the copy stay
   readable only under your Windows user. Restoring the file on a *different*
   Windows user or PC still brings back everything else (times, scores, goals,
-  timesheets); titles and addresses then show as unreadable. The backup copy
-  itself is not separately password-protected.
+  timesheets); titles and addresses then show as unreadable. By default the
+  backup copy itself is not separately password-protected — see the next
+  bullet for the optional protection.
+- **Optional backup encryption (off by default).** On the Backup page you
+  can turn on backup encryption with a passphrase you choose. New backups
+  are then encrypted with that passphrase before they are copied, so the
+  Drive copy is unreadable without it, and a backup can be restored on a
+  new PC by typing the passphrase on the Backup page. This only protects
+  new backups; older backups stay as they are. If you forget the
+  passphrase, encrypted backups cannot be recovered — there is no
+  recovery, not even by us. To let automatic backups keep running on
+  this PC, Focus Core keeps a check-value plus a copy of the passphrase
+  protected by your Windows user account on this PC only; it is never
+  put inside the database or a backup. The small safety copy Focus
+  Core makes on this PC before a database upgrade stays on this PC
+  and is not passphrase-encrypted.
 - **Your account only.** It is your Drive, your account, your folder. We have
   no access to it and never request access.
 - **Turning it off.** Because the copies are automatic whenever Drive is
@@ -79,7 +93,9 @@ Google account.
   enough — the next backup will create it again while Drive is running.
 
 ## What Focus Core never does
-- No user accounts, no sign-in, no passwords stored anywhere.
+- No user accounts and no sign-in. If you turn on backup encryption, the
+  only passphrase material kept is described above — a check-value and a
+  Windows-protected copy on this PC — and it is never sent anywhere.
 - No analytics, no telemetry, no crash reporting, no usage statistics.
 - No ads, no tracking, nothing sold or shared. The three internet uses
   above, plus the optional Drive backup described in its own section, are

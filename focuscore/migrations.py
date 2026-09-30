@@ -1052,7 +1052,8 @@ def apply_migrations(
     if not is_fresh and target_path.exists() and target_path.stat().st_size > 0:
         try:
             backup_path = backup.create_backup(
-                db_path=str(target_path), dest_dir=backup_folder
+                db_path=str(target_path), dest_dir=backup_folder,
+                force_plaintext=True
             )
             prune_snapshots(keep=10, dest_dir=backup_folder)
             logger.info("Created pre-migration snapshot: %s", backup_path)

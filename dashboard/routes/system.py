@@ -89,16 +89,19 @@ def backup_page():
     rows = []
     for b in backups:
         size_kb = b["size_bytes"] / 1024.0
+        marker = " <span class='note'>Encrypted</span>" if b.get("encrypted") else ""
         rows.append(
-            "<tr><td><code>%s</code></td><td>%s</td><td>%.0f KB</td>"
+            "<tr><td><code>%s</code>%s</td><td>%s</td><td>%.0f KB</td>"
             "<td><form class='inline' method='post' "
             "action='/backup/restore' onsubmit=\"return confirm('Restore "
             "this backup? Your current data is first copied to a safety "
             "file, so nothing is lost.');\">"
             "<input type='hidden' name='name' value='%s'>"
+            "<input type='password' name='passphrase' "
+            "placeholder='Passphrase if encrypted' autocomplete='off'>"
             "<button type='submit' class='secondary'>Restore</button>"
             "</form></td></tr>"
-            % (escape(b["name"]),
+            % (escape(b["name"]), marker,
                b["modified"].strftime("%Y-%m-%d %H:%M"),
                size_kb, escape(b["name"])))
     table = (
@@ -106,6 +109,8 @@ def backup_page():
         "%s</table>"
         % ("".join(rows)
            or "<tr><td colspan='4' class='note'>No backups yet.</td></tr>"))
+
+    encryption_html = _backup_encryption_card_html(backup_mod)
 
     # Craft pass (work batch): the backup action is the hero; restore
     # second; everything else folds away. Same POST contracts.
@@ -117,7 +122,9 @@ def backup_page():
         "</section>"
         "<section class='wk-section'><h2>Restore a backup</h2>%s"
         "<p class='note'>Restoring first copies your current data to a "
-        "safety file, so nothing is lost.</p></section>"
+        "safety file, so nothing is lost. If a backup is marked "
+        "Encrypted, type the passphrase it was made with.</p></section>"
+        "%s"
         "<section class='wk-section'><h2>Where your backups go</h2>%s</section>"
         "<p class='how-it-works'>Focus Core also backs up by itself every "
         "day when you start it (only if the last backup is older than 24 "
@@ -142,13 +149,88 @@ def backup_page():
         "<h3>Moving to a new laptop</h3>"
         "<p class='note'>1. On the new laptop, install Focus Core and "
         "Google Drive, and let Drive finish syncing.<br>"
-        "2. Copy the newest <code>focuscore-*.db</code> file from the "
-        "\"Focus Core Backups\" folder into the Focus Core folder and "
-        "rename it to <code>focuscore.db</code>. Done &mdash; all your history "
+        "2. Open this Backup page on the new laptop and restore the "
+        "newest backup from the list. If it is marked Encrypted, type "
+        "the passphrase it was made with. Done &mdash; all your history "
         "is back.</p></details>"
-        % (last_html, table, where_html)
+        % (last_html, table, encryption_html, where_html)
     )
     return layout("Backup", body, active="backup")
+
+
+def _backup_encryption_card_html(backup_mod):
+    """Roadmap 1.5b: enable / disable / unlock card for /backup."""
+    enabled = backup_mod.is_encryption_enabled()
+    if not enabled:
+        return (
+            "<section class='wk-section'><h2>Backup encryption</h2>"
+            "<p>Encryption is <b>off</b>. You can protect backups that "
+            "leave this PC (for example the Google Drive copy) with a "
+            "passphrase. Without your passphrase, nobody can open an "
+            "encrypted backup.</p>"
+            "<form method='post' action='/backup/encryption/enable'>"
+            "<p><label>Passphrase (at least 8 characters)<br>"
+            "<input type='password' name='passphrase' "
+            "autocomplete='new-password'></label></p>"
+            "<p><label>Type the passphrase again<br>"
+            "<input type='password' name='passphrase_confirm' "
+            "autocomplete='new-password'></label></p>"
+            "<button type='submit' class='secondary'>"
+            "Turn on backup encryption</button></form>"
+            "<p class='note'>Only new backups are encrypted. Old "
+            "backups stay as they are.</p>"
+            "<p class='note'><b>Important:</b> if you forget your "
+            "passphrase, your encrypted backups are unrecoverable. "
+            "There is no recovery &mdash; not even by us. Please keep "
+            "it somewhere safe.</p>"
+            "<p class='note'>Changing your passphrase later does not "
+            "change old backups: each backup keeps the passphrase it "
+            "was made with.</p></section>")
+    locked = backup_mod.is_locked()
+    if locked:
+        return (
+            "<section class='wk-section'><h2>Backup encryption</h2>"
+            "<p>Encryption is <b>on</b>, but this PC is locked: "
+            "automatic backups cannot run until you unlock.</p>"
+            "<form method='post' action='/backup/encryption/unlock'>"
+            "<p><label>Passphrase<br>"
+            "<input type='password' name='passphrase' "
+            "autocomplete='current-password'></label></p>"
+            "<button type='submit' class='secondary'>Unlock</button>"
+            "</form>"
+            "<form method='post' action='/backup/encryption/disable'>"
+            "<p><label>Or turn encryption off &mdash; type your "
+            "passphrase to confirm<br>"
+            "<input type='password' name='passphrase' "
+            "autocomplete='current-password'></label></p>"
+            "<button type='submit' class='secondary'>"
+            "Turn off backup encryption</button></form>"
+            "<p class='note'>If you forget your passphrase, your "
+            "encrypted backups are unrecoverable. There is no "
+            "recovery &mdash; not even by us.</p>"
+            "<p class='note'>Turning encryption off does not decrypt "
+            "old backups: they stay encrypted with the passphrase "
+            "they were made with. Changing your passphrase later "
+            "does not change old backups either.</p></section>")
+    return (
+        "<section class='wk-section'><h2>Backup encryption</h2>"
+        "<p>Encryption is <b>on</b>. New backups are protected with "
+        "your passphrase, and automatic backups on this PC can run.</p>"
+        "<form method='post' action='/backup/encryption/disable'>"
+        "<p><label>Type your passphrase to confirm turning it off<br>"
+        "<input type='password' name='passphrase' "
+        "autocomplete='current-password'></label></p>"
+        "<button type='submit' class='secondary'>"
+        "Turn off backup encryption</button></form>"
+        "<p class='note'>Turning encryption off does not decrypt "
+        "old backups: they stay encrypted.</p>"
+        "<p class='note'>If you forget your passphrase, your "
+        "encrypted backups are unrecoverable. There is no recovery "
+        "&mdash; not even by us.</p>"
+        "<p class='note'>To use a different passphrase, turn "
+        "encryption off and turn it on again with the new one. "
+        "Changing your passphrase does not change old backups: each "
+        "backup keeps the passphrase it was made with.</p></section>")
 
 
 @app.route("/backup/diagnostics")
@@ -172,14 +254,77 @@ def backup_diagnostics():
 @app.route("/backup/now", methods=["POST"])
 def backup_now():
     from focuscore import backup as backup_mod
+    from focuscore.backupcrypto import BackupCryptoError
 
     try:
         backup_mod.create_backup()
-    except FileNotFoundError as exc:
+    except (FileNotFoundError, backup_mod.BackupLockedError,
+            BackupCryptoError) as exc:
         return layout("Backup",
                       "<div class='card'><p><b>Could not back up:</b> %s</p>"
                       "<p><a href='/backup'>Back</a></p></div>"
                       % escape(str(exc)), help_key="backup"), 400
+    return redirect("/backup")
+
+
+@app.route("/backup/encryption/enable", methods=["POST"])
+def backup_encryption_enable():
+    from focuscore import backup as backup_mod
+    from focuscore import backupcrypto
+
+    passphrase = request.form.get("passphrase") or ""
+    confirm = request.form.get("passphrase_confirm") or ""
+    if len(passphrase) < 8:
+        return layout("Backup",
+                      "<div class='card'><p><b>Could not turn on "
+                      "encryption:</b> Please use a passphrase of at "
+                      "least 8 characters.</p>"
+                      "<p><a href='/backup'>Back</a></p></div>"), 400
+    if passphrase != confirm:
+        return layout("Backup",
+                      "<div class='card'><p><b>Could not turn on "
+                      "encryption:</b> The two passphrases do not "
+                      "match. Please try again.</p>"
+                      "<p><a href='/backup'>Back</a></p></div>"), 400
+    verifier = backupcrypto.make_passphrase_verifier(passphrase)
+    store.set_setting(backup_mod.SETTING_PASSPHRASE_VERIFIER, verifier)
+    store.set_setting(backup_mod.SETTING_ENCRYPTION_ENABLED, "1")
+    # Cache only after the verifier is stored (write re-checks it).
+    backup_mod.write_cached_passphrase(passphrase)
+    return redirect("/backup")
+
+
+@app.route("/backup/encryption/disable", methods=["POST"])
+def backup_encryption_disable():
+    from focuscore import backup as backup_mod
+    from focuscore import backupcrypto
+
+    passphrase = request.form.get("passphrase") or ""
+    verifier = store.get_setting(backup_mod.SETTING_PASSPHRASE_VERIFIER)
+    if not verifier or not backupcrypto.verify_passphrase(passphrase, verifier):
+        return layout("Backup",
+                      "<div class='card'><p><b>Could not turn off "
+                      "encryption:</b> That passphrase is not correct.</p>"
+                      "<p><a href='/backup'>Back</a></p></div>"), 400
+    store.set_setting(backup_mod.SETTING_ENCRYPTION_ENABLED, "0")
+    store.set_setting(backup_mod.SETTING_PASSPHRASE_VERIFIER, "")
+    backup_mod.clear_cached_passphrase()
+    return redirect("/backup")
+
+
+@app.route("/backup/encryption/unlock", methods=["POST"])
+def backup_encryption_unlock():
+    from focuscore import backup as backup_mod
+    from focuscore import backupcrypto
+
+    passphrase = request.form.get("passphrase") or ""
+    verifier = store.get_setting(backup_mod.SETTING_PASSPHRASE_VERIFIER)
+    if not verifier or not backupcrypto.verify_passphrase(passphrase, verifier):
+        return layout("Backup",
+                      "<div class='card'><p><b>Could not unlock:</b> "
+                      "That passphrase is not correct.</p>"
+                      "<p><a href='/backup'>Back</a></p></div>"), 400
+    backup_mod.write_cached_passphrase(passphrase)
     return redirect("/backup")
 
 
@@ -189,10 +334,11 @@ def backup_restore():
     from focuscore import backup as backup_mod
 
     name = (request.form.get("name") or "").strip()
+    passphrase = request.form.get("passphrase") or None
     try:
         with warnings.catch_warnings(record=True) as caught:
             warnings.simplefilter("always")
-            safety = backup_mod.restore_backup(name)
+            safety = backup_mod.restore_backup(name, passphrase=passphrase)
     except (ValueError, FileNotFoundError) as exc:
         return layout("Backup",
                       "<div class='card'><p><b>Could not restore:</b> %s</p>"

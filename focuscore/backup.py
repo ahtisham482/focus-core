@@ -62,7 +62,7 @@ import warnings
 from datetime import datetime
 from pathlib import Path
 
-from . import paths
+from . import backupcrypto, columncrypto, paths
 from . import store
 
 logger = logging.getLogger(__name__)
@@ -77,6 +77,20 @@ ATTENTION_AFTER_DAYS = 7  # home page nags when the newest backup is older
 
 TMP_SUFFIX = ".tmp"  # temp files during create/restore; never listed
 CHECKSUM_SUFFIX = ".sha256"  # sidecar holding the backup's SHA256 digest
+
+# Roadmap 1.5b: passphrase-encrypted backups (opt-in).
+SETTING_ENCRYPTION_ENABLED = "backup_encryption_enabled"
+SETTING_PASSPHRASE_VERIFIER = "backup_passphrase_verifier"
+CACHE_FILENAME = "backup-passphrase.cache"
+
+
+class BackupLockedError(Exception):
+    """Encryption is on but no passphrase can be resolved.
+
+    Dedicated so callers can tell "locked, ask the user" apart from a
+    corrupt file or a missing database. create_backup raises this
+    before writing anything.
+    """
 
 
 def find_drive_folder():
@@ -112,6 +126,134 @@ def backup_dir(dest_dir=None):
 
 def _timestamp():
     return datetime.now().strftime("%Y%m%d-%H%M%S")
+
+
+# ------------------------------------------------------- 1.5b helpers ---
+
+def _setting_value(db_path, key):
+    """Read one settings value straight from a DB file, or None.
+
+    Deliberately avoids store.get_setting()/init_db(): create/restore
+    must not run migrations or create tables in a bare test/live DB
+    just to learn whether encryption is on.
+    """
+    if db_path is None:
+        db_path = store.DEFAULT_DB_PATH
+    if not Path(db_path).exists():
+        return None
+    try:
+        conn = sqlite3.connect(str(db_path), timeout=5.0)
+        try:
+            row = conn.execute(
+                "SELECT 1 FROM sqlite_master WHERE type='table' "
+                "AND name='settings'").fetchone()
+            if not row:
+                return None
+            r = conn.execute(
+                "SELECT value FROM settings WHERE key = ?", (key,)
+            ).fetchone()
+            return r[0] if r else None
+        finally:
+            conn.close()
+    except Exception:
+        return None
+
+
+def is_encryption_enabled(db_path=None):
+    return _setting_value(db_path, SETTING_ENCRYPTION_ENABLED) == "1"
+
+
+def _verifier(db_path=None):
+    return _setting_value(db_path, SETTING_PASSPHRASE_VERIFIER)
+
+
+def cache_path():
+    """DPAPI-wrapped passphrase cache, under the per-user data dir.
+
+    Never inside the database -- a backup must not carry its own key.
+    """
+    return paths.user_data_dir() / CACHE_FILENAME
+
+
+def read_cached_passphrase(db_path=None):
+    """Cached passphrase, or None when locked (missing/corrupt/stale)."""
+    try:
+        raw = cache_path().read_bytes()
+    except OSError:
+        return None
+    try:
+        plain = columncrypto.unprotect_bytes(raw)
+        passphrase = plain.decode("utf-8")
+    except Exception:
+        return None
+    verifier = _verifier(db_path)
+    if verifier and not backupcrypto.verify_passphrase(passphrase, verifier):
+        return None
+    return passphrase
+
+
+def write_cached_passphrase(passphrase, db_path=None):
+    """Wrap + cache the passphrase, only after a verifier check.
+
+    When a verifier is stored, a passphrase that does not match it is
+    refused (ValueError) and nothing is written.
+    """
+    verifier = _verifier(db_path)
+    if verifier and not backupcrypto.verify_passphrase(passphrase, verifier):
+        raise ValueError(
+            "That passphrase does not match the one set for backups.")
+    blob = columncrypto.protect_bytes(passphrase.encode("utf-8"))
+    path = cache_path()
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_bytes(blob)
+    return path
+
+
+def clear_cached_passphrase():
+    try:
+        cache_path().unlink(missing_ok=True)
+    except OSError as exc:
+        logger.warning("could not remove the backup passphrase cache: %s", exc)
+
+
+def is_locked(db_path=None):
+    """Enabled but no usable cached passphrase == locked."""
+    return is_encryption_enabled(db_path) and \
+        read_cached_passphrase(db_path=db_path) is None
+
+
+def _resolve_create_passphrase(db_path, passphrase, force_plaintext):
+    """Passphrase to encrypt a new backup with, or None for plaintext.
+
+    Raises BackupLockedError when encryption is on (or a passphrase
+    was explicitly supplied) but no valid passphrase can be resolved.
+    """
+    if force_plaintext:
+        return None
+    enabled = is_encryption_enabled(db_path)
+    verifier = _verifier(db_path)
+    if passphrase is not None:
+        if verifier and not backupcrypto.verify_passphrase(passphrase, verifier):
+            raise BackupLockedError(
+                "That passphrase does not match the one set for "
+                "backups, so no backup was made.")
+        return passphrase
+    if not enabled:
+        return None
+    cached = read_cached_passphrase(db_path=db_path)
+    if cached is None:
+        raise BackupLockedError(
+            "Backup encryption is on, but Focus Core is locked on "
+            "this PC. Open the Backup page and unlock it with your "
+            "passphrase, then try again. No backup was made.")
+    return cached
+
+
+def _resolve_restore_passphrase(db_path, passphrase):
+    """Explicit passphrase first, else the cache; None when neither."""
+    if passphrase is not None:
+        return passphrase
+    return read_cached_passphrase(db_path=db_path)
 
 
 def _checksum_path(backup_path):
@@ -178,7 +320,8 @@ def _verify_checksum(backup_path):
     return True
 
 
-def create_backup(db_path=None, dest_dir=None):
+def create_backup(db_path=None, dest_dir=None, passphrase=None,
+                  force_plaintext=False):
     """Copy the database to a timestamped backup file.
 
     Sprint 4 (Qwen item 6): uses ``VACUUM INTO`` (not a raw file copy,
@@ -189,11 +332,21 @@ def create_backup(db_path=None, dest_dir=None):
     renamed into place. A SHA256 sidecar is recorded. Returns the Path
     of the new backup file. Raises FileNotFoundError when there is no
     database to back up yet.
+
+    Roadmap 1.5b: when backup encryption is on (or a passphrase is
+    explicitly supplied), the verified staging bytes are encrypted at
+    publish time and an in-memory encrypt->decrypt round-trip must
+    reproduce them exactly before anything lands. Enabled-but-locked
+    raises :class:`BackupLockedError` and writes nothing.
+    ``force_plaintext=True`` (migration snapshots) never encrypts.
     """
     src = Path(db_path or store.DEFAULT_DB_PATH)
     if not src.exists():
         raise FileNotFoundError(
             "No database found at %s -- nothing to back up yet." % src)
+    # Resolve the key BEFORE any file is written: locked means nothing.
+    encrypt_with = _resolve_create_passphrase(
+        src, passphrase, force_plaintext)
     folder = backup_dir(dest_dir)
     ts = _timestamp()
 
@@ -201,6 +354,7 @@ def create_backup(db_path=None, dest_dir=None):
     # WinError 5 collisions on Windows.
     unique_suffix = f"{os.getpid()}_{threading.get_ident()}_{uuid.uuid4().hex[:8]}"
     staging = folder / f"backup_staging-{unique_suffix}.db"
+    enc_staging = folder / f"backup_staging-{unique_suffix}.enc.tmp"
 
     try:
         src_conn = sqlite3.connect(str(src), timeout=30.0)
@@ -220,6 +374,17 @@ def create_backup(db_path=None, dest_dir=None):
         # Verify the staging copy before publishing.
         _verify_backup_file(staging, src_rowcount)
 
+        publish_from = staging
+        if encrypt_with is not None:
+            plaintext = staging.read_bytes()
+            ciphertext = backupcrypto.encrypt_bytes(plaintext, encrypt_with)
+            # Round-trip in memory: a key mix-up must never publish.
+            if backupcrypto.decrypt_bytes(ciphertext, encrypt_with) != plaintext:
+                raise backupcrypto.BackupCryptoError(
+                    "Backup encryption check failed, so no backup was made.")
+            enc_staging.write_bytes(ciphertext)
+            publish_from = enc_staging
+
         # Atomic publish: synchronize target resolution and rename.
         with _backup_lock:
             target = folder / ("focuscore-%s.db" % ts)
@@ -227,14 +392,15 @@ def create_backup(db_path=None, dest_dir=None):
             while target.exists():
                 target = folder / ("focuscore-%s-%d.db" % (ts, counter))
                 counter += 1
-            os.replace(str(staging), str(target))
+            os.replace(str(publish_from), str(target))
     finally:
         # An interrupted write must not leave a partial backup behind.
-        try:
-            staging.unlink(missing_ok=True)
-        except OSError as exc:
-            logger.warning("could not remove the partial backup file "
-                           "%s: %s", staging, exc)
+        for leftover in (staging, enc_staging):
+            try:
+                leftover.unlink(missing_ok=True)
+            except OSError as exc:
+                logger.warning("could not remove the partial backup file "
+                               "%s: %s", leftover, exc)
     _write_checksum(target)
     return target
 
@@ -291,11 +457,13 @@ def _verify_backup_file(path, expected_rowcount=None):
 
 
 def list_backups(dest_dir=None):
-    """Backup files, newest first: [{name, path, size_bytes, modified}].
+    """Backup files, newest first.
 
-    Only finished backups are listed: temp/interrupted files
-    (``*.tmp``) and checksum sidecars (``*.sha256``) are ignored, as is
-    anything not matching the strict backup name pattern.
+    Dicts carry {name, path, size_bytes, modified, encrypted} --
+    ``encrypted`` is the 1.5b magic sniff. Only finished backups are
+    listed: temp/interrupted files (``*.tmp``) and checksum sidecars
+    (``*.sha256``) are ignored, as is anything not matching the strict
+    backup name pattern.
     """
     folder = backup_dir(dest_dir)
     backups = []
@@ -313,6 +481,7 @@ def list_backups(dest_dir=None):
             "path": str(path),
             "size_bytes": stat.st_size,
             "modified": datetime.fromtimestamp(stat.st_mtime),
+            "encrypted": backupcrypto.is_encrypted_file(path),
         })
     backups.sort(key=lambda b: b["name"], reverse=True)
     return backups
@@ -363,10 +532,15 @@ def backup_if_stale(max_age_hours=STALE_AFTER_HOURS, db_path=None,
             / 3600.0
         if age_hours < max_age_hours:
             return None
-    return create_backup(db_path=db_path, dest_dir=dest_dir)
+    try:
+        return create_backup(db_path=db_path, dest_dir=dest_dir)
+    except BackupLockedError as exc:
+        # Never-crash contract (launcher): locked encryption skips.
+        logger.warning("auto-backup skipped, encryption locked: %s", exc)
+        return None
 
 
-def restore_backup(name, db_path=None, dest_dir=None):
+def restore_backup(name, db_path=None, dest_dir=None, passphrase=None):
     """Restore a backup over the current database.
 
     Safety first: the backup's SHA256 checksum is verified before
@@ -386,6 +560,13 @@ def restore_backup(name, db_path=None, dest_dir=None):
     crafted name cannot read or write outside the backup folder.
 
     Sprint 4: no raw file copies anywhere -- ``shutil.copy2`` is gone.
+
+    Roadmap 1.5b: encrypted backups (``FCBENC1`` magic) are detected
+    up front. Checksum first, then decryption to the restore staging
+    file and verification of that staging file -- only then the
+    safety snapshot, atomic swap and invoice repair, in that order.
+    Any failure before the swap raises ``ValueError`` with a plain
+    message and leaves the live database byte-identical.
     """
     if not BACKUP_NAME_PATTERN.match(name or ""):
         raise ValueError("Not a valid backup name: %r" % (name,))
@@ -394,35 +575,78 @@ def restore_backup(name, db_path=None, dest_dir=None):
     if not src.exists():
         raise FileNotFoundError("Backup not found: %s" % name)
 
+    encrypted = backupcrypto.is_encrypted_file(src)
     _verify_checksum(src)
 
     db = Path(db_path or store.DEFAULT_DB_PATH)
-    safety = db.parent / ("focuscore.db.pre-restore-%s" % _timestamp())
-    if db.exists():
-        # Safety copy via VACUUM INTO (consistent snapshot, no raw copy).
-        live_conn = sqlite3.connect(str(db), timeout=30.0)
+    if not encrypted:
+        safety = db.parent / ("focuscore.db.pre-restore-%s" % _timestamp())
+        if db.exists():
+            # Safety copy via VACUUM INTO (consistent snapshot, no raw copy).
+            live_conn = sqlite3.connect(str(db), timeout=30.0)
+            try:
+                live_conn.execute("VACUUM INTO ?", (str(safety),))
+            finally:
+                live_conn.close()
+        else:
+            safety = None
+        staging = db.parent / (db.name + ".restore-staging")
         try:
-            live_conn.execute("VACUUM INTO ?", (str(safety),))
+            # VACUUM the backup into staging (verifies it reads cleanly),
+            # then verify and atomically swap.
+            src_conn = sqlite3.connect(str(src), timeout=30.0)
+            try:
+                src_rowcount = _total_rowcount(src_conn)
+                src_conn.execute("VACUUM INTO ?", (str(staging),))
+            finally:
+                src_conn.close()
+            _verify_backup_file(staging, src_rowcount)
+            # Atomic swap: the live database is never half-overwritten.
+            os.replace(str(staging), str(db))
+            # Sprint 4 (Qwen item 7): repair invoice counters so the next
+            # issued number continues after the highest non-void invoice.
+            _repair_invoice_counters(db)
         finally:
-            live_conn.close()
-    else:
-        safety = None
-    staging = db.parent / (db.name + ".restore-staging")
+            try:
+                staging.unlink(missing_ok=True)
+            except OSError as exc:
+                logger.warning("could not remove the restore staging "
+                               "file %s: %s", staging, exc)
+        return safety
+
+    # Encrypted path: resolve + decrypt + verify BEFORE touching the DB.
+    resolved = _resolve_restore_passphrase(db, passphrase)
+    if resolved is None:
+        raise ValueError(
+            "This backup is encrypted. Please enter the passphrase "
+            "it was made with and try again. Nothing was changed.")
     try:
-        # VACUUM the backup into staging (verifies it reads cleanly),
-        # then verify and atomically swap.
-        src_conn = sqlite3.connect(str(src), timeout=30.0)
-        try:
-            src_rowcount = _total_rowcount(src_conn)
-            src_conn.execute("VACUUM INTO ?", (str(staging),))
-        finally:
-            src_conn.close()
-        _verify_backup_file(staging, src_rowcount)
-        # Atomic swap: the live database is never half-overwritten.
+        plaintext = backupcrypto.decrypt_bytes(src.read_bytes(), resolved)
+    except backupcrypto.BackupCryptoError as exc:
+        raise ValueError(
+            "That passphrase could not open this backup. It may be "
+            "wrong, or the backup is damaged. Nothing was changed."
+        ) from exc
+    staging = db.parent / (db.name + ".restore-staging")
+    safety = None
+    try:
+        staging.write_bytes(plaintext)
+        _verify_backup_file(staging)
+        safety = db.parent / ("focuscore.db.pre-restore-%s" % _timestamp())
+        if db.exists():
+            live_conn = sqlite3.connect(str(db), timeout=30.0)
+            try:
+                live_conn.execute("VACUUM INTO ?", (str(safety),))
+            finally:
+                live_conn.close()
+        else:
+            safety = None
         os.replace(str(staging), str(db))
-        # Sprint 4 (Qwen item 7): repair invoice counters so the next
-        # issued number continues after the highest non-void invoice.
         _repair_invoice_counters(db)
+    except ValueError:
+        # Verification failure above also arrives here before any swap:
+        # re-raise as a plain restore refusal, DB untouched.
+        raise
     finally:
         try:
             staging.unlink(missing_ok=True)

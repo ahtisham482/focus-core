@@ -5,4 +5,5 @@ plyer>=2.0
 pystray>=0.19
 Pillow>=10.0
 pywebview>=5.0
+cryptography>=42.0
 tzdata>=2024.1  # zoneinfo needs this on Windows (no system tz database)

@@ -142,6 +142,37 @@ def _default_protector():
 _protector = _default_protector()
 
 
+# ------------------------------------------------------------ bytes API ---
+
+def protect_bytes(data: bytes) -> bytes:
+    """Seal raw bytes with the platform protector (roadmap 1.5b).
+
+    Used for the backup-passphrase cache file. Raises
+    :class:`ColumnCryptoError` on failure -- callers decide how to
+    degrade. The text API below is unchanged.
+    """
+    if not isinstance(data, (bytes, bytearray)):
+        raise ColumnCryptoError("protect_bytes needs bytes")
+    try:
+        return _protector.protect(bytes(data))
+    except ColumnCryptoError:
+        raise
+    except Exception as exc:
+        raise ColumnCryptoError(str(exc)) from exc
+
+
+def unprotect_bytes(data: bytes) -> bytes:
+    """Open bytes sealed by :func:`protect_bytes`. Raises on failure."""
+    if not isinstance(data, (bytes, bytearray)):
+        raise ColumnCryptoError("unprotect_bytes needs bytes")
+    try:
+        return _protector.unprotect(bytes(data))
+    except ColumnCryptoError:
+        raise
+    except Exception as exc:
+        raise ColumnCryptoError(str(exc)) from exc
+
+
 # ------------------------------------------------------------ text API ---
 
 def is_protected(value) -> bool:
