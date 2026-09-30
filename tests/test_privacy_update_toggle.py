@@ -362,7 +362,18 @@ def test_privacy_documents_the_toggle():
 
 def test_privacy_date_is_current():
     text = _privacy_text()
-    assert ("Last updated " + date.today().isoformat()) in text
+    marker = "Last updated "
+    assert marker in text
+    doc_date = date.fromisoformat(text.split(marker, 1)[1].split()[0].strip("."))
+    today = date.today()
+    # PRIVACY.md is re-dated by hand when edited, in the editor's
+    # timezone (Asia/Karachi), while CI runners use UTC — so allow a
+    # day of skew. The guard's real job: the date exists, parses, is
+    # not from the future, and is not left stale for over a year.
+    # (The previous same-day equality version went red on every
+    # UTC/PKT day boundary — reproduced on CI for 8c77098.)
+    assert (doc_date - today).days <= 1
+    assert (today - doc_date).days <= 366
 
 
 def test_privacy_does_not_claim_version_is_sent():
