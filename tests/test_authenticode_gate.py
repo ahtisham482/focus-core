@@ -58,11 +58,15 @@ def test_wintrust_data_layout():
     d = authenticode._WINTRUST_DATA
     assert d.cbStruct.offset == 0
     assert d.dwUIChoice.offset == 24
+    assert d.fdwRevocationChecks.offset == 28
     assert d.dwUnionChoice.offset == 32
     assert d.u.offset == 40
     assert d.u.offset % 8 == 0  # pointer-aligned union
     assert d.dwStateAction.offset == 48
+    assert d.hWVTStateData.offset == 56
     assert d.pwszURLReference.offset == 64
+    assert d.dwProvFlags.offset == 72
+    assert d.dwUIContext.offset == 76
     assert d.pSignatureSettings.offset == 80
     assert ctypes.sizeof(d) == 88
 
