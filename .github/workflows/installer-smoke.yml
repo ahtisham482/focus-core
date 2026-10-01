@@ -367,11 +367,26 @@ jobs:
           }
           # Stop the running app first (as the install step does): the
           # uninstaller cannot delete files a running process holds open.
-          Get-CimInstance Win32_Process -Filter "Name = 'pythonw.exe'" |
-            Where-Object { $_.CommandLine -like "*focuscore.launcher*" } |
+          # The launcher runs the dashboard as a child process
+          # (pythonw -m dashboard.app), so matching the launcher's command
+          # line alone leaves that child alive with the program files
+          # locked -- stop every process running from the install folder.
+          Get-CimInstance Win32_Process |
+            Where-Object { $_.ExecutablePath -and
+              $_.ExecutablePath.StartsWith($app) } |
             ForEach-Object {
               Stop-Process -Id $_.ProcessId -Force -ErrorAction SilentlyContinue
             }
+          # Wait until no process runs from the install folder anymore,
+          # so the uninstaller can delete every file.
+          $deadline = (Get-Date).AddMinutes(2)
+          while ((Get-Date) -lt $deadline) {
+            $stillAlive = Get-CimInstance Win32_Process |
+              Where-Object { $_.ExecutablePath -and
+                $_.ExecutablePath.StartsWith($app) }
+            if (-not $stillAlive) { break }
+            Start-Sleep -Seconds 2
+          }
           $log = "$env:RUNNER_TEMP\uninstall.log"
           Start-Process -FilePath $uninstaller `
                     -ArgumentList "/VERYSILENT", "/SUPPRESSMSGBOXES", `
