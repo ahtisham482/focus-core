@@ -42,6 +42,10 @@ Code comments are not claims and are not registered.
 - [TESTED] The update flow never touches your data — it makes a safety backup first (and stops if that fails) and only then downloads and stages the installer. | surface: Updates page ("Your data is never touched by the update") | evidence: tests/test_claims_register.py::test_update_flow_never_touches_user_data
 - [MANUAL] Focus Core works fully offline — dashboard, tracker ingest, and focus sessions need no internet. | surface: README FAQ "Does it need internet?" | evidence: (MANUAL) disconnect the PC's network, use the dashboard, start a focus session, and confirm everything works; only the update check and the optional calendar feed report they cannot reach the network.
 
+## Format stability (FORMAT.md, roadmap 1.19)
+
+- [TESTED] Your history survives upgrades: a database written at schema version 1 opens in the current app with its records intact, and exports don't quietly change your numbers — JSON (focuscore.timesheet/v1) is exact, and the small roundings CSV and HTML use are written down in FORMAT.md. | surface: FORMAT.md "Stability policy" | evidence: tests/test_format_contract_119.py::test_aged_v1_database_migrates_through_init_db, ::test_export_roundtrip_json_is_exact, ::test_export_roundtrip_csv_matches_declared_rendering, ::test_format_md_documents_the_real_schema_and_policy
+
 ## How to keep this register honest
 
 A new behavioral promise ("always", "never", "guaranteed", "automatically",
