@@ -20,9 +20,12 @@ config here, so a stray FOCUSCORE_DATA_DIR in some shell can never
 relocate a dev or portable database.
 """
 
+import logging
 import os
 import sys
 from pathlib import Path
+
+logger = logging.getLogger(__name__)
 
 APP_ROOT = Path(__file__).resolve().parent.parent
 INSTALLED_MARKER = APP_ROOT / ".installed"
@@ -48,10 +51,23 @@ def _configured_data_dir():
 
     The import is lazy on purpose: focuscore.config finds its TOML
     through this module, so importing it at module level would cycle.
+
+    A configured value that cannot be expanded (e.g. a ``~user``
+    typo whose home cannot be determined) must never brick startup:
+    warn and fall through to the per-user data dir, exactly like
+    every other invalid config value falls through tiers.
     """
     from . import config
     value = config.get_data_dir()
-    return Path(value).expanduser() if value else None
+    if not value:
+        return None
+    try:
+        return Path(value).expanduser()
+    except Exception as exc:  # noqa: BLE001 -- never raise into startup
+        logger.warning(
+            "ignoring unresolvable data_dir %r from config: %s",
+            value, exc)
+        return None
 
 
 def data_dir():

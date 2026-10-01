@@ -335,3 +335,74 @@ def test_paths_grandfathered_db_beats_config(cfg, tmp_path, monkeypatch):
     (tmp_path / "focuscore.db").write_text("fake-db")
     monkeypatch.setenv("FOCUSCORE_DATA_DIR", str(tmp_path / "elsewhere"))
     assert paths.data_dir() == tmp_path
+
+
+# ------------------------------------------- repair 1.12 follow-ups ---
+
+@pytest.mark.parametrize("bad_value", ["~nosuchuser/data",
+                                       "~nosuchuser999/data"])
+def test_paths_installed_unresolvable_data_dir_falls_back(
+        cfg, tmp_path, monkeypatch, caplog, bad_value):
+    """Installed mode: an unexpandable configured data_dir must warn
+    and fall through to user_data_dir(), never raise into startup.
+    Covers the repair brief's "~nosuchuser/data" and the critic's
+    exact "~nosuchuser999/data" probe shape."""
+    user_dir = _paths_at(tmp_path, monkeypatch, installed=True)
+    monkeypatch.setenv("FOCUSCORE_DATA_DIR", bad_value)
+    with caplog.at_level(logging.WARNING, logger="focuscore.paths"):
+        assert paths.data_dir() == user_dir
+    assert any(r.levelno >= logging.WARNING for r in caplog.records)
+
+
+def test_paths_installed_unresolvable_toml_data_dir_falls_back(
+        cfg, tmp_path, monkeypatch, caplog):
+    user_dir = _paths_at(tmp_path, monkeypatch, installed=True)
+    _write_toml(cfg, 'data_dir = "~nosuchuser999/data"\n')
+    with caplog.at_level(logging.WARNING, logger="focuscore.paths"):
+        assert paths.data_dir() == user_dir
+    assert any(r.levelno >= logging.WARNING for r in caplog.records)
+
+
+def test_load_toml_resolution_failure_is_empty_with_warning(
+        cfg, monkeypatch, caplog):
+    """config_file_path() resolution failure warns and counts as an
+    empty TOML tier instead of propagating into startup."""
+    def boom():
+        raise RuntimeError("no home")
+
+    monkeypatch.setattr(config, "config_file_path", boom)
+    monkeypatch.setenv("FOCUSCORE_PORT", "5462")
+    with caplog.at_level(logging.WARNING, logger="focuscore.config"):
+        assert config.get_port() == 5462
+        assert config._load_toml() == {}
+    assert any(r.levelno >= logging.WARNING for r in caplog.records)
+
+
+def test_feature_whitespace_spellings_resolve_identically(
+        cfg, monkeypatch):
+    """Leading/trailing whitespace is insignificant for flag names:
+    " dark_mode " and "dark_mode" must mean the same flag."""
+    monkeypatch.setenv("FOCUSCORE_FEATURE_DARK_MODE", "1")
+    assert config.feature_enabled("dark_mode") is True
+    assert config.feature_enabled(" dark_mode ") is True
+
+
+def test_feature_whitespace_matches_toml_key(cfg):
+    _write_toml(cfg, "[features]\ndark_mode = true\n")
+    assert config.feature_enabled("dark_mode") is True
+    assert config.feature_enabled(" dark_mode ") is True
+
+
+def test_feature_whitespace_env_name_mapping(cfg, monkeypatch):
+    """The critic's probe shape: a padded, hyphenated flag name maps
+    to the same env var as the canonical spelling."""
+    monkeypatch.setenv("FOCUSCORE_FEATURE_MY_FLAG", "1")
+    assert config.feature_enabled("my_flag") is True
+    assert config.feature_enabled(" My-Flag ") is True
+
+
+def test_feature_empty_after_strip_uses_default(cfg):
+    assert config.feature_enabled("   ") is False
+    assert config.feature_enabled("   ", default=True) is True
+    assert config.feature_enabled("") is False
+    assert config.feature_enabled("", default=True) is True

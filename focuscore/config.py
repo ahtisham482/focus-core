@@ -162,14 +162,18 @@ def config_file_path():
 
 def _load_toml():
     """Parse config.toml. Broken TOML warns and counts as empty."""
-    path = config_file_path()
+    path = None
     try:
+        path = config_file_path()
         with open(path, "rb") as handle:
             data = tomllib.load(handle)
     except FileNotFoundError:
         return {}
     except Exception as exc:  # noqa: BLE001 -- a typo never bricks us
-        logger.warning("ignoring config file %s: %s", path, exc)
+        if path is not None:
+            logger.warning("ignoring config file %s: %s", path, exc)
+        else:
+            logger.warning("ignoring config file: %s", exc)
         return {}
     return data if isinstance(data, dict) else {}
 
@@ -181,7 +185,9 @@ def _env_name_for(key):
 
 
 def _env_suffix(name):
-    return "".join(ch if ch.isalnum() else "_" for ch in name.upper())
+    stripped = name.strip() if isinstance(name, str) else name
+    return "".join(
+        ch if ch.isalnum() else "_" for ch in str(stripped).upper())
 
 
 # -------------------------------------------------------- validation ---
@@ -291,9 +297,13 @@ def _coerce_bool(value):
 def _lookup_feature(features, name):
     if not isinstance(features, dict):
         return _MISSING
-    lowered = name.lower()
+    if not isinstance(name, str):
+        return _MISSING
+    lowered = name.strip().lower()
+    if not lowered:
+        return _MISSING
     for flag, value in features.items():
-        if isinstance(flag, str) and flag.lower() == lowered:
+        if isinstance(flag, str) and flag.strip().lower() == lowered:
             return value
     return _MISSING
 
@@ -304,7 +314,15 @@ def feature_enabled(name, default=False):
     Machine Features subkey > config.toml [features] > the
     FOCUSCORE_FEATURE_<NAME> env var > ``default``. An unparseable
     value warns and falls through, like any other config value.
+    Leading/trailing whitespace is insignificant: ``" dark_mode "``
+    and ``"dark_mode"`` name the same flag, and an empty-after-strip
+    name resolves straight to ``default``.
     """
+    if not isinstance(name, str):
+        return bool(default)
+    name = name.strip()
+    if not name:
+        return bool(default)
     env_name = "FOCUSCORE_FEATURE_" + _env_suffix(name)
     env_raw = os.environ.get(env_name)
     tiers = (
