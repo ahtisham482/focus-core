@@ -71,7 +71,17 @@ def test_snapshot_blocks_today_counted(tmp_path, monkeypatch):
     assert snap["blocks_today"] == 2
 
 
-def test_snapshot_never_raises_on_broken_db(tmp_path):
+def test_snapshot_never_raises_on_broken_db(tmp_path, monkeypatch):
+    import focuscore.shield as shield_mod
+
+    # Stub the machine-global daemon probe like the sibling tests:
+    # whether a shield daemon is running on this machine (in CI, an
+    # earlier test's session spawns a real one on Windows) must not
+    # decide this test -- its subject is the broken DB path.
+    monkeypatch.setattr(shield_mod, "shield_daemon_running",
+                        lambda: False)
+    monkeypatch.setattr(shield_mod, "pass_active",
+                        lambda now=None, db_path=None: None)
     snap = hud.hud_snapshot(
         db_path=str(tmp_path / "no-such-dir" / "h.db"))
     assert snap["state"] == "off"
