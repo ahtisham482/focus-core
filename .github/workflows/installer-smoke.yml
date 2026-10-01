@@ -69,6 +69,43 @@ jobs:
           path: installer-size.txt
           if-no-files-found: warn
 
+      - name: Snapshot machine state before install (roadmap 2.4)
+        # Roadmap 2.4's bar: install -> use -> uninstall (with the
+        # data wipe) leaves no residue. Capture the machine state now
+        # so the residue check at the end can diff against it.
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $dir = "$env:RUNNER_TEMP\residue"
+          New-Item -ItemType Directory -Force -Path $dir | Out-Null
+          Get-ScheduledTask |
+            ForEach-Object { "$($_.TaskPath)$($_.TaskName)" } |
+            Sort-Object | Out-File "$dir\before-tasks.txt"
+          $run = Get-ItemProperty `
+            'HKCU:\Software\Microsoft\Windows\CurrentVersion\Run' `
+            -ErrorAction SilentlyContinue
+          $runLines = @()
+          if ($run) {
+            $runLines = @($run.PSObject.Properties |
+              Where-Object { $_.Name -notlike 'PS*' } |
+              ForEach-Object { "$($_.Name)=$($_.Value)" } | Sort-Object)
+          }
+          $runLines | Out-File "$dir\before-run.txt"
+          $startup = [Environment]::GetFolderPath('Startup')
+          Get-ChildItem $startup -ErrorAction SilentlyContinue |
+            Select-Object -ExpandProperty Name | Sort-Object |
+            Out-File "$dir\before-startup.txt"
+          Get-ChildItem `
+            'HKCU:\Software\Microsoft\Windows\CurrentVersion\Uninstall' `
+            -ErrorAction SilentlyContinue |
+            Select-Object -ExpandProperty PSChildName | Sort-Object |
+            Out-File "$dir\before-uninstall-keys.txt"
+          "app=$(Test-Path "$env:LOCALAPPDATA\Programs\Focus Core")" |
+            Out-File "$dir\before-presence.txt"
+          "data=$(Test-Path "$env:LOCALAPPDATA\Focus Core")" |
+            Out-File -Append "$dir\before-presence.txt"
+          Write-Host "Machine-state snapshot saved to $dir"
+
       - name: Silent-install the product
         # Fail fast if the installer hangs: a healthy silent install takes
         # a few minutes. Without this, a hang burns the whole 30-minute
@@ -412,6 +449,162 @@ jobs:
             throw "Uninstall deleted user data that must be kept: $data"
           }
           Write-Host "Silent uninstall OK; user data kept"
+
+      - name: Reinstall silently (roadmap 2.4 wipe test setup)
+        # The wipe needs a second install -> uninstall cycle: the
+        # first cycle (above) proved the default uninstall keeps the
+        # data; this one proves /DELETEDATA removes it.
+        timeout-minutes: 15
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $exe = Get-ChildItem installer\FocusCore-Setup-*.exe |
+                 Select-Object -First 1
+          if (-not $exe) { throw "No installer exe found" }
+          $log = "$env:RUNNER_TEMP\reinstall.log"
+          $proc = Start-Process -FilePath $exe.FullName `
+                    -ArgumentList "/VERYSILENT", "/SUPPRESSMSGBOXES", `
+                      "/NORESTART", "/LOG=$log" `
+                    -PassThru
+          $deadline = (Get-Date).AddMinutes(10)
+          while (-not $proc.HasExited) {
+            if ((Get-Date) -gt $deadline) {
+              throw "reinstall hung (setup.exe never exited)"
+            }
+            Start-Sleep -Seconds 5
+          }
+          if ($proc.ExitCode -ne 0) {
+            throw "Reinstall exited with code $($proc.ExitCode)"
+          }
+          $app = "$env:LOCALAPPDATA\Programs\Focus Core"
+          if (-not (Test-Path "$app\unins000.exe")) {
+            throw "Reinstall did not restore the uninstaller"
+          }
+          # The data folder kept by the first cycle must still be
+          # there, or the wipe assertion below proves nothing.
+          if (-not (Test-Path "$env:LOCALAPPDATA\Focus Core")) {
+            throw "Data folder missing before wipe test"
+          }
+          Write-Host "Reinstalled for wipe test"
+
+      - name: Silent-uninstall with data wipe (roadmap 2.4)
+        # The documented offboarding command (docs/enterprise-deploy.md):
+        # the default silent uninstall plus /DELETEDATA, which must
+        # remove the data folder too.
+        timeout-minutes: 10
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $app = "$env:LOCALAPPDATA\Programs\Focus Core"
+          $uninstaller = "$app\unins000.exe"
+          if (-not (Test-Path $uninstaller)) {
+            throw "Uninstaller missing: $uninstaller"
+          }
+          # Stop every process running from the install folder first:
+          # the uninstaller cannot delete files a running process
+          # holds open (the dashboard is a child of the launcher).
+          Get-CimInstance Win32_Process |
+            Where-Object { $_.ExecutablePath -and
+              $_.ExecutablePath.StartsWith($app) } |
+            ForEach-Object {
+              Stop-Process -Id $_.ProcessId -Force -ErrorAction SilentlyContinue
+            }
+          $deadline = (Get-Date).AddMinutes(2)
+          while ((Get-Date) -lt $deadline) {
+            $stillAlive = Get-CimInstance Win32_Process |
+              Where-Object { $_.ExecutablePath -and
+                $_.ExecutablePath.StartsWith($app) }
+            if (-not $stillAlive) { break }
+            Start-Sleep -Seconds 2
+          }
+          $log = "$env:RUNNER_TEMP\uninstall-wipe.log"
+          Start-Process -FilePath $uninstaller `
+                    -ArgumentList "/VERYSILENT", "/SUPPRESSMSGBOXES", `
+                      "/NORESTART", "/DELETEDATA", "/LOG=$log"
+          # Same handoff wait as the default uninstall above.
+          $deadline = (Get-Date).AddMinutes(5)
+          while ((Get-Date) -lt $deadline) {
+            $stillRunning = Get-Process -ErrorAction SilentlyContinue |
+              Where-Object { $_.ProcessName -like "unins*" }
+            if ((-not $stillRunning) -and (-not (Test-Path $app))) { break }
+            Start-Sleep -Seconds 5
+          }
+          if (Test-Path $app) {
+            throw "Wipe uninstall finished but $app is still there"
+          }
+          if (Test-Path "$env:LOCALAPPDATA\Focus Core") {
+            throw "/DELETEDATA uninstall kept the data folder"
+          }
+          Write-Host "Wipe uninstall OK; program and data removed"
+
+      - name: Residue check (roadmap 2.4)
+        # Clean diff is the bar: after install -> use -> wipe
+        # uninstall, the machine must look exactly as it did before
+        # the install (scheduled tasks, Startup entries, HKCU Run
+        # key, uninstall keys, program/data folders).
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $dir = "$env:RUNNER_TEMP\residue"
+          Get-ScheduledTask |
+            ForEach-Object { "$($_.TaskPath)$($_.TaskName)" } |
+            Sort-Object | Out-File "$dir\after-tasks.txt"
+          $run = Get-ItemProperty `
+            'HKCU:\Software\Microsoft\Windows\CurrentVersion\Run' `
+            -ErrorAction SilentlyContinue
+          $runLines = @()
+          if ($run) {
+            $runLines = @($run.PSObject.Properties |
+              Where-Object { $_.Name -notlike 'PS*' } |
+              ForEach-Object { "$($_.Name)=$($_.Value)" } | Sort-Object)
+          }
+          $runLines | Out-File "$dir\after-run.txt"
+          $startup = [Environment]::GetFolderPath('Startup')
+          Get-ChildItem $startup -ErrorAction SilentlyContinue |
+            Select-Object -ExpandProperty Name | Sort-Object |
+            Out-File "$dir\after-startup.txt"
+          Get-ChildItem `
+            'HKCU:\Software\Microsoft\Windows\CurrentVersion\Uninstall' `
+            -ErrorAction SilentlyContinue |
+            Select-Object -ExpandProperty PSChildName | Sort-Object |
+            Out-File "$dir\after-uninstall-keys.txt"
+          "app=$(Test-Path "$env:LOCALAPPDATA\Programs\Focus Core")" |
+            Out-File "$dir\after-presence.txt"
+          "data=$(Test-Path "$env:LOCALAPPDATA\Focus Core")" |
+            Out-File -Append "$dir\after-presence.txt"
+          # The Focus Core uninstall key itself must be gone, not
+          # just moved: Inno names it after the AppId + "_is1".
+          $leftover = Get-Content "$dir\after-uninstall-keys.txt" |
+            Where-Object {
+              $_ -like '*C7A3F2E1-8B4D-4F6A-9E2C-1D5A7B3F9E2C4*' }
+          if ($leftover) {
+            throw "Focus Core uninstall key left behind: $leftover"
+          }
+          $failed = $false
+          foreach ($name in @('tasks', 'run', 'startup',
+                             'uninstall-keys', 'presence')) {
+            $diff = Compare-Object `
+              @(Get-Content "$dir\before-$name.txt") `
+              @(Get-Content "$dir\after-$name.txt")
+            if ($diff) {
+              $failed = $true
+              $diff | Format-Table -AutoSize |
+                Out-File "$dir\diff-$name.txt"
+              Write-Host "Residue diff in $name (see artifact)"
+            }
+          }
+          if ($failed) { throw "Machine-state residue diff not clean" }
+          Write-Host "Residue check OK: machine state identical"
+
+      - name: Upload residue snapshots on failure
+        if: failure() || cancelled()
+        uses: actions/upload-artifact@v4
+        with:
+          name: smoke-residue-snapshots
+          path: |
+            ${{ runner.temp }}/residue
+            ${{ runner.temp }}/uninstall-wipe.log
+          if-no-files-found: warn
 
       - name: Upload install log on failure
         # Include cancelled(): a hung installer hits the step timeout above

@@ -95,3 +95,77 @@ begin
     and not RegValueExists(HKLM, 'SOFTWARE\WOW6432Node\Microsoft\EdgeUpdate\Clients\{F3017226-FE2A-4295-8BDF-00C3A9A7E4C5}', 'pv')
     and not RegValueExists(HKCU, 'SOFTWARE\Microsoft\EdgeUpdate\Clients\{F3017226-FE2A-4295-8BDF-00C3A9A7E4C5}', 'pv');
 end;
+
+// Roadmap 2.4: opt-in data wipe at uninstall. The default uninstall
+// keeps the user's data folder (%LOCALAPPDATA%\Focus Core) -- see
+// [UninstallDelete]. The wipe fires only when the user ticks the
+// checkbox on the uninstall wizard page (interactive mode only,
+// unchecked by default) or when IT passes /DELETEDATA to the silent
+// uninstaller for enterprise offboarding. Nothing outside {app} and
+// the data folder is ever touched, and a wipe that fails partway is
+// logged, never allowed to fail the uninstall itself.
+var
+  DeleteDataCheckBox: TNewCheckBox;
+  DeleteDataViaSwitch: Boolean;
+
+function DeleteDataSwitchGiven(): Boolean;
+var
+  I: Integer;
+begin
+  Result := False;
+  for I := 1 to ParamCount do
+  begin
+    if CompareText(ParamStr(I), '/DELETEDATA') = 0 then
+    begin
+      Result := True;
+      Exit;
+    end;
+  end;
+end;
+
+function InitializeUninstall(): Boolean;
+var
+  WipePage: TWizardPage;
+begin
+  Result := True;
+  DeleteDataViaSwitch := DeleteDataSwitchGiven();
+  // The checkbox is an interactive-only offer: a silent uninstall
+  // shows no UI at all (and keeps the data unless /DELETEDATA was
+  // given), and the page is pointless when the switch already made
+  // the decision.
+  if (not DeleteDataViaSwitch) and (not WizardSilent) then
+  begin
+    WipePage := CreateCustomPage(wpWelcome, 'Remove Focus Core',
+      'Your tracked history is kept when you uninstall, unless you choose to delete it below.');
+    DeleteDataCheckBox := TNewCheckBox.Create(WipePage);
+    DeleteDataCheckBox.Parent := WipePage.Surface;
+    DeleteDataCheckBox.Left := ScaleX(0);
+    DeleteDataCheckBox.Top := ScaleY(0);
+    DeleteDataCheckBox.Width := WipePage.SurfaceWidth;
+    DeleteDataCheckBox.Height := ScaleY(20);
+    DeleteDataCheckBox.Caption := 'Also delete my Focus Core data (history, settings, backups)';
+    DeleteDataCheckBox.Checked := False;
+  end;
+end;
+
+procedure CurUninstallStepChanged(CurUninstallStep: TUninstallStep);
+var
+  DataDir: String;
+begin
+  if CurUninstallStep = usPostUninstall then
+  begin
+    if DeleteDataViaSwitch or
+       (Assigned(DeleteDataCheckBox) and DeleteDataCheckBox.Checked) then
+    begin
+      DataDir := ExpandConstant('{localappdata}\Focus Core');
+      Log('Data wipe requested: deleting ' + DataDir);
+      try
+        if DirExists(DataDir) and
+           not DelTree(DataDir, True, True, True, True) then
+          Log('Data wipe incomplete; some files may remain in ' + DataDir);
+      except
+        Log('Data wipe failed; the uninstall continues.');
+      end;
+    end;
+  end;
+end;

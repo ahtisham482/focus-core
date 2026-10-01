@@ -83,6 +83,32 @@ the uninstall:
 rd /s /q "%LOCALAPPDATA%\Focus Core"
 ```
 
+## Removing Focus Core completely (offboarding)
+
+The default uninstall above deliberately keeps the person's data.
+When someone leaves and the machine must be wiped clean, Focus Core
+can delete the data folder itself as part of the uninstall:
+
+- **Interactive:** start the uninstaller without any silent flags
+  (for example from Settings → Apps). The uninstall shows one extra
+  option — **Also delete my Focus Core data (history, settings,
+  backups)** — unticked by default. Tick it and the whole data
+  folder (`%LOCALAPPDATA%\Focus Core`) is deleted after the program
+  itself is removed.
+- **Silent:** add `/DELETEDATA` to the documented uninstall
+  command:
+
+  ```
+  "%LOCALAPPDATA%\Programs\Focus Core\unins000.exe" /VERYSILENT /SUPPRESSMSGBOXES /NORESTART /DELETEDATA
+  ```
+
+Honest notes: without `/DELETEDATA` the silent uninstall keeps the
+data folder exactly as before — the switch is the only silent way
+to wipe. Deleting the data folder by hand after a default uninstall
+(the `rd /s /q` above) reaches the same result. A wipe that cannot
+delete some file is written to the uninstall log (`/LOG=`) and
+never makes the uninstall itself fail.
+
 ## Wrap for Intune (.intunewin)
 
 Focus Core is a per-user installer, so it deploys as a standard

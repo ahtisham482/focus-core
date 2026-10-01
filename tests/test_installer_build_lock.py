@@ -536,3 +536,39 @@ def test_install_locked_pin_main_maps_failures_to_exit_codes(monkeypatch, capsys
 
     monkeypatch.setattr(mod.subprocess, "check_call", bad_check_call)
     assert mod.main(["Pillow"]) == 7
+
+
+# Roadmap 2.4: the uninstaller offers an opt-in data wipe. The default
+# uninstall keeps the user's data folder (roadmap 2.2); the wipe fires
+# only from the interactive checkbox (shown in non-silent mode only,
+# unchecked by default) or the /DELETEDATA silent switch, and deletes
+# nothing but the data dir, after the program itself is removed.
+ISS_PATH = ROOT / "installer" / "installer.iss"
+
+
+def _iss():
+    return ISS_PATH.read_text()
+
+
+def test_uninstall_wipe_checkbox_exists_and_defaults_off():
+    iss = _iss()
+    assert "Also delete my Focus Core data" in iss
+    assert "DeleteDataCheckBox.Checked := False" in iss
+
+
+def test_uninstall_wipe_deletedata_switch_is_parsed():
+    iss = _iss()
+    assert "/DELETEDATA" in iss
+    assert "ParamStr" in iss
+
+
+def test_uninstall_wipe_deletes_only_the_data_dir():
+    iss = _iss()
+    assert "DelTree" in iss
+    assert "ExpandConstant('{localappdata}\\Focus Core')" in iss
+
+
+def test_uninstall_wipe_prompt_is_interactive_only_and_runs_last():
+    iss = _iss()
+    assert "WizardSilent" in iss
+    assert "usPostUninstall" in iss
