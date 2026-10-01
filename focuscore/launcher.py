@@ -3,8 +3,13 @@
 "Start Focus Core.bat" runs ``pythonw -m focuscore.launcher`` -- no
 console window. This module then:
 
-    1. Makes sure the dashboard server is running on 127.0.0.1:5000
-       (starts it quietly if needed, waits until it answers).
+    0. Takes the single-instance mutex (Roadmap 1.11). A second
+       instance focuses the first one's window and exits, starting
+       nothing -- so two updaters can never race either.
+    1. Makes sure the dashboard server is running on 127.0.0.1
+       (port 5000 if it is free, otherwise the next free port up to
+       5009; a port already held by a real Focus Core is attached to,
+       never duplicated).
     2. Runs a quiet backup if the newest backup is stale
        (never crashes the app if the backup fails).
     3. Opens the dashboard in "app mode" -- its own window, no address
@@ -19,13 +24,18 @@ Every helper here is a small pure/testable function; the .bat file
 itself is just two lines.
 """
 
+import json
 import logging
 import socket
 import subprocess
 import sys
 import time
+import urllib.error
+import urllib.request
 import webbrowser
 from pathlib import Path
+
+from . import single_instance
 
 logger = logging.getLogger(__name__)
 
@@ -33,7 +43,10 @@ PROJECT_ROOT = Path(__file__).resolve().parent.parent
 HOST = "127.0.0.1"
 PORT = 5000
 WAIT_TIMEOUT = 20  # seconds to wait for the server to answer
-APP_URL = "http://%s:%d/" % (HOST, PORT)
+APP_URL = f"http://{HOST}:{PORT}/"
+HEALTHZ_PATH = "/healthz"
+PROBE_TIMEOUT = 0.5  # seconds; identity probes must stay snappy
+PORT_SCAN_COUNT = 10  # candidate ports: PORT .. PORT + 9
 # Windows AppUserModelID: the OS-level identity of the app, in the
 # conventional Publisher.Product form. Without an explicit ID, Windows
 # groups our window under the Python interpreter (pythonw.exe): the
@@ -58,6 +71,127 @@ def set_windows_app_identity(app_id=APP_ID):
             app_id)
         return True
     except Exception:  # noqa: BLE001 -- cosmetic, never fatal
+        return False
+
+
+# ----------------------------------------------------------- active URL ---
+
+_active_port = None
+
+
+def active_port():
+    """The port the dashboard is (or will be) served on in this process."""
+    return _active_port if _active_port is not None else PORT
+
+
+def app_url():
+    """Base URL of the running dashboard, following the chosen port.
+
+    Before any port selection has happened this is the plain port-5000
+    URL, exactly what the old APP_URL constant always produced.
+    """
+    return f"http://{HOST}:{active_port()}/"
+
+
+def _set_active_port(port):
+    global _active_port
+    _active_port = int(port)
+
+
+# ------------------------------------------------------- identity probe ---
+
+def is_focus_core(port, host=HOST, timeout=None):
+    """True only when port answers GET /healthz as Focus Core.
+
+    The probe is how a busy port is told apart from a foreign app:
+    HTTP 200 AND a JSON body whose ``app`` is "focus-core". Any error,
+    timeout, wrong status, or wrong body means "not Focus Core".
+    ``timeout=None`` resolves to PROBE_TIMEOUT at call time.
+    """
+    if timeout is None:
+        timeout = PROBE_TIMEOUT
+    url = f"http://{host}:{port}{HEALTHZ_PATH}"
+    try:
+        request = urllib.request.Request(
+            url, headers={"Accept": "application/json"})
+        with urllib.request.urlopen(request, timeout=timeout) as response:
+            if response.status != 200:
+                return False
+            body = response.read(4096)
+        data = json.loads(body.decode("utf-8", "replace"))
+    except Exception:  # noqa: BLE001 -- any failure means "not Focus Core"
+        return False
+    return isinstance(data, dict) and data.get("app") == "focus-core"
+
+
+def _port_bindable(port, host=HOST):
+    """True when this process could bind host:port right now."""
+    sock = socket.socket()
+    try:
+        sock.bind((host, port))
+        return True
+    except OSError:
+        return False
+    finally:
+        sock.close()
+
+
+def _candidate_ports():
+    return list(range(PORT, PORT + PORT_SCAN_COUNT))
+
+
+def _select_port():
+    """Pick the dashboard port. Returns (port, already_running).
+
+    A port that already serves Focus Core wins first (attach; never
+    start a duplicate). Otherwise the first bindable-free port is
+    where a new server will start. Ten busy foreign ports raise a
+    plain-English RuntimeError.
+    """
+    candidates = _candidate_ports()
+    for port in candidates:
+        if is_focus_core(port):
+            _set_active_port(port)
+            return port, True
+    for port in candidates:
+        if _port_bindable(port):
+            _set_active_port(port)
+            return port, False
+    raise RuntimeError(
+        f"Focus Core could not start because ports {candidates[0]} to "
+        f"{candidates[-1]} are all being used by other programs. Close "
+        "one of those programs, then open Focus Core again.")
+
+
+def focus_existing_window(title=None, _user32=None):
+    """Best-effort: bring the first instance's window to the front.
+
+    Windows only; never raises. Returns True when a window was found
+    and foregrounded. ``_user32`` injects the API for tests.
+    """
+    if title is None:
+        from .desktop import APP_TITLE
+        title = APP_TITLE
+    if _user32 is None:
+        if sys.platform != "win32":
+            return False
+        try:
+            import ctypes
+            _user32 = ctypes.windll.user32
+        except Exception:  # noqa: BLE001 -- cosmetic, never fatal
+            return False
+    try:
+        hwnd = _user32.FindWindowW(None, title)
+        if not hwnd:
+            return False
+        sw_restore = 9
+        try:
+            _user32.ShowWindow(hwnd, sw_restore)
+        except Exception:  # noqa: BLE001 -- restore is cosmetic
+            logger.debug("restoring the existing window failed")
+        return bool(_user32.SetForegroundWindow(hwnd))
+    except Exception:  # noqa: BLE001 -- best effort, never fatal
+        logger.debug("focusing the existing window failed")
         return False
 
 
@@ -88,13 +222,13 @@ def _no_window_kwargs():
     return {}
 
 
-def start_server():
+def start_server(port=PORT):
     """Start the dashboard server quietly in the background.
 
     Returns the Popen handle so the owner (tray) can stop it later.
     """
     return subprocess.Popen(
-        [sys.executable, "-m", "dashboard.app"],
+        [sys.executable, "-m", "dashboard.app", "--port", str(port)],
         cwd=str(PROJECT_ROOT),
         stdout=subprocess.DEVNULL,
         stderr=subprocess.DEVNULL,
@@ -105,11 +239,14 @@ def ensure_server():
     """Make sure the server is up. Returns (process_or_None, already_running).
 
     process is the Popen handle when WE started the server, else None.
+    The chosen port is remembered (see app_url()) so the tray and the
+    app window open the server that is actually running.
     """
-    if port_open():
+    port, already_running = _select_port()
+    if already_running:
         return None, True
-    proc = start_server()
-    if not wait_for_port():
+    proc = start_server(port)
+    if not wait_for_port(port=port):
         try:
             proc.terminate()
         except OSError as exc:
@@ -133,12 +270,15 @@ def maybe_backup():
         print("Focus Core: backup skipped (%s)" % exc)
 
 
-def open_app_window(url=APP_URL):
+def open_app_window(url=None):
     """Open the dashboard in app mode (own window, no address bar).
 
     Tries Chrome, then Edge, then the default browser. Returns the
-    method used: "chrome", "edge", or "browser".
+    method used: "chrome", "edge", or "browser". With no explicit URL
+    the active URL (chosen port) is used.
     """
+    if url is None:
+        url = app_url()
     candidates = [
         ("chrome", [
             "chrome.exe",
@@ -185,6 +325,16 @@ def _background_update_check():
 
 
 def main():
+    # Roadmap 1.11: the single-instance mutex comes FIRST, before the
+    # update-check thread, the tray, the server, the backup, and the
+    # shield -- a second instance starts NOTHING. Holding the only
+    # instance by construction also means the tray's updater can never
+    # race a second updater.
+    if single_instance.acquire() is None:
+        logger.info("another Focus Core instance is already running; "
+                    "focusing it and exiting")
+        focus_existing_window()
+        return
     # OS identity first: before any window exists, tell Windows this
     # process is Focus Core (not the Python interpreter), so the
     # taskbar/Alt+Tab show the app's own name and icon.

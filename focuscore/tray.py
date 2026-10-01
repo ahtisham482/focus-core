@@ -193,7 +193,7 @@ class TrayApp:
     def on_check_updates(self, icon=None, item=None):
         import webbrowser
         from . import launcher
-        webbrowser.open(launcher.APP_URL + "/update")
+        webbrowser.open(launcher.app_url() + "/update")
 
     def _apply_pending_update(self, pending):
         """Install a downloaded update, then quit so files can be replaced.
@@ -400,7 +400,7 @@ class TrayApp:
     def on_emergency_pass(self, icon=None, item=None):
         import webbrowser
         from . import launcher
-        webbrowser.open(launcher.APP_URL + "/shield")
+        webbrowser.open(launcher.app_url() + "/shield")
 
     def on_hud_toggle(self, icon=None, item=None):
         from . import store
@@ -449,12 +449,21 @@ class TrayApp:
         if not desktop.available():
             return None
         try:
-            return desktop.create_window(launcher.APP_URL)
+            return desktop.create_window(launcher.app_url())
         except Exception:  # noqa: BLE001 -- fall back to the browser window
             return None
 
     def run(self):
         """Start server (if needed), open the window, run the tray loop."""
+        # Roadmap 1.11: same single-instance guard as the launcher
+        # (covers TrayApp started directly). Idempotent in-process:
+        # when the module-level run() already took the mutex, this
+        # returns the held handle and startup proceeds.
+        from . import single_instance
+        if single_instance.acquire() is None:
+            from . import launcher as _launcher
+            _launcher.focus_existing_window()
+            return
         import pystray
         import threading
         from . import launcher, desktop, updater
@@ -514,6 +523,15 @@ class TrayApp:
 
 def run(db_path=None):
     """Entry point used by the launcher."""
+    # Roadmap 1.11: single-instance guard FIRST -- a second instance
+    # focuses the running one and exits, starting nothing (so two
+    # updaters can never race). The helper is idempotent, so the
+    # launcher having acquired it already in this process is fine.
+    from . import single_instance
+    if single_instance.acquire() is None:
+        from . import launcher
+        launcher.focus_existing_window()
+        return
     # Roadmap 1.3: this process carries the "tray" tag in the shared
     # log file from here on (the launcher process becomes this one).
     from . import logging_config

@@ -9,7 +9,7 @@ from pathlib import Path
 import logging
 import re
 
-from flask import Blueprint, redirect, request
+from flask import Blueprint, jsonify, redirect, request
 
 from focuscore import store
 from dashboard.app import (
@@ -25,6 +25,17 @@ from dashboard.app import (
 bp = Blueprint("system", __name__)
 
 logger = logging.getLogger(__name__)
+
+
+@bp.route("/healthz")
+def healthz():
+    """Identity probe (Roadmap 1.11): proves this port serves Focus Core.
+
+    The launcher asks for this before attaching to a busy port, so a
+    foreign app on 5000 is never mistaken for the dashboard. It
+    reveals nothing but the app name -- no data, no auth needed.
+    """
+    return jsonify({"app": "focus-core", "status": "ok"})
 
 
 # ─────────────────────────────────────────────────────────────────────────────

@@ -69,6 +69,7 @@ GOLDEN_ROUTE_MAP = [
     ('/goals/add', ('POST',)),
     ('/goals/delete', ('POST',)),
     ('/goals/pin', ('POST',)),
+    ('/healthz', ('GET',)),
     ('/help', ('GET',)),
     ('/help/<key>', ('GET',)),
     ('/intelligence', ('GET',)),
