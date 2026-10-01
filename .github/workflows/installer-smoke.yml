@@ -49,6 +49,26 @@ jobs:
             installer\installer.iss /DAppVersion="0.0.0.${{ github.run_number }}"
           Get-ChildItem installer\FocusCore-Setup-*.exe
 
+      - name: Record installer size (roadmap 1.17)
+        # Installer download size tracked per release: emitted as a
+        # run artifact so sizes can be compared across releases.
+        shell: pwsh
+        run: |
+          $exe = Get-ChildItem installer\FocusCore-Setup-*.exe |
+                 Select-Object -First 1
+          if (-not $exe) { throw "No installer exe found" }
+          $line = "installer=$($exe.Name) bytes=$($exe.Length)"
+          Write-Host $line
+          Set-Content -Path installer-size.txt -Value $line
+
+      - name: Upload installer size
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: installer-size
+          path: installer-size.txt
+          if-no-files-found: warn
+
       - name: Silent-install the product
         # Fail fast if the installer hangs: a healthy silent install takes
         # a few minutes. Without this, a hang burns the whole 30-minute

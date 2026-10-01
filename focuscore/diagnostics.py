@@ -246,6 +246,33 @@ def _log_tail_section(log_file):
     return anonymize("\n".join(out)) + "\n"
 
 
+def _memory_section(data_dir):
+    from . import memreport
+    out = ["Memory self-report", "==================", ""]
+    summary = memreport.summarize(memreport.load_snapshots(data_dir))
+    latest = summary["latest"]
+    if latest is None:
+        out.append("(no memory snapshot recorded yet)")
+        return "\n".join(out) + "\n"
+    out.append(f"Latest snapshot: {latest.get('recorded_at')}")
+    out.append(f"Process id: {latest.get('pid')}")
+    uptime = latest.get("uptime_s")
+    uptime_text = f"{uptime / 3600:.1f} h" if uptime else "unknown"
+    out.append(f"Process uptime at snapshot: {uptime_text}")
+    rss = latest.get("rss_bytes")
+    rss_text = (f"{rss / 1048576:.1f} MB" if rss is not None
+                else "unknown")
+    out.append(f"Memory (RSS): {rss_text}")
+    if summary["growth_bytes"] is not None:
+        compared_at = summary["compared_to"].get("recorded_at")
+        out.append(f"24h memory growth: {summary['growth_bytes'] / 1048576:+.1f} MB "
+                   f"(vs snapshot {compared_at}, same process)")
+    else:
+        out.append("24h memory growth: not available yet (needs a "
+                   "snapshot 20h+ older from the same process)")
+    return "\n".join(out) + "\n"
+
+
 def _installer_section(app_root, data_dir):
     out = ["Installer", "=========", ""]
     candidates = [Path(app_root) / "installer.ini",
@@ -298,6 +325,9 @@ What is inside
 - log-tail.txt  The last 200 lines of the app log, with your user name
                 and home folder paths replaced by placeholders.
 - installer.txt Notes about how this copy was installed.
+- memory.txt    The tray process's own memory self-report: its
+                latest memory snapshot and 24h memory growth,
+                recorded nightly by the app itself.
 
 What is NOT inside -- on purpose
 --------------------------------
@@ -319,6 +349,8 @@ def build_diagnostics_zip(db_path=None, log_file=None, data_dir=None,
     sections = {
         "README.txt": _README,
         "system.txt": _section("system", lambda: _system_section(db_path)),
+        "memory.txt": _section("memory",
+                               lambda: _memory_section(data_dir)),
         "settings.txt": _section("settings",
                                  lambda: _settings_section(db_path)),
         "data-dir.txt": _section("data dir",

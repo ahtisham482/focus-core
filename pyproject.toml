@@ -11,6 +11,13 @@ select = ["E", "F"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
+# Roadmap 1.17: the 1-hour idle soak runs ONLY in the weekly CI job,
+# which selects it explicitly with `-m soak` (command line beats
+# addopts). A normal `pytest tests/` can never pick it up.
+addopts = '-m "not soak"'
+markers = [
+    "soak: long-running footprint soak; weekly CI only (select with -m soak)",
+]
 filterwarnings = [
     "ignore::DeprecationWarning:Pillow.*",
     "ignore:.*Pillow.*:DeprecationWarning",

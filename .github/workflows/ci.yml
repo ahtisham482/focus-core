@@ -83,6 +83,27 @@ jobs:
       - name: Run test suite
         run: pytest -q --cov=focuscore --cov=dashboard --cov-report=term-missing --cov-fail-under=69
 
+  weekly-soak:
+    name: Weekly footprint soak (roadmap 1.17)
+    # Roadmap 1.17: the 1-hour idle soak lives ONLY in the weekly
+    # scheduled run -- never on push or PR. The ceilings (idle CPU
+    # < 1%, RSS < 150 MB) are pinned in
+    # tests/test_performance_footprint.py and fail like tests.
+    if: github.event_name == 'schedule'
+    runs-on: ubuntu-latest
+    timeout-minutes: 90
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Install dependencies
+        run: pip install -r requirements.txt
+      - name: Idle footprint soak (1 hour)
+        env:
+          FOCUSCORE_SOAK_SECONDS: "3600"
+        run: python -m pytest tests/test_performance_soak.py -m soak -x -q
+
   artifact:
     name: Build release zip
     needs: [lint, test]

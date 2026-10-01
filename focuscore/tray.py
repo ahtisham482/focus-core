@@ -241,8 +241,21 @@ class TrayApp:
         On integrity failure: log loudly and surface one user-visible
         notification pointing at backup/restore. Never raises into
         the daemon loop -- the tray must keep running.
+
+        Roadmap 1.17: also records an own-process memory snapshot
+        (observational only; feeds the diagnostics bundle). It runs
+        first so the integrity-ok early return cannot skip it.
         """
         from . import store
+        try:
+            from . import memreport, paths
+            data_dir = (Path(self.db_path).parent if self.db_path
+                        else paths.data_dir())
+            memreport.record_snapshot(data_dir)
+        except Exception:  # self-report only; never fatal
+            logger.warning(
+                "nightly memory snapshot failed for %s",
+                self.db_path, exc_info=True)
         try:
             store.checkpoint_wal(self.db_path)
         except Exception:  # noqa: BLE001 -- logged, never fatal
