@@ -568,6 +568,14 @@ def run(db_path=None):
             "opened and no recovery was chosen. Your data was not "
             "changed.")
         return
+    # Roadmap 2.5: crash-report session marker + exception hooks. The
+    # module swallows its own failures; this guard means an import
+    # problem can never block startup either.
+    try:
+        from . import crashreport
+        crashreport.begin_session()
+    except Exception as exc:  # noqa: BLE001 -- never block startup
+        logger.debug("crash report setup skipped: %s", exc)
     if not available():
         raise RuntimeError(
             "Tray needs pystray and Pillow. Run setup.bat again, or "

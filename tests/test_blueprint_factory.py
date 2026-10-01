@@ -53,6 +53,7 @@ GOLDEN_ROUTE_MAP = [
     ('/backup/restore', ('POST',)),
     ('/coaching', ('GET',)),
     ('/collect', ('GET',)),
+    ('/crash-report/handled', ('POST',)),
     ('/day/<day>', ('GET',)),
     ('/focus', ('GET',)),
     ('/focus/abort', ('POST',)),

@@ -657,6 +657,66 @@ def _living_tabs(active):
             % "".join(items))
 
 
+def _crash_report_card_html():
+    """Roadmap 2.5: the one-time "didn't close properly" offer.
+
+    Renders only while a crash-report offer is pending. The exact
+    report text is shown verbatim; sending is entirely the user's
+    choice (copy it, or open it in their own mail client) -- the app
+    itself sends nothing. Any of the three actions marks the incident
+    handled, so the card never nags twice for the same incident.
+    """
+    try:
+        from focuscore import crashreport
+        text = crashreport.pending_report()
+    except Exception:  # noqa: BLE001 -- the card must never break Home
+        return ""
+    if not text:
+        return ""
+    js_text = _json.dumps(text).replace("</", "<\\/")
+    return (
+        "<section class='hm-wrap'><div class='card' id='crash-report-card'>"
+        "<h3>Focus Core didn&rsquo;t close properly last time.</h3>"
+        "<p>If you want, you can send a small crash report. It contains "
+        "only what&rsquo;s shown below &mdash; no activity data, ever.</p>"
+        "<pre class='crash-report-text'>" + escape(text) + "</pre>"
+        "<p>"
+        "<button type='button' class='btn' id='crash-copy-btn'>"
+        "Copy report</button> "
+        "<a class='btn' id='crash-email-link' href='"
+        + escape(crashreport.mailto_url(text)) + "'>"
+        "Open email to maintainer</a> "
+        "<button type='button' class='btn secondary' id='crash-dismiss-btn'>"
+        "No thanks</button>"
+        "</p>"
+        "<p class='note' id='crash-copy-note' hidden>Copied &mdash; paste "
+        "it into your email, or anywhere you like.</p>"
+        "<script>(function () {"
+        "var card = document.getElementById('crash-report-card');"
+        "if (!card) return;"
+        "var text = " + js_text + ";"
+        "function handled() {"
+        "fetch('/crash-report/handled', {method: 'POST'})"
+        ".then(function () { card.remove(); })"
+        ".catch(function () { card.remove(); });"
+        "}"
+        "document.getElementById('crash-copy-btn')"
+        ".addEventListener('click', function () {"
+        "if (navigator.clipboard && navigator.clipboard.writeText) {"
+        "navigator.clipboard.writeText(text);"
+        "}"
+        "var note = document.getElementById('crash-copy-note');"
+        "if (note) note.hidden = false;"
+        "handled();"
+        "});"
+        "document.getElementById('crash-email-link')"
+        ".addEventListener('click', handled);"
+        "document.getElementById('crash-dismiss-btn')"
+        ".addEventListener('click', handled);"
+        "})();</script>"
+        "</div></section>")
+
+
 def home_page():
     """Home: one clear action first (start a 25-minute session), then
     today's live story as a strip -- never a wall of identical cards."""
@@ -924,7 +984,8 @@ def home_page():
         "Start a session and everything above fills in on its own.</p>"
         "</section>")
 
-    body = (nav_html + hero_html + targets_html + rhythm_html
+    body = (nav_html + hero_html + _crash_report_card_html()
+            + targets_html + rhythm_html
             + attention_html + today_html + footnote_html
             + foot_html
             + "<div class='hm-tabspace' aria-hidden='true'></div>"
@@ -1838,5 +1899,12 @@ if __name__ == "__main__":
               "could not be opened and no recovery was chosen. "
               "Your data was not changed.")
         sys.exit(1)
+    # Roadmap 2.5: crash-report session marker + exception hooks
+    # (defensive: a setup failure must never block startup).
+    try:
+        from focuscore import crashreport as _crashreport
+        _crashreport.begin_session()
+    except Exception as exc:  # noqa: BLE001 -- never block startup
+        print(f"crash report setup skipped: {exc}")
     from dashboard.app import app as application
     application.run(host=args.host, port=args.port)

@@ -852,6 +852,17 @@ def update_revert():
     return layout("Reverting", body, help_key="update")
 
 
+@bp.route("/crash-report/handled", methods=["POST"])
+def crash_report_handled():
+    """Roadmap 2.5: any card action (copy / email / dismiss) retires
+    the pending crash-report offer -- it is never shown twice for the
+    same incident. The app sends nothing itself; this only records
+    that the user has answered the offer."""
+    from focuscore import crashreport
+    crashreport.mark_handled()
+    return ("", 204)
+
+
 @bp.route("/report")
 def report_page():
     from focuscore import reports as rep_mod
