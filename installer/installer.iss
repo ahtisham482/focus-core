@@ -84,11 +84,11 @@ Filename: "{app}\python\pythonw.exe"; Parameters: "-m focuscore.launcher"; Worki
 Type: filesandordirs; Name: "{app}"
 
 [Code]
-; The WebView2 runtime registers under this client GUID whether it was
-; installed per-machine or per-user. This installer is per-user
-; (PrivilegesRequired=lowest), so it must also check HKCU: a per-user
-; WebView2 leaves no HKLM trace, and without the HKCU check every
-; silent update would pointlessly reinstall it.
+// The WebView2 runtime registers under this client GUID whether it was
+// installed per-machine or per-user. This installer is per-user
+// (PrivilegesRequired=lowest), so it must also check HKCU: a per-user
+// WebView2 leaves no HKLM trace, and without the HKCU check every
+// silent update would pointlessly reinstall it.
 function NeedsWebView2(): Boolean;
 begin
   Result := not RegValueExists(HKLM, 'SOFTWARE\Microsoft\EdgeUpdate\Clients\{F3017226-FE2A-4295-8BDF-00C3A9A7E4C5}', 'pv')
