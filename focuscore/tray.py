@@ -537,9 +537,15 @@ def run(db_path=None):
     from . import logging_config
     logging_config.setup_logging(process_name="tray")
     # Roadmap 1.7: migrations before any thread writes through the
-    # FK-enforcing store.get_db.
-    from . import store
-    store.init_db(db_path)
+    # FK-enforcing store.get_db. Roadmap 1.13: wrapped in safe mode --
+    # a corrupt DB offers restore-or-start-empty instead of crashing.
+    from . import recovery
+    if not recovery.ensure_working_db(db_path):
+        logger.error(
+            "Focus Core did not start: the database could not be "
+            "opened and no recovery was chosen. Your data was not "
+            "changed.")
+        return
     if not available():
         raise RuntimeError(
             "Tray needs pystray and Pillow. Run setup.bat again, or "

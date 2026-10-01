@@ -1806,8 +1806,14 @@ if __name__ == "__main__":
     from focuscore import logging_config
     logging_config.setup_logging(process_name="dashboard")
     # Roadmap 1.7: migrations before the first request writes through
-    # the FK-enforcing store.get_db.
-    from focuscore import store as _store
-    _store.init_db()
+    # the FK-enforcing store.get_db. Roadmap 1.13: wrapped in safe
+    # mode -- a corrupt DB offers restore-or-start-empty instead of
+    # crashing; declining aborts startup with a non-zero exit.
+    from focuscore import recovery as _recovery
+    if not _recovery.ensure_working_db():
+        print("Focus Core dashboard did not start: the database "
+              "could not be opened and no recovery was chosen. "
+              "Your data was not changed.")
+        sys.exit(1)
     from dashboard.app import app as application
     application.run(host=args.host, port=args.port)
