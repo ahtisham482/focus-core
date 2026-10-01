@@ -24,6 +24,7 @@ import hashlib
 import hmac
 import json
 import logging
+import sys
 import tempfile
 import time
 import urllib.error
@@ -38,6 +39,13 @@ logger = logging.getLogger(__name__)
 UPDATE_INFO_NAME = "update-info.json"
 CHECK_CACHE_NAME = ".update-check.json"
 PENDING_NAME = ".update-pending.json"
+# Roadmap 2.1 rollback state, all in the data dir: the newest tracked
+# download, the one-deep previous-installer slot (+ its marker), and the
+# failure marker the update bat writes when an installer exits non-zero.
+LAST_DOWNLOAD_NAME = ".update-last-download.json"
+PREVIOUS_DIR_NAME = "previous-installer"
+PREVIOUS_MARKER_NAME = ".previous-installer.json"
+FAILURE_NAME = ".update-failed.json"
 API_URL = "https://api.github.com/repos/{repo}/releases/latest"
 USER_AGENT = "FocusCore-Updater"
 REQUEST_TIMEOUT = 20
@@ -380,21 +388,176 @@ def take_pending_install():
     return data
 
 
+# --- rollback state (roadmap 2.1) ---------------------------------------
+#
+# The honest core of "Revert to previous version": the slot may only
+# ever name the installer that produced the version the app is
+# *currently running*. Downloads are tracked when they complete; when a
+# later download arrives and the app is by then running the previously
+# downloaded version, that installer is copied into the slot. A
+# download that was never applied settles nothing -- no fabricated
+# previous, ever.
+
+
+def _read_json_file(path):
+    try:
+        data = json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        return None
+    return data if isinstance(data, dict) else None
+
+
+def record_download(installer_path, version):
+    """Remember the newest installer this copy got (version + path).
+
+    Written when a download completes (and when a revert is queued).
+    On its own this changes nothing visible; it only lets
+    track_download() later settle the previous-installer slot for the
+    version the app is actually running. Best effort -- a failed write
+    must never break an update.
+    """
+    try:
+        paths.ensure_data_dir()
+        (paths.data_dir() / LAST_DOWNLOAD_NAME).write_text(json.dumps({
+            "installer": str(installer_path),
+            "version": version,
+            "at": time.time(),
+        }), encoding="utf-8")
+    except OSError as exc:
+        logger.warning("could not record the update download: %s", exc)
+
+
+def _settle_previous_slot():
+    """Copy the running version's producer into the previous slot."""
+    info = get_update_info()
+    if not info:
+        return
+    running = parse_version(info.get("version"))
+    if running is None:
+        return
+    record = _read_json_file(paths.data_dir() / LAST_DOWNLOAD_NAME)
+    if not record or parse_version(record.get("version")) != running:
+        return
+    marker_path = paths.data_dir() / PREVIOUS_MARKER_NAME
+    marker = _read_json_file(marker_path)
+    if marker and parse_version(marker.get("version")) == running:
+        return  # the slot already names this version's installer
+    source = Path(record.get("installer") or "")
+    if not source.is_file():
+        return
+    dest = paths.data_dir() / PREVIOUS_DIR_NAME / source.name
+    try:
+        if source.resolve() != dest.resolve():
+            dest.parent.mkdir(parents=True, exist_ok=True)
+            for old in dest.parent.glob(INSTALLER_PREFIX + "*.exe"):
+                if old != dest:
+                    old.unlink(missing_ok=True)  # one-deep slot
+            dest.write_bytes(source.read_bytes())
+        marker_path.write_text(json.dumps({
+            "version": record["version"],
+            "installer": str(dest),
+            "at": time.time(),
+        }), encoding="utf-8")
+    except OSError as exc:
+        logger.warning("could not keep the previous installer: %s", exc)
+
+
+def track_download(installer_path, version):
+    """A download just completed: settle the slot, then record it.
+
+    Settling uses the *previous* record -- the installer that produced
+    the version running right now -- so the slot is one update behind
+    by design: while you run version N it holds N's producer, ready to
+    become the revert target the moment N+1 lands.
+
+    A path that isn't a real file on disk is not a completed download
+    and tracks nothing -- the same honesty rule as the slot itself.
+    """
+    if not Path(installer_path).is_file():
+        return
+    _settle_previous_slot()
+    record_download(installer_path, version)
+
+
+def previous_installer():
+    """The kept previous installer: {"version", "installer"} or None.
+
+    None unless the marker exists, its version parses, and the
+    installer file is really on disk -- the Revert button is only as
+    honest as this function.
+    """
+    marker = _read_json_file(paths.data_dir() / PREVIOUS_MARKER_NAME)
+    if not marker:
+        return None
+    installer = marker.get("installer")
+    if parse_version(marker.get("version")) is None or not installer:
+        return None
+    if not Path(installer).is_file():
+        return None
+    return {"version": marker["version"], "installer": installer}
+
+
+def read_update_failure():
+    """The update bat's failure marker {"version", "installer"} / None."""
+    return _read_json_file(paths.data_dir() / FAILURE_NAME)
+
+
+def clear_update_failure():
+    try:
+        (paths.data_dir() / FAILURE_NAME).unlink()
+    except OSError as exc:
+        # Expected/cosmetic: the marker may already be gone. DEBUG is
+        # enough -- the page simply renders without the card.
+        logger.debug("could not clear the update-failure marker: %s",
+                     exc)
+
+
+def attempted_version_from_name(name):
+    """Best-effort version from an installer file name.
+
+    Release installers are FocusCore-Setup-<version>.exe; anything else
+    falls back to the bare file stem (still names what ran).
+    """
+    stem = name[:-4] if name.lower().endswith(".exe") else name
+    if stem.startswith(INSTALLER_PREFIX):
+        candidate = stem[len(INSTALLER_PREFIX):]
+        if parse_version(candidate):
+            return candidate
+    return stem
+
+
 def write_update_launcher(installer_path):
     """Write a small bat that installs after we exit.
 
     The installer can't replace files while we're still running, so the
-    bat waits a few seconds, runs the setup silently, then deletes
-    itself. The caller launches it (detached) and then quits the app.
+    bat waits a few seconds, then runs the setup silently -- attached,
+    not via ``start``, so the exit code is real. On success Inno's own
+    post-install step reopens the app, exactly as before. On a
+    non-zero exit the old app is still installed (a failed Inno run
+    leaves it in place), so the bat drops a failure marker into the
+    data dir for the /update page and relaunches the old app the same
+    way installer.iss launches it (``pythonw.exe -m
+    focuscore.launcher``; roadmap 2.1) -- the app never just vanishes.
+    The caller launches the bat (detached) and then quits the app.
     Returns the bat path.
     """
     bat = Path(tempfile.gettempdir()) / (
         "focuscore-update-%s.bat" % datetime.now().strftime("%Y%m%d%H%M%S"))
+    installer_name = str(installer_path).replace(
+        "\\", "/").rsplit("/", 1)[-1]
     bat.write_text(
         "@echo off\r\n"
         "timeout /t 5 /nobreak >nul\r\n"
-        'start "" "%s" /SILENT\r\n'
-        'del "%%~f0"\r\n' % installer_path,
+        '"%s" /SILENT\r\n'
+        "if not errorlevel 1 goto focuscore_updated\r\n"
+        'echo {"version": "%s", "installer": "%s"}> "%s"\r\n'
+        'start "" /d "%s" "%s" -m focuscore.launcher\r\n'
+        ":focuscore_updated\r\n"
+        'del "%%~f0"\r\n'
+        % (installer_path,
+           attempted_version_from_name(installer_name), installer_name,
+           paths.data_dir() / FAILURE_NAME, paths.APP_ROOT,
+           sys.executable),
         encoding="utf-8",
     )
     return bat

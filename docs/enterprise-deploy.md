@@ -36,6 +36,9 @@ after install, no reinstall needed.
   through the same code path as the automatic check.
 - Starting an update (the "Update now" flow) is refused before
   anything is downloaded or staged.
+- "Revert to previous version" (the rollback the Updates page offers
+  after an update) is refused too — while the pin is on, the app does
+  not change versions in either direction.
 - An update that was downloaded and queued before the pin is held,
   not applied. If the policy is later removed, normal behavior
   resumes, including that queued update.

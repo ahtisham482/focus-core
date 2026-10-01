@@ -119,6 +119,7 @@ GOLDEN_ROUTE_MAP = [
     ('/timesheet/statement', ('GET',)),
     ('/update', ('GET',)),
     ('/update/check-toggle', ('POST',)),
+    ('/update/revert', ('POST',)),
     ('/update/start', ('POST',)),
     ('/welcome', ('GET',)),
     ('/welcome/finish', ('POST',)),

@@ -488,6 +488,64 @@ def _update_toggle_card_html():
         % (state, next_value, action))
 
 
+def _update_failure_html(updater_mod):
+    """The calm "update didn't finish" card, from the bat's marker.
+
+    Shown exactly once: the marker is cleared as soon as it is read,
+    so the next page load is clean (roadmap 2.1). The running version
+    is named from update-info.json -- never a guess -- and the message
+    never claims the update half-worked: Inno either replaced the app
+    or it didn't.
+    """
+    failure = updater_mod.read_update_failure()
+    if not failure:
+        return ""
+    updater_mod.clear_update_failure()
+    info = updater_mod.get_update_info()
+    if not info:
+        return ""
+    attempted = failure.get("version")
+    tried = ("The update to <b>" + escape(str(attempted))
+             + "</b> didn't finish. ") if attempted else (
+                 "The update didn't finish. ")
+    return (
+        "<div class='card'><h3>Update didn't finish</h3>"
+        "<p>" + tried + "You're still on <b>"
+        + escape(str(info["version"])) + "</b>. Nothing was changed.</p>"
+        "<p class='note'>Your data and settings are exactly as they "
+        "were. You can try the update again whenever you're ready.</p>"
+        "</div>")
+
+
+def _revert_card_html(updater_mod, current_version):
+    """The "go back to the previous version" card (roadmap 2.1).
+
+    Rendered only when the data dir really holds the previous
+    installer and it names a different version than the running one --
+    otherwise the feature is absent, never greyed-out theater.
+    """
+    previous = updater_mod.previous_installer()
+    if not previous:
+        return ""
+    if updater_mod.parse_version(previous["version"]) == \
+            updater_mod.parse_version(str(current_version)):
+        return ""
+    previous_version = escape(str(previous["version"]))
+    return (
+        "<div class='card'><h3>Previous version</h3>"
+        "<p>Something wrong since the last update? You can go back to "
+        "<b>" + previous_version + "</b>, the version you had before "
+        "this one. Focus Core kept its installer for exactly this.</p>"
+        "<form method='post' action='/update/revert' onsubmit=\"return "
+        "confirm('Go back to " + previous_version + "? A safety backup "
+        "is made first, then Focus Core closes, reinstalls the previous "
+        "version, and reopens by itself.');\">"
+        "<button type='submit'>Revert to previous version</button>"
+        "</form>"
+        "<p class='note'>Your data is never touched — and a safety "
+        "backup is made first anyway.</p></div>")
+
+
 def _cached_update_status(updater_mod):
     """Last known update-check state, read from the cache -- never the
     network.
@@ -515,6 +573,9 @@ def update_page():
     from focuscore import config
     from focuscore import updater as updater_mod
 
+    # Roadmap 2.1: a failed update's marker is shown once, above
+    # whatever else this page renders -- policy pin included.
+    failure_html = _update_failure_html(updater_mod)
     refresh = request.args.get("refresh") == "1"
     if config.feature_enabled("updates_disabled"):
         # Roadmap 1.21: the machine policy beats every path into this
@@ -545,7 +606,7 @@ def update_page():
             "updates on this device, so the app won't check for new "
             "versions here &mdash; not even when you ask it to. Your "
             "own update setting can't override this.</p></div>")
-        return layout("Updates", body, help_key="update")
+        return layout("Updates", failure_html + body, help_key="update")
 
     if status["status"] == "dev-copy":
         body = (
@@ -555,7 +616,7 @@ def update_page():
             "the way you usually do.</p>"
             "<p class='note'>One-click updates are for installed copies "
             "only.</p></div>")
-        return layout("Updates", body, help_key="update")
+        return layout("Updates", failure_html + body, help_key="update")
 
     if status["status"] == "not-checked":
         body = (
@@ -567,7 +628,10 @@ def update_page():
             "<p><a class='btn' href='/update?refresh=1'>Check again</a></p>"
             "</div>"
             % escape(status["current"]))
-        return layout("Updates", body + _update_toggle_card_html(),
+        return layout("Updates", failure_html + body
+                      + _update_toggle_card_html()
+                      + _revert_card_html(updater_mod,
+                                          status["current"]),
                       help_key="update")
 
     if status["status"] == "error":
@@ -579,7 +643,10 @@ def update_page():
             "<p><a class='btn' href='/update?refresh=1'>Check again</a></p>"
             "</div>"
             % (escape(status["error"]), escape(status["current"])))
-        return layout("Updates", body + _update_toggle_card_html(),
+        return layout("Updates", failure_html + body
+                      + _update_toggle_card_html()
+                      + _revert_card_html(updater_mod,
+                                          status["current"]),
                       help_key="update")
 
     head = ("<div class='card'><h3>Updates</h3>"
@@ -594,7 +661,10 @@ def update_page():
                 "<p><b>You're up to date.</b>" + check_hint + "</p>"
                 "<p><a class='btn' href='/update?refresh=1'>Check again</a>"
                 "</p></div>")
-        return layout("Updates", body + _update_toggle_card_html(),
+        return layout("Updates", failure_html + body
+                      + _update_toggle_card_html()
+                      + _revert_card_html(updater_mod,
+                                          status["current"]),
                       help_key="update")
 
     body = (
@@ -609,7 +679,9 @@ def update_page():
         "</p></div>"
         % (escape(status["latest"]), escape(status["latest"]),
            escape(status["latest"])))
-    return layout("Updates", body + _update_toggle_card_html(),
+    return layout("Updates", failure_html + body
+                  + _update_toggle_card_html()
+                  + _revert_card_html(updater_mod, status["current"]),
                   help_key="update")
 
 
@@ -690,6 +762,9 @@ def update_start():
             % escape(str(exc)),
             help_key="update"), 500
 
+    # Roadmap 2.1: track the completed download (settles the
+    # previous-installer slot for the version running right now).
+    updater_mod.track_download(dest, status["latest"])
     updater_mod.write_pending_install(dest, status["latest"])
     body = (
         "<div class='card'><h3>Updating to %s...</h3>"
@@ -700,6 +775,81 @@ def update_start():
         "the desktop icon as usual.</p></div>"
         % escape(status["latest"]))
     return layout("Updating", body, help_key="update")
+
+
+@bp.route("/update/revert", methods=["POST"])
+def update_revert():
+    """Queue the kept previous installer for the tray to apply.
+
+    Roadmap 2.1. Mirrors /update/start's gates exactly -- the 1.21
+    machine policy pin (403, IT's pin is a pin), an active focus
+    session, and the safety backup -- then hands the previous
+    installer to the normal pending-install path so the tray applies
+    it like any update. With no honestly-kept previous installer the
+    refusal is plain and nothing is queued.
+    """
+    from focuscore import backup as backup_mod
+    from focuscore import config
+    from focuscore import updater as updater_mod
+
+    if config.feature_enabled("updates_disabled"):
+        return layout(
+            "Updates",
+            "<div class='card'><p><b>Updates are disabled by your IT "
+            "policy.</b> Your IT team manages updates on this device, "
+            "so Focus Core can't change versions here — not even back "
+            "to the previous one.</p>"
+            "<p><a href='/update'>Back</a></p></div>",
+            help_key="update"), 403
+
+    info = updater_mod.get_update_info()
+    previous = updater_mod.previous_installer()
+    if not info or not previous or \
+            updater_mod.parse_version(previous["version"]) == \
+            updater_mod.parse_version(str(info["version"])):
+        return layout(
+            "Updates",
+            "<div class='card'><p><b>No previous version to go back "
+            "to.</b> Focus Core only offers this when it kept the "
+            "installer of the version you had before — this copy "
+            "doesn't have one.</p>"
+            "<p><a href='/update'>Back</a></p></div>",
+            help_key="update"), 400
+
+    active = store.get_active_session()
+    if active:
+        return layout(
+            "Updates",
+            "<div class='card'><p><b>Can't go back right now:</b> a "
+            "focus session (" + escape(active.get("label") or "untitled")
+            + ") is in progress. Finish or stop it first, then come "
+            "back.</p><p><a href='/update'>Back</a></p></div>",
+            help_key="update"), 400
+
+    try:
+        backup_mod.create_backup()
+    except Exception as exc:  # noqa: BLE001 -- backup must not be skipped
+        return layout(
+            "Updates",
+            "<div class='card'><p><b>Revert stopped:</b> the safety "
+            "backup failed (" + escape(str(exc)) + "). Nothing was "
+            "changed.</p><p><a href='/update'>Back</a></p></div>",
+            help_key="update"), 500
+
+    updater_mod.record_download(previous["installer"],
+                                previous["version"])
+    updater_mod.write_pending_install(previous["installer"],
+                                      previous["version"])
+    body = (
+        "<div class='card'><h3>Reverting to "
+        + escape(str(previous["version"])) + "...</h3>"
+        "<p>The previous version's installer is kept on this computer "
+        "and a safety backup is made. Focus Core will now close, "
+        "reinstall the previous version, and reopen by itself — about "
+        "a minute.</p>"
+        "<p class='note'>If it doesn't reopen by itself, start it "
+        "from the desktop icon as usual.</p></div>")
+    return layout("Reverting", body, help_key="update")
 
 
 @bp.route("/report")
