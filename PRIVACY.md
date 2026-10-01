@@ -109,7 +109,7 @@ and you ask for help. It contains **only**:
   database health-check result.
 - Your settings, with secrets (passwords, tokens, calendar links) hidden.
 - The names and sizes of the files in your data folder — never their contents.
-- Recent error messages from the app's log (the last 200 lines), with your
+- Recent entries from the app's log (the last 200 lines), with your
   user name and home-folder paths replaced by placeholders — no activity
   titles, no URLs, no scores.
 - A short self-report of the app's own memory use.
