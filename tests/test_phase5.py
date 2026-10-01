@@ -331,7 +331,7 @@ def test_welcome_restart_clears_flag(env, monkeypatch, tmp_path):
     flag.write_text("2026-09-24")
     dash_app = _dash(monkeypatch, db, flag)
     client = dash_app.app.test_client()
-    assert client.get("/welcome/restart").status_code == 302
+    assert client.post("/welcome/restart").status_code == 302
     assert not flag.exists()
 
 

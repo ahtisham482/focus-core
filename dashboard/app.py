@@ -146,7 +146,11 @@ def layout(title, body, day=None, refresh=300, active="home",
         "<footer class='page-footer'>Focus Core &middot; "
         "your data never leaves this PC "
         "&middot; <a href='%s'>Help</a> "
-        "&middot; <a href='/welcome/restart'>Take the tour again</a></footer>"
+        "&middot; <form method='post' action='/welcome/restart' "
+        "style='display:inline;margin:0;padding:0'>"
+        "<button type='submit' style='background:none;border:none;"
+        "padding:0;color:var(--accent);cursor:pointer;font:inherit'>"
+        "Take the tour again</button></form></footer>"
         % help_href)
 
 
@@ -477,7 +481,8 @@ _BLOCKED_PAGE = (
 
 def _reject_loopback_csrf():
     # Only state-changing requests need protection; GET/HEAD/OPTIONS
-    # are read-only in this app and must keep working.
+    # are read-only in this app and must keep working (pinned by
+    # tests/test_no_get_mutates.py).
     if request.method not in _MUTATING_METHODS:
         return None
     if not _host_is_loopback(request.headers.get("Host", "")):

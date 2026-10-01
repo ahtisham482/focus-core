@@ -122,7 +122,7 @@ GOLDEN_ROUTE_MAP = [
     ('/update/start', ('POST',)),
     ('/welcome', ('GET',)),
     ('/welcome/finish', ('POST',)),
-    ('/welcome/restart', ('GET',)),
+    ('/welcome/restart', ('POST',)),
 ]
 
 

@@ -150,7 +150,7 @@ def welcome_finish():
     return redirect(dest)
 
 
-@bp.route("/welcome/restart")
+@bp.route("/welcome/restart", methods=["POST"])
 def welcome_restart():
     try:
         # Via module attribute so tests can monkeypatch
