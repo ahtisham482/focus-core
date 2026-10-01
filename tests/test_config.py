@@ -10,6 +10,8 @@ depends on the host env, or touches the repo dev DB.
 
 import logging
 import os
+import sys
+from pathlib import Path
 
 import pytest
 
@@ -339,8 +341,20 @@ def test_paths_grandfathered_db_beats_config(cfg, tmp_path, monkeypatch):
 
 # ------------------------------------------- repair 1.12 follow-ups ---
 
-@pytest.mark.parametrize("bad_value", ["~nosuchuser/data",
-                                       "~nosuchuser999/data"])
+@pytest.mark.parametrize("bad_value", [
+    pytest.param(
+        "~nosuchuser/data",
+        marks=pytest.mark.skipif(
+            sys.platform == "win32",
+            reason="'~user' expansion does not raise for unknown users "
+                   "on Windows")),
+    pytest.param(
+        "~nosuchuser999/data",
+        marks=pytest.mark.skipif(
+            sys.platform == "win32",
+            reason="'~user' expansion does not raise for unknown users "
+                   "on Windows")),
+])
 def test_paths_installed_unresolvable_data_dir_falls_back(
         cfg, tmp_path, monkeypatch, caplog, bad_value):
     """Installed mode: an unexpandable configured data_dir must warn
@@ -354,10 +368,33 @@ def test_paths_installed_unresolvable_data_dir_falls_back(
     assert any(r.levelno >= logging.WARNING for r in caplog.records)
 
 
+@pytest.mark.skipif(
+    sys.platform == "win32",
+    reason="'~user' expansion does not raise for unknown users "
+           "on Windows")
 def test_paths_installed_unresolvable_toml_data_dir_falls_back(
         cfg, tmp_path, monkeypatch, caplog):
     user_dir = _paths_at(tmp_path, monkeypatch, installed=True)
     _write_toml(cfg, 'data_dir = "~nosuchuser999/data"\n')
+    with caplog.at_level(logging.WARNING, logger="focuscore.paths"):
+        assert paths.data_dir() == user_dir
+    assert any(r.levelno >= logging.WARNING for r in caplog.records)
+
+
+def test_paths_installed_expanduser_failure_falls_back(
+        cfg, tmp_path, monkeypatch, caplog):
+    """The '~user' tests above cannot fire on Windows (expansion there
+    never raises for an unknown user). Force the same failure here
+    instead: a configured data_dir whose expanduser() raises must
+    warn and fall through to user_data_dir(), never raise into
+    startup. _paths_at already replaces user_data_dir() with a
+    lambda, so the forced failure cannot leak into the fallback."""
+    def _unexpandable(self):
+        raise RuntimeError("Could not determine home directory")
+
+    user_dir = _paths_at(tmp_path, monkeypatch, installed=True)
+    monkeypatch.setattr(Path, "expanduser", _unexpandable)
+    monkeypatch.setenv("FOCUSCORE_DATA_DIR", "~/fc-data")
     with caplog.at_level(logging.WARNING, logger="focuscore.paths"):
         assert paths.data_dir() == user_dir
     assert any(r.levelno >= logging.WARNING for r in caplog.records)
