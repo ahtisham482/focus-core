@@ -480,9 +480,14 @@ _BLOCKED_PAGE = (
 
 
 def _reject_loopback_csrf():
-    # Only state-changing requests need protection; GET/HEAD/OPTIONS
-    # are read-only in this app and must keep working (pinned by
-    # tests/test_no_get_mutates.py).
+    # Only state-changing requests need protection. GET/HEAD/OPTIONS
+    # never change user data in this app; the one named exception is
+    # that the three financial-export GETs (/timesheet/export.json,
+    # /timesheet/export/client, /timesheet/statement) append a row to
+    # finance_audit_events -- a deliberate append-only audit stamp on
+    # download, not a user-data change. That invariant is what lets
+    # safe methods pass here, and it is pinned by
+    # tests/test_no_get_mutates.py.
     if request.method not in _MUTATING_METHODS:
         return None
     if not _host_is_loopback(request.headers.get("Host", "")):
