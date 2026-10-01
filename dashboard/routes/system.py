@@ -102,7 +102,7 @@ def backup_page():
         last_html = "<p><b>No backups yet.</b> Make your first one now.</p>"
 
     rows = []
-    for b in backups:
+    for row_idx, b in enumerate(backups):
         size_kb = b["size_bytes"] / 1024.0
         marker = " <span class='note'>Encrypted</span>" if b.get("encrypted") else ""
         rows.append(
@@ -112,13 +112,17 @@ def backup_page():
             "this backup? Your current data is first copied to a safety "
             "file, so nothing is lost.');\">"
             "<input type='hidden' name='name' value='%s'>"
+            "<label class='sr-only' for='restore-pass-%d'>"
+            "Passphrase for backup %s, if encrypted</label>"
             "<input type='password' name='passphrase' "
+            "id='restore-pass-%d' "
             "placeholder='Passphrase if encrypted' autocomplete='off'>"
             "<button type='submit' class='secondary'>Restore</button>"
             "</form></td></tr>"
             % (escape(b["name"]), marker,
                b["modified"].strftime("%Y-%m-%d %H:%M"),
-               size_kb, escape(b["name"])))
+               size_kb, escape(b["name"]), row_idx,
+               escape(b["name"]), row_idx))
     table = (
         "<table><tr><th>Backup</th><th>Made</th><th>Size</th><th></th></tr>"
         "%s</table>"
@@ -1103,23 +1107,32 @@ def shield_page():
         "<form method='post' action='/shield/rule/add' "
         "class='sentence-form'>"
         "<p class='sentence'>Block "
-        "<input type='text' name='key' required "
+        "<label class='sr-only' for='shield-key'>"
+        "App, site or category</label>"
+        "<input type='text' name='key' id='shield-key' required "
         "placeholder='youtube.com or social' size='20' "
         "aria-label='App, site or category'> "
-        "<select name='rule_type' aria-label='Rule type'>"
+        "<label class='sr-only' for='shield-rule-type'>Rule type</label>"
+        "<select name='rule_type' id='shield-rule-type' aria-label='Rule type'>"
         "<option value='app'>an app / website</option>"
         "<option value='category'>a category</option></select> "
-        "<select name='days' aria-label='Days'>"
+        "<label class='sr-only' for='shield-days'>Days</label>"
+        "<select name='days' id='shield-days' aria-label='Days'>"
         "<option value='all'>every day</option>"
         "<option value='0,1,2,3,4'>weekdays</option>"
         "<option value='5,6'>weekends</option></select> "
         "<span class='nowrap'>from</span> "
-        "<input type='text' name='start_time' placeholder='09:00' size='5' "
+        "<label class='sr-only' for='shield-from'>From</label>"
+        "<input type='text' name='start_time' id='shield-from' "
+        "placeholder='09:00' size='5' "
         "aria-label='From'> "
         "<span class='nowrap'>to</span> "
-        "<input type='text' name='end_time' placeholder='18:00' size='5' "
+        "<label class='sr-only' for='shield-to'>To</label>"
+        "<input type='text' name='end_time' id='shield-to' "
+        "placeholder='18:00' size='5' "
         "aria-label='To'> "
-        "<select name='action' aria-label='Action'>"
+        "<label class='sr-only' for='shield-action'>Action</label>"
+        "<select name='action' id='shield-action' aria-label='Action'>"
         "<option value='soft'>just remind me</option>"
         "<option value='firm'>remind + minimize</option>"
         "<option value='hardcore'>minimize + 30s lock</option></select>"

@@ -132,11 +132,14 @@ def invoice_new_page():
     filter_form = (
         "<form method='get' action='/invoices/new' class='sentence-form'>"
         "<p class='sentence'>I want to bill "
-        "<select name='project_id' aria-label='Project'>"
+        "<label class='sr-only' for='inv-project'>Project</label>"
+        "<select name='project_id' id='inv-project' aria-label='Project'>"
         "<option value=''>-- choose --</option>%s</select> "
         "for work from "
-        "<input type='date' name='from' value='%s' aria-label='From'> "
-        "to <input type='date' name='to' value='%s' aria-label='To'>"
+        "<label class='sr-only' for='inv-from'>From</label>"
+        "<input type='date' name='from' id='inv-from' value='%s' aria-label='From'> "
+        "to <label class='sr-only' for='inv-to'>To</label>"
+        "<input type='date' name='to' id='inv-to' value='%s' aria-label='To'>"
         "<span class='nowrap'>.</span></p>"
         "<p><button type='submit'>Show entries</button></p></form>"
         % ("".join(

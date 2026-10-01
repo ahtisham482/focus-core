@@ -122,25 +122,45 @@ def timesheet_page():
                 "<button type='submit'>Delete</button></form>"
                 % (entry["id"], entry["id"], day, entry["id"], day))
             row_form = (
-                "<td><input type='text' name='start_ts' form='edit-%d' "
+                "<td><label class='sr-only' for='edit-start-%d'>"
+                "Start time</label>"
+                "<input type='text' name='start_ts' id='edit-start-%d' form='edit-%d' "
                 "value='%s' size='16'> - "
-                "<input type='text' name='end_ts' form='edit-%d' "
+                "<label class='sr-only' for='edit-end-%d'>"
+                "End time</label>"
+                "<input type='text' name='end_ts' id='edit-end-%d' form='edit-%d' "
                 "value='%s' size='16'></td>"
-                "<td><select name='category' form='edit-%d'>%s</select></td>"
+                "<td><label class='sr-only' for='edit-category-%d'>"
+                "Category</label>"
+                "<select name='category' id='edit-category-%d' "
+                "form='edit-%d'>%s</select></td>"
                 "<td>%s</td>"
-                "<td><select name='project_id' form='edit-%d'>%s</select></td>"
-                "<td><input type='text' name='task' form='edit-%d' "
+                "<td><label class='sr-only' for='edit-project-%d'>"
+                "Project</label>"
+                "<select name='project_id' id='edit-project-%d' "
+                "form='edit-%d'>%s</select></td>"
+                "<td><label class='sr-only' for='edit-task-%d'>"
+                "Task</label>"
+                "<input type='text' name='task' id='edit-task-%d' form='edit-%d' "
                 "value='%s' size='10'></td>"
-                "<td><input type='text' name='note' form='edit-%d' "
+                "<td><label class='sr-only' for='edit-note-%d'>"
+                "Note</label>"
+                "<input type='text' name='note' id='edit-note-%d' form='edit-%d' "
                 "value='%s' size='14'></td>"
                 "<td>%s%s</td><td>%s</td>"
-                % (entry["id"], escape(entry["start_ts"]),
-                   entry["id"], escape(entry["end_ts"]),
-                   entry["id"], _category_options(entry["category"]),
+                % (entry["id"], entry["id"], entry["id"],
+                   escape(entry["start_ts"]),
+                   entry["id"], entry["id"], entry["id"],
+                   escape(entry["end_ts"]),
+                   entry["id"], entry["id"], entry["id"],
+                   _category_options(entry["category"]),
                    escape(entry["app"]),
-                   entry["id"], _project_options(entry["project_id"]),
-                   entry["id"], escape(entry["task"]),
-                   entry["id"], escape(entry["note"]),
+                   entry["id"], entry["id"], entry["id"],
+                   _project_options(entry["project_id"]),
+                   entry["id"], entry["id"], entry["id"],
+                   escape(entry["task"]),
+                   entry["id"], entry["id"], entry["id"],
+                   escape(entry["note"]),
                    escape(entry["status"]), inv_badge, actions))
         entry_rows.append("<tr>" + row_form + "</tr>")
     if entry_rows:
@@ -188,13 +208,18 @@ def timesheet_page():
         "<form method='post' action='/timesheet/add' class='sentence-form'>"
         "<input type='hidden' name='day' value='%s'>"
         "<p class='sentence'>I worked "
-        "<input type='text' name='start_ts' required size='16' "
+        "<label class='sr-only' for='ts-start'>Start</label>"
+        "<input type='text' name='start_ts' id='ts-start' required size='16' "
         "placeholder='2026-09-25T09:00' aria-label='Start'> &ndash; "
-        "<input type='text' name='end_ts' required size='16' "
+        "<label class='sr-only' for='ts-end'>End</label>"
+        "<input type='text' name='end_ts' id='ts-end' required size='16' "
         "placeholder='2026-09-25T10:30' aria-label='End'> "
-        "on <select name='category' aria-label='Category'>%s</select>"
+        "on <label class='sr-only' for='ts-category'>Category</label>"
+        "<select name='category' id='ts-category' aria-label='Category'>%s</select>"
         "<span class='nowrap'>, doing "
-        "<input type='text' name='task' size='14' placeholder='what was it' "
+        "<label class='sr-only' for='ts-task'>Task</label>"
+        "<input type='text' name='task' id='ts-task' size='14' "
+        "placeholder='what was it' "
         "aria-label='Task'>.</span></p>"
         "<details class='wk-details'><summary>More details "
         "(optional)</summary>"

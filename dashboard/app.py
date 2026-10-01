@@ -118,10 +118,12 @@ def layout(title, body, day=None, refresh=300, active="home",
     # Theme toggle buttons (server-side POST, no JS required)
     theme_toggle = (
         "<form class='theme-toggle' method='post' action='/settings/theme'>"
-        "<button type='submit' name='theme' value='light' title='Light mode'>"
+        "<button type='submit' name='theme' value='light' "
+        "title='Light mode' aria-label='Light mode'>"
         "<svg width='14' height='14'><use href='/static/icons.svg#icon-sun'/></svg>"
         "</button>"
-        "<button type='submit' name='theme' value='dark' title='Dark mode'>"
+        "<button type='submit' name='theme' value='dark' "
+        "title='Dark mode' aria-label='Dark mode'>"
         "<svg width='14' height='14'><use href='/static/icons.svg#icon-moon'/></svg>"
         "</button>"
         "</form>"
@@ -149,7 +151,8 @@ def layout(title, body, day=None, refresh=300, active="home",
         "&middot; <form method='post' action='/welcome/restart' "
         "style='display:inline;margin:0;padding:0'>"
         "<button type='submit' style='background:none;border:none;"
-        "padding:0;color:var(--accent);cursor:pointer;font:inherit'>"
+        "padding:0;color:var(--accent-strong, var(--accent));"
+        "cursor:pointer;font:inherit'>"
         "Take the tour again</button></form></footer>"
         % help_href)
 
@@ -750,7 +753,9 @@ def home_page():
             "today's rhythm here.</p>"
             "<form class='hm-cal-form' method='post' "
             "action='/settings/calendar'>"
-            "<input type='url' name='ical_url' required "
+            "<label class='sr-only' for='ical-url'>"
+            "Calendar iCal URL</label>"
+            "<input type='url' name='ical_url' id='ical-url' required "
             "placeholder='Paste your Google Calendar secret iCal URL' "
             "autocomplete='off'>"
             "<button type='submit' class='hm-btn-sm'>Connect</button>"

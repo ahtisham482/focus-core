@@ -173,7 +173,7 @@ def activities():
     day = _parse_day(request.args.get("day")) or date.today().isoformat()
     rows = store.get_day_activities(day)
     body_rows = []
-    for row in rows:
+    for row_idx, row in enumerate(rows):
         options = "".join(
             '<option value="%d"%s>%+d %s</option>'
             % (level, " selected" if row["score"] == level else "",
@@ -188,14 +188,16 @@ def activities():
             "<td><form method='post' action='/override' style='margin:0'>"
             "<input type='hidden' name='day' value='%s'>"
             "<input type='hidden' name='match_key' value='%s'>"
-            "<select name='score'>%s</select> "
+            "<label class='sr-only' for='score-%d'>Score for %s</label>"
+            "<select name='score' id='score-%d'>%s</select> "
             "<button type='submit'>Set</button></form></td></tr>"
             % (escape((row["ts"] or "")[11:16]),
                escape(row["title"] or ""), escape((row["title"] or "")[:60]),
                escape(row["app"] or ""), escape(host or "-"),
                escape(row["category"] or ""),
                (row["duration"] or 0) / 60.0,
-               day, escape(row["match_key"] or ""), options)
+               day, escape(row["match_key"] or ""), row_idx,
+               escape(row["app"] or "this activity"), row_idx, options)
         )
     # --- today's story: one human sentence from the raw rows ---
     story_html = ""
@@ -327,12 +329,16 @@ def goals_page():
         "<div class='card goal-create'><h3>Add a goal</h3>%s"
         "<form method='post' action='/goals/add' class='sentence-form'>"
         "<p class='sentence'>I want "
-        "<select name='direction' aria-label='Direction'>"
+        "<label class='sr-only' for='goal-direction'>Direction</label>"
+        "<select name='direction' id='goal-direction' aria-label='Direction'>"
         "<option value='more_than' selected>more than</option>"
         "<option value='less_than'>less than</option></select> "
-        "<input type='number' name='threshold' min='0' step='0.5' required "
+        "<label class='sr-only' for='goal-threshold'>Amount</label>"
+        "<input type='number' name='threshold' id='goal-threshold' "
+        "min='0' step='0.5' required "
         "placeholder='e.g. 240' aria-label='Amount'> "
-        "<select name='target' aria-label='Target'>%s</select> "
+        "<label class='sr-only' for='goal-target'>Target</label>"
+        "<select name='target' id='goal-target' aria-label='Target'>%s</select> "
         "<span class='nowrap'>each day.</span></p>"
         "<p><label class='sentence-name'>Name it "
         "<input type='text' name='name' required "
@@ -500,11 +506,15 @@ def alerts_page():
         "<div class='card gd-create'><h3>Add an alert</h3>%s"
         "<form method='post' action='/alerts/add' class='sentence-form'>"
         "<p class='sentence'>Warn me when "
-        "<input type='text' name='target_name' list='catlist' required "
+        "<label class='sr-only' for='alert-target'>What to watch</label>"
+        "<input type='text' name='target_name' id='alert-target' "
+        "list='catlist' required "
         "placeholder='Social Networking or app:chrome' size='24' "
         "aria-label='What to watch'> "
         "<span class='nowrap'>passes</span> "
-        "<input type='number' name='threshold_minutes' min='1' step='1' "
+        "<label class='sr-only' for='alert-minutes'>Minutes</label>"
+        "<input type='number' name='threshold_minutes' id='alert-minutes' "
+        "min='1' step='1' "
         "placeholder='60' required style='width:80px' aria-label='Minutes'> "
         "<span class='nowrap'>minutes.</span></p>"
         "<p class='gd-form-row'><label>Watching "

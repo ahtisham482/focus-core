@@ -209,7 +209,7 @@ body.living footer.page-footer {
   animation-delay: var(--d, 0ms);
 }
 @keyframes lv-unmask { to { transform: none; } }
-.lv-ember-i { color: var(--ember); font-style: italic; }
+.lv-ember-i { color: var(--ember-strong, var(--ember)); font-style: italic; }
 .lv-sub {
   color: var(--ink2);
   font-size: 17px;
@@ -435,9 +435,9 @@ body.living footer.page-footer {
   letter-spacing: 0;
 }
 .lv-target-note { font-size: 13px; color: var(--ink2); margin: 0 0 16px; }
-.lv-target-note.ok { color: var(--ember); }
+.lv-target-note.ok { color: var(--ember-strong, var(--ember)); }
 .lv-target-empty { color: var(--ink2); font-size: 15px; margin: 0; }
-.lv-target-empty a { color: var(--ember); }
+.lv-target-empty a { color: var(--ember-strong, var(--ember)); }
 
 /* spring bar: fills via scaleX */
 .lv-bar {
@@ -533,7 +533,7 @@ body.living footer.page-footer {
     letter-spacing: .02em;
     text-decoration: none;
   }
-  .lv-tabs a.on { color: var(--ember); }
+  .lv-tabs a.on { color: var(--ember-strong, var(--ember)); }
   .lv-tabs a:active { background: var(--glass); }
 }
 
@@ -559,7 +559,7 @@ body.living footer.page-footer {
 .lv-cal li:last-child { border-bottom: 0; }
 .lv-cal-time {
   font-variant-numeric: tabular-nums;
-  color: var(--ember);
+  color: var(--ember-strong, var(--ember));
   font-weight: 600;
   font-size: 15px;
   min-width: 82px;
@@ -596,7 +596,7 @@ body.living footer.page-footer {
 .lv-cal-hint { color: var(--ink3); font-size: 13px; margin: 0; max-width: 640px; }
 .lv-cal-ev.lv-cal-done { opacity: .55; }
 .lv-cal-ev.lv-cal-now .lv-cal-name { font-weight: 650; }
-.lv-cal-ev.lv-cal-now .lv-cal-time { color: var(--ember-deep); }
+.lv-cal-ev.lv-cal-now .lv-cal-time { color: var(--ember-strong, var(--ember-deep)); }
 .lv-cal-stale {
   color: var(--ink3); font-size: 13px; margin: 0 0 10px; max-width: 640px;
   border-left: 3px solid var(--ember); padding-left: 10px;
@@ -634,6 +634,10 @@ html[data-theme="light"] body.living {
   --line: rgba(33,26,18,.14);
   --glass: rgba(255,255,255,.62);
   --ember: #bd7c1b;
+  /* Roadmap 1.15: ember as TEXT on paper. #bd7c1b is 3.21:1 on --bg
+     (fails WCAG AA 4.5:1 normal text); #905f15, same hue darker, is
+     5.08:1. Fills keep --ember + --ember-ink (5.30:1). */
+  --ember-strong: #905f15;
   --ember-deep: #9c6110;
   --warn: #a86e12;
 }
@@ -649,6 +653,7 @@ html[data-theme="light"] body.living {
     --line: rgba(33,26,18,.14);
     --glass: rgba(255,255,255,.62);
     --ember: #bd7c1b;
+    --ember-strong: #905f15;
     --ember-deep: #9c6110;
     --warn: #a86e12;
   }
@@ -819,6 +824,12 @@ html[data-theme="light"] body.living .lv-nav {
   outline: none;
   border-color: var(--ember);
 }
+/* Roadmap 1.15: restore a visible outline for keyboard focus (the
+   :focus rule above removes it); mouse focus styling is untouched. */
+.lv-label-row input:focus-visible {
+  outline: 2px solid var(--ember);
+  outline-offset: 2px;
+}
 
 /* mode chips with gliding ember pill */
 .lv-chips {
@@ -856,7 +867,7 @@ html[data-theme="light"] body.living .lv-nav {
   white-space: nowrap;
   transition: color .3s;
 }
-.lv-chip.on { color: var(--ember); }
+.lv-chip.on { color: var(--ember-strong, var(--ember)); }
 
 /* stepper */
 .lv-stepper {
@@ -987,7 +998,7 @@ html[data-theme="light"] body.living .lv-nav {
   color: var(--ink2);
   max-width: 420px;
 }
-.lv-suggest b { color: var(--ember); }
+.lv-suggest b { color: var(--ember-strong, var(--ember)); }
 .lv-tired {
   margin: 8px 0 0;
   font-size: 13.5px;
@@ -1043,7 +1054,7 @@ html[data-theme="light"] body.living .lv-nav {
   55% { transform: scale(1.045); }
   100% { transform: scale(1.02); }
 }
-.lv-beginning #lv-orb-state { color: var(--ember); }
+.lv-beginning #lv-orb-state { color: var(--ember-strong, var(--ember)); }
 
 /* ============================================================================
    Slice 7: in-session orb — the instrument at work
@@ -1089,7 +1100,7 @@ html[data-theme="light"] body.living .lv-nav {
   0%, 100% { opacity: 1; }
   50% { opacity: .55; }
 }
-#lv-orb.lv-done #lv-orb-state { color: var(--ember); }
+#lv-orb.lv-done #lv-orb-state { color: var(--ember-strong, var(--ember)); }
 
 /* ---- armed shield pill ---- */
 .lv-orb-shield.lv-armed .dot {

@@ -310,6 +310,29 @@
   }
 
   // ─────────────────────────────────────────────────────────────────────
+  // ROADMAP 1.15: ESCAPE CLOSES OPEN DISCLOSURES
+  // The web app has no custom menus/drawers/modals; its closable UI is
+  // zen-mode (handled in focus.js / the Focus page script) and native
+  // <details> disclosures, which browsers do not close on Escape.
+  // ─────────────────────────────────────────────────────────────────────
+  function initEscape() {
+    document.addEventListener('keydown', function (e) {
+      if (e.key !== 'Escape') return;
+      var open = document.querySelectorAll('details[open]');
+      if (!open.length) return;
+      var active = document.activeElement;
+      var summary = null;
+      open.forEach(function (d) {
+        if (active && d.contains(active)) {
+          summary = d.querySelector('summary');
+        }
+        d.removeAttribute('open');
+      });
+      if (summary) summary.focus();
+    });
+  }
+
+  // ─────────────────────────────────────────────────────────────────────
   // BOOTSTRAP
   // ─────────────────────────────────────────────────────────────────────
   function boot() {
@@ -320,6 +343,7 @@
     initRingPulse();
     initButtons();
     initFrostGuard();
+    initEscape();
   }
 
   if (document.readyState === 'loading') {
