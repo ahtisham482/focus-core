@@ -374,6 +374,21 @@ def test_privacy_does_not_claim_version_is_sent():
     assert "user-agent" in text
 
 
+def test_privacy_crash_report_sentence_is_honest():
+    # Roadmap 2.5 promise change (owner-mandated): after an unclean
+    # shutdown the app may prepare a three-fact crash report LOCALLY and
+    # offer it, but never sends it. The old absolute "no crash
+    # reporting" sentence cannot survive that feature honestly, so the
+    # qualified sentence below is the promise now -- pin it.
+    text = _privacy_text()
+    flat = " ".join(text.split())  # the sentence may wrap across lines
+    low = flat.lower()
+    assert "no crash reporting" not in low
+    assert "nothing is ever sent automatically" in flat
+    assert "error type only" in flat
+    assert "choose to send yourself" in flat
+
+
 def test_privacy_drive_backup_described_truthfully():
     # MEDIUM-2: no in-app Drive toggle exists -- whenever Google Drive for
     # Desktop is installed, backups are copied into the Drive folder

@@ -16,15 +16,23 @@ it honest:
 * Every function fails silent (log only). A crash-report bug must
   never break app startup, shutdown, or the home page.
 
-Session bookkeeping: begin_session() runs once at each app start. A
+Session bookkeeping: begin_session() runs at each app start, but
+exactly ONE process per launch owns the session marker -- the tray, or
+the dashboard when it runs standalone. The tray spawns the dashboard
+as a child process carrying FOCUSCORE_DASHBOARD_CHILD=1; a child skips
+the marker/pending logic entirely (it would otherwise read the owner's
+fresh marker as a leftover and invent an offer on every clean launch --
+critic B1) and only installs the exception hooks, so its own crashes
+still record their type for the owner's next start. At start, a
 leftover session-mark.json means the previous run did not close
 properly (crash, power cut, Windows closed it -- the offer says
 exactly that, never "crashed" as a fact). It is turned into a
 one-time pending offer (crash-pending.json, plus the same text saved
-as crash-report-<timestamp>.txt for manual attach), the recorded
-exception type is consumed, a fresh marker is written for this
-session, and a clean exit clears it via atexit. Marker I/O happens at
-start/exit only -- never on enforcement paths (Invariant I-1).
+as crash-report-<timestamp>.txt for manual attach; only the newest
+five report files are kept), the recorded exception type is consumed,
+a fresh marker is written for this session, and a clean exit clears
+it via atexit. Marker I/O happens at start/exit only -- never on
+enforcement paths (Invariant I-1).
 """
 
 import atexit
@@ -49,6 +57,9 @@ MAINTAINER_EMAIL = "muhammadahtisham482@gmail.com"
 MARKER_NAME = "session-mark.json"
 CRASH_NAME = "last-crash.json"
 PENDING_NAME = "crash-pending.json"
+# Set by the tray/launcher on every dashboard child it spawns: the
+# child is not a session owner (see the module docstring / critic B1).
+CHILD_ENV = "FOCUSCORE_DASHBOARD_CHILD"
 NO_ERROR_LINE = (
     "no error was recorded (the app was closed by Windows or lost power)")
 
@@ -188,6 +199,21 @@ def build_report(crash=None):
         f"What went wrong: {what}\n")
 
 
+def _prune_report_files(folder, keep=5):
+    """Retire old saved reports: keep only the newest few (critic N1).
+
+    File names carry the timestamp, so name order is age order. A
+    per-incident .txt is a few hundred bytes, but untouched they would
+    still pile up for years.
+    """
+    try:
+        saved = sorted(folder.glob("crash-report-*.txt"))
+        for old in saved[:-keep]:
+            _unlink(old)
+    except Exception as exc:  # noqa: BLE001 -- housekeeping is optional
+        logger.debug("crash report: old reports not pruned: %s", exc)
+
+
 def _create_pending(crash):
     text = build_report(crash)
     folder = _folder()
@@ -200,6 +226,7 @@ def _create_pending(crash):
             text, encoding="utf-8")
     except OSError as exc:
         logger.debug("crash report: report file not saved: %s", exc)
+    _prune_report_files(folder)
     return text
 
 
@@ -234,13 +261,22 @@ def mailto_url(report_text):
 def begin_session():
     """Start-of-app bookkeeping: detect, offer, mark, hook. Never raises.
 
-    Called once by each app-start entry (tray and dashboard). Reads a
-    leftover marker from the previous run, turns it into a one-time
-    offer, consumes the recorded exception type, writes this session's
-    marker (cleared on clean exit via atexit), and installs the
-    exception-type hooks.
+    Exactly one process per launch owns the session: the tray, or the
+    dashboard when it runs standalone. Called by both app-start entries
+    (tray and dashboard), but a dashboard child spawned by the tray
+    carries FOCUSCORE_DASHBOARD_CHILD and skips the marker/pending
+    logic -- it only installs the exception hooks, so a child crash
+    still records its type for the owner's next start (critic B1).
+    The owner reads a leftover marker from the previous run, turns it
+    into a one-time offer, consumes the recorded exception type,
+    writes this session's marker (cleared on clean exit via atexit),
+    and installs the exception-type hooks.
     """
     try:
+        if os.environ.get(CHILD_ENV):
+            # Dashboard child: hooks only, never session bookkeeping.
+            install_crash_hooks()
+            return
         try:
             crash = _read_json(_folder() / CRASH_NAME)
         except Exception:  # noqa: BLE001 -- unreadable record = no record

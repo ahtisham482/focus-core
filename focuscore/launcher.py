@@ -27,6 +27,7 @@ itself is just two lines.
 
 import json
 import logging
+import os
 import socket
 import subprocess
 import sys
@@ -239,10 +240,14 @@ def start_server(port=PORT):
     """Start the dashboard server quietly in the background.
 
     Returns the Popen handle so the owner (tray) can stop it later.
+    The child is flagged FOCUSCORE_DASHBOARD_CHILD=1: the tray owns
+    the Roadmap 2.5 crash-report session marker, and a second owner
+    would mistake the fresh marker for a leftover on every launch.
     """
     return subprocess.Popen(
         [sys.executable, "-m", "dashboard.app", "--port", str(port)],
         cwd=str(PROJECT_ROOT),
+        env={**os.environ, "FOCUSCORE_DASHBOARD_CHILD": "1"},
         stdout=subprocess.DEVNULL,
         stderr=subprocess.DEVNULL,
         **_no_window_kwargs())

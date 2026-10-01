@@ -97,7 +97,10 @@ Google account.
 - No user accounts and no sign-in. If you turn on backup encryption, the
   only passphrase material kept is described above — a check-value and a
   Windows-protected copy on this PC — and it is never sent anywhere.
-- No analytics, no telemetry, no crash reporting, no usage statistics.
+- No analytics, no telemetry, no usage statistics — and nothing is ever sent
+  automatically. If Focus Core closes unexpectedly, it may offer you a short
+  report (app version, system, error type only) that you can read in full
+  and choose to send yourself.
 - No ads, no tracking, nothing sold or shared. The three internet uses
   above, plus the optional Drive backup described in its own section, are
   the complete list.

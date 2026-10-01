@@ -281,3 +281,121 @@ def test_handled_route_dismisses_the_card_for_good(dash_env):
     assert "close properly last time" not in client.get("/").data.decode()
     # Idempotent: pressing again with nothing pending is not an error.
     assert client.post("/crash-report/handled").status_code in (200, 204)
+
+
+# --------------------------------- real launch topology (critic B1) --
+#
+# The shipped app calls begin_session() TWICE per launch: tray.run()
+# (in-process under the launcher), then the dashboard child the tray
+# spawns (`python -m dashboard.app`). Exactly one of them may own the
+# session marker: the tray. Children carry FOCUSCORE_DASHBOARD_CHILD=1
+# and skip the marker/pending logic -- otherwise the child reads the
+# owner's fresh marker as a leftover and invents an offer on every
+# clean launch (and overwrites a real crash's recorded type).
+
+CHILD_ENV = "FOCUSCORE_DASHBOARD_CHILD"
+
+
+def _as_child(monkeypatch):
+    monkeypatch.setenv(CHILD_ENV, "1")
+
+
+def test_two_entry_clean_launch_offers_nothing(data_dir, monkeypatch):
+    monkeypatch.delenv(CHILD_ENV, raising=False)
+    # Entry 1: the tray (session owner) starts a clean session.
+    crashreport.begin_session()
+    assert crashreport.pending_report() is None
+    marker_text = (data_dir / "session-mark.json").read_text(
+        encoding="utf-8")
+    # Entry 2: the tray-spawned dashboard child begins too. It must not
+    # mistake the owner's fresh marker for a leftover.
+    _as_child(monkeypatch)
+    crashreport.begin_session()
+    assert crashreport.pending_report() is None
+    assert not (data_dir / "crash-pending.json").exists()
+    assert not list(data_dir.glob("crash-report-*.txt"))
+    # The owner's marker is byte-for-byte untouched by the child.
+    assert (data_dir / "session-mark.json").read_text(
+        encoding="utf-8") == marker_text
+
+
+def test_two_entry_crash_launch_keeps_recorded_type(
+        data_dir, monkeypatch):
+    _plant_leftover_marker(data_dir, crash_type="ValueError")
+    monkeypatch.delenv(CHILD_ENV, raising=False)
+    # Entry 1 (tray/owner): the real incident becomes the offer.
+    crashreport.begin_session()
+    text = crashreport.pending_report()
+    assert text is not None and "ValueError" in text
+    saved = list(data_dir.glob("crash-report-*.txt"))
+    assert len(saved) == 1
+    saved_text = saved[0].read_text(encoding="utf-8")
+    marker_text = (data_dir / "session-mark.json").read_text(
+        encoding="utf-8")
+    # Entry 2 (dashboard child): the true offer survives byte-for-byte;
+    # before the fix the child overwrote it with "no error was recorded".
+    _as_child(monkeypatch)
+    crashreport.begin_session()
+    assert crashreport.pending_report() == text
+    assert "ValueError" in crashreport.pending_report()
+    assert crashreport.NO_ERROR_LINE not in crashreport.pending_report()
+    saved = list(data_dir.glob("crash-report-*.txt"))
+    assert len(saved) == 1
+    assert saved[0].read_text(encoding="utf-8") == saved_text
+    assert (data_dir / "session-mark.json").read_text(
+        encoding="utf-8") == marker_text
+
+
+def test_dashboard_child_records_type_without_owning_marker(
+        data_dir, monkeypatch):
+    _as_child(monkeypatch)
+    seen = []
+    monkeypatch.setattr(
+        sys, "excepthook", lambda t, v, tb: seen.append((t, v, tb)))
+    crashreport.begin_session()
+    # A child never writes a session marker and never offers a card.
+    assert not (data_dir / "session-mark.json").exists()
+    assert crashreport.pending_report() is None
+    # ...but its uncaught exceptions still record the TYPE only, so the
+    # owner's next start can offer the real incident.
+    try:
+        raise RuntimeError("child secret C:\\Users\\fake\\child.txt")
+    except RuntimeError:
+        exc_type, exc_value, exc_tb = sys.exc_info()
+    sys.excepthook(exc_type, exc_value, exc_tb)
+    stored_text = (data_dir / "last-crash.json").read_text(
+        encoding="utf-8")
+    assert json.loads(stored_text)["type"] == "RuntimeError"
+    assert "child secret" not in stored_text
+    assert seen  # the chained (previous) hook still ran
+
+
+def test_dashboard_children_are_flagged_at_spawn():
+    launcher_src = (REPO_ROOT / "focuscore" / "launcher.py").read_text(
+        encoding="utf-8")
+    start = launcher_src.index("def start_server")
+    end = launcher_src.index("\ndef ", start + 1)
+    spawn_block = launcher_src[start:end]
+    # Every dashboard child -- first spawn and the tray's mid-session
+    # respawn alike -- funnels through launcher.start_server and must
+    # be flagged as a child (critic B1).
+    assert "dashboard.app" in spawn_block
+    assert '"FOCUSCORE_DASHBOARD_CHILD": "1"' in spawn_block
+    assert "env" in spawn_block
+    crash_src = (REPO_ROOT / "focuscore" / "crashreport.py").read_text(
+        encoding="utf-8")
+    assert "FOCUSCORE_DASHBOARD_CHILD" in crash_src
+
+
+def test_report_files_pruned_to_newest_five(data_dir):
+    for day in range(1, 7):  # six old report files lying around
+        (data_dir / f"crash-report-2020010{day}-000000.txt").write_text(
+            f"old report {day}\n", encoding="utf-8")
+    _plant_leftover_marker(data_dir, crash_type="RuntimeError")
+    crashreport.begin_session()  # writes a seventh, newest report file
+    saved = sorted(p.name for p in data_dir.glob("crash-report-*.txt"))
+    assert len(saved) == 5
+    assert "crash-report-20200101-000000.txt" not in saved  # oldest pruned
+    assert "crash-report-20200106-000000.txt" in saved
+    newest = (data_dir / saved[-1]).read_text(encoding="utf-8")
+    assert "RuntimeError" in newest
