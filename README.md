@@ -143,13 +143,20 @@ back.
 
 ## For developers
 
-Source install:
+Needs Python 3.11 or newer (the source uses the standard-library
+`tomllib`; the installer build pins Python 3.12). Set up a virtual
+environment first — installing into a system Python fails on many
+machines:
 
 ```
+python -m venv .venv        # use python3 if `python` is not on your PATH (common on Linux/macOS)
+.venv\Scripts\activate      # Windows; on Linux/macOS: source .venv/bin/activate
 pip install -r requirements.txt
-python -m dashboard.app        # http://127.0.0.1:5000
-python -m pytest               # full test suite
+python -m dashboard.app     # http://127.0.0.1:5000
+python -m pytest            # full test suite
 ```
+
+To build the Windows installer itself, see `installer/README.md`.
 
 How it works in one paragraph: `focuscore/ingest.py` reads ActivityWatch's
 local API (window/web/AFK buckets); `taxonomy.py` + `seed_data.py` map
@@ -164,4 +171,6 @@ setup page; `focuscore/updater.py` the one-click update check.
 
 Key docs: `USER_GUIDE.md` (user manual), `docs/support/troubleshooting.md`
 (symptom -> cause -> fix), `docs/security/` (threat model), `PRIVACY.md`,
+`installer/README.md` (build the Windows installer),
+`docs/enterprise-deploy.md` (silent install, Intune, fleet policy),
 `CHANGELOG.md`, `ROADMAP.md`.

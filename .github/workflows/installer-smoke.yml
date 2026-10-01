@@ -352,6 +352,52 @@ jobs:
           if ($r.StatusCode -ne 200) { throw "/ -> $($r.StatusCode)" }
           Write-Host "Server alive after restore"
 
+      - name: Silent-uninstall the product
+        # The documented uninstall command (docs/enterprise-deploy.md),
+        # run exactly as IT would: proves the silent uninstall removes
+        # the program while user data is deliberately kept.
+        timeout-minutes: 10
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $app = "$env:LOCALAPPDATA\Programs\Focus Core"
+          $uninstaller = "$app\unins000.exe"
+          if (-not (Test-Path $uninstaller)) {
+            throw "Uninstaller missing: $uninstaller"
+          }
+          # Stop the running app first (as the install step does): the
+          # uninstaller cannot delete files a running process holds open.
+          Get-CimInstance Win32_Process -Filter "Name = 'pythonw.exe'" |
+            Where-Object { $_.CommandLine -like "*focuscore.launcher*" } |
+            ForEach-Object {
+              Stop-Process -Id $_.ProcessId -Force -ErrorAction SilentlyContinue
+            }
+          $log = "$env:RUNNER_TEMP\uninstall.log"
+          Start-Process -FilePath $uninstaller `
+                    -ArgumentList "/VERYSILENT", "/SUPPRESSMSGBOXES", `
+                      "/NORESTART", "/LOG=$log"
+          # unins000.exe hands off to a temporary copy of itself, so
+          # the first process can exit before the work is done. Wait
+          # for every unins* process to finish AND the program folder
+          # to actually disappear.
+          $deadline = (Get-Date).AddMinutes(5)
+          while ((Get-Date) -lt $deadline) {
+            $stillRunning = Get-Process -ErrorAction SilentlyContinue |
+              Where-Object { $_.ProcessName -like "unins*" }
+            if ((-not $stillRunning) -and (-not (Test-Path $app))) { break }
+            Start-Sleep -Seconds 5
+          }
+          if (Test-Path $app) {
+            throw "Silent uninstall finished but $app is still there"
+          }
+          # By design the uninstaller keeps user data (so reinstalling
+          # later brings history back): prove it survived.
+          $data = "$env:LOCALAPPDATA\Focus Core\focuscore.db"
+          if (-not (Test-Path $data)) {
+            throw "Uninstall deleted user data that must be kept: $data"
+          }
+          Write-Host "Silent uninstall OK; user data kept"
+
       - name: Upload install log on failure
         # Include cancelled(): a hung installer hits the step timeout above
         # and the job is cancelled -- the log is the only way to see why.
@@ -360,3 +406,11 @@ jobs:
         with:
           name: smoke-install-log
           path: ${{ runner.temp }}/install.log
+
+      - name: Upload uninstall log on failure
+        if: failure() || cancelled()
+        uses: actions/upload-artifact@v4
+        with:
+          name: smoke-uninstall-log
+          path: ${{ runner.temp }}/uninstall.log
+          if-no-files-found: warn
