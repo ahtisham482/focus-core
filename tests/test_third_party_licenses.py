@@ -180,6 +180,39 @@ def test_license_text_found_in_licenses_subdir(site_packages, tmp_path):
     assert "licenses/LICENSE.txt" in section
 
 
+def test_output_paths_use_forward_slashes_only(site_packages, tmp_path):
+    # Regression (CI windows-latest failure): the generator used to
+    # render each license-text source path with str(Path), which uses
+    # OS-native separators -- so a Windows build shipped
+    # "Demo-1.0.dist-info\licenses\LICENSE.txt" while a Linux build
+    # shipped the forward-slash form, and the artifact bytes differed
+    # by build OS. This pins the invariant without a Windows machine:
+    # with separator-free fixture texts, no backslash may appear
+    # anywhere in the generated output, and every source label must
+    # use forward slashes.
+    make_dist_info(
+        site_packages, "Demo", "1.0",
+        extra_headers=("License-Expression: MIT",),
+        license_texts={"licenses/LICENSE.txt": "THE MIT TEXT"},
+    )
+    package_dir = site_packages / "demopkg"
+    package_dir.mkdir()
+    (package_dir / "__init__.py").write_text("")
+    (package_dir / "LICENSE.txt").write_text("TOP LEVEL LICENSE TEXT")
+    make_dist_info(
+        site_packages, "demopkg", "2.0",
+        extra_headers=("License-Expression: Apache-2.0",),
+        record_paths=("demopkg/__init__.py", "demopkg/LICENSE.txt"),
+    )
+    text = licenses.generate_licenses_text(
+        site_packages, make_python_dir(tmp_path), "3.12.7")
+    assert "\\" not in text
+    assert "licenses/LICENSE.txt" in text
+    assert "License text (Demo-1.0.dist-info/licenses/LICENSE.txt):" in text
+    assert "License text (demopkg/LICENSE.txt):" in text
+    assert "License text (python/LICENSE.txt):" in text
+
+
 def test_license_text_found_via_license_file_header(site_packages, tmp_path):
     make_dist_info(
         site_packages, "Demo", "1.0",

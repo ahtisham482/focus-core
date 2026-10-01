@@ -127,7 +127,10 @@ def _package_top_level_dirs(site_packages, dist_info):
             candidate = site_packages / first
             if candidate.is_dir():
                 tops.add(candidate)
-    return sorted(tops)
+    # Sort by POSIX string form: sorting Path objects directly uses the
+    # OS path flavour (Windows compares case-insensitively), which would
+    # make the emitted license-text order build-OS dependent.
+    return sorted(tops, key=lambda p: p.as_posix())
 
 
 def _find_license_texts(site_packages, dist_info, headers):
@@ -208,7 +211,10 @@ def _component_from_dist_info(site_packages, dist_info):
     texts = []
     for path in _find_license_texts(site_packages, dist_info, headers):
         body = path.read_bytes().decode("utf-8", errors="replace").strip()
-        texts.append((str(path.relative_to(site_packages)), body))
+        # Render the source label with forward slashes on every OS:
+        # str(Path) uses the OS separator (\ on Windows), so the shipped
+        # file's bytes would differ between Windows and Linux builds.
+        texts.append((path.relative_to(site_packages).as_posix(), body))
     return Component(
         name=headers["name"][0],
         version=headers["version"][0],
@@ -240,7 +246,12 @@ def collect_components(site_packages, python_dir, python_version):
         raise ValueError(f"site-packages directory not found: {site_packages}")
     components = [
         _component_from_dist_info(site_packages, dist_info)
-        for dist_info in sorted(site_packages.glob("*.dist-info"))
+        # Sort by POSIX string form for the same reason as in
+        # _package_top_level_dirs: Path-object ordering is OS-flavoured.
+        # (Components are re-sorted by sort_key below; this only keeps
+        # collection order itself deterministic.)
+        for dist_info in sorted(
+            site_packages.glob("*.dist-info"), key=lambda p: p.as_posix())
         if dist_info.is_dir()
     ]
     components.append(_cpython_component(Path(python_dir), python_version))
