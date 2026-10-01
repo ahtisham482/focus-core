@@ -102,12 +102,19 @@ Google account.
   above, plus the optional Drive backup described in its own section, are
   the complete list.
 
-## Optional diagnostics bundle (planned for a later release)
-A future update will add an option to generate a diagnostics bundle from the
-dashboard if something breaks and you ask for help. It will contain **only**:
-- Which version of Focus Core you run, and which version of Windows.
-- Recent error messages from the app's log (no activity titles, no URLs, no scores).
-- Backup status (when the last backup ran, whether it succeeded).
+## Optional diagnostics bundle (only when you export it)
+From the Backup page you can export a diagnostics bundle if something breaks
+and you ask for help. It contains **only**:
+- Which version of Focus Core you run, which version of Windows, and a
+  database health-check result.
+- Your settings, with secrets (passwords, tokens, calendar links) hidden.
+- The names and sizes of the files in your data folder — never their contents.
+- Recent error messages from the app's log (the last 200 lines), with your
+  user name and home-folder paths replaced by placeholders — no activity
+  titles, no URLs, no scores.
+- A short self-report of the app's own memory use.
 
-It will never contain your tracked activities, window titles, website URLs, scores,
-goals, or timesheet entries. You will see exactly what is in the bundle before you send it.
+It never contains the database itself, your tracked activities, window titles,
+website URLs, scores, goals, or timesheet entries. A README inside the bundle
+lists exactly what is in it, so you can see what you would be sending before
+you send it.
