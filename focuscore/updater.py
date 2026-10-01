@@ -40,9 +40,13 @@ UPDATE_INFO_NAME = "update-info.json"
 CHECK_CACHE_NAME = ".update-check.json"
 PENDING_NAME = ".update-pending.json"
 # Roadmap 2.1 rollback state, all in the data dir: the newest tracked
-# download, the one-deep previous-installer slot (+ its marker), and the
-# failure marker the update bat writes when an installer exits non-zero.
+# download (its installer kept as a durable copy under downloads/,
+# because the download itself lands in %TEMP% and Temp cleanup would
+# otherwise delete it before the slot can settle), the one-deep
+# previous-installer slot (+ its marker), and the failure marker the
+# update bat writes when an installer exits non-zero.
 LAST_DOWNLOAD_NAME = ".update-last-download.json"
+DOWNLOADS_DIR_NAME = "downloads"
 PREVIOUS_DIR_NAME = "previous-installer"
 PREVIOUS_MARKER_NAME = ".previous-installer.json"
 FAILURE_NAME = ".update-failed.json"
@@ -407,19 +411,53 @@ def _read_json_file(path):
     return data if isinstance(data, dict) else None
 
 
+def _durable_download_copy(installer_path):
+    """Best-effort durable copy of a completed download in the data dir.
+
+    Downloads land in %TEMP% (see dashboard/routes/system.py), where
+    Temp cleanup can delete them before the previous-installer slot
+    ever settles -- silently losing the Revert button exactly when a
+    bad update is discovered weeks later. The tracked-download record
+    therefore aims at a one-deep ``downloads/`` copy in the data dir.
+    Returns the durable path, or None when no copy applies (source
+    missing, or already durable inside the data dir) or can be made;
+    the caller then records the original path. Never raises.
+    """
+    source = Path(installer_path)
+    try:
+        data_dir = paths.data_dir()
+        if not source.is_file() or data_dir in source.resolve().parents:
+            return None  # nothing to copy, or already durable
+        dest = data_dir / DOWNLOADS_DIR_NAME / source.name
+        if source.resolve() != dest.resolve():
+            dest.parent.mkdir(parents=True, exist_ok=True)
+            dest.write_bytes(source.read_bytes())
+            for old in dest.parent.glob(INSTALLER_PREFIX + "*.exe"):
+                if old != dest:
+                    old.unlink(missing_ok=True)  # one-deep: newest only
+        return dest
+    except OSError as exc:
+        logger.warning("could not keep a durable download copy: %s", exc)
+        return None
+
+
 def record_download(installer_path, version):
     """Remember the newest installer this copy got (version + path).
 
     Written when a download completes (and when a revert is queued).
-    On its own this changes nothing visible; it only lets
-    track_download() later settle the previous-installer slot for the
-    version the app is actually running. Best effort -- a failed write
-    must never break an update.
+    The recorded path aims at the durable data-dir copy (see
+    _durable_download_copy), falling back to the given path when no
+    copy could be made. On its own this changes nothing visible; it
+    only lets track_download() later settle the previous-installer slot
+    for the version the app is actually running. Best effort -- a
+    failed write must never break an update.
     """
+    durable = _durable_download_copy(installer_path)
+    recorded = durable if durable is not None else installer_path
     try:
         paths.ensure_data_dir()
         (paths.data_dir() / LAST_DOWNLOAD_NAME).write_text(json.dumps({
-            "installer": str(installer_path),
+            "installer": str(recorded),
             "version": version,
             "at": time.time(),
         }), encoding="utf-8")

@@ -157,6 +157,50 @@ def test_previous_installer_none_when_file_deleted(app_root):
     assert updater.previous_installer() is None
 
 
+def test_revert_survives_temp_cleanup(dash, cfg, installed, net,
+                                      tmp_path_factory):
+    """Critic M1: the tracked download must outlive Temp cleanup.
+
+    Downloads land in %TEMP%, which Windows cleans opportunistically.
+    If the tracked record still pointed there, a cleanup between the
+    download and the next one would silently delete the only copy the
+    previous-installer slot can settle from -- and the Revert button
+    would never appear, exactly when a bad update surfaces weeks later.
+    """
+    store.set_setting("update_check_enabled", "0")
+    write_update_info(installed, version="1.2.0")  # running 1.2.0
+    # The 1.3.0 download lands outside the data dir, like %TEMP%.
+    temp_dir = tmp_path_factory.mktemp("temp")
+    landed = temp_dir / "FocusCore-Setup-1.3.0.exe"
+    landed.write_bytes(b"INSTALLER-A")
+    updater.track_download(landed, "v1.3.0")
+
+    # The durable data-dir copy exists and is byte-identical.
+    durable = (paths.data_dir() / updater.DOWNLOADS_DIR_NAME
+               / "FocusCore-Setup-1.3.0.exe")
+    assert durable.exists()
+    assert durable.read_bytes() == b"INSTALLER-A"
+
+    # Temp cleanup wipes the original, weeks before anyone needs it.
+    landed.unlink()
+    # The 1.3.0 update is applied, then 1.4.0 lands: the slot must
+    # still settle from the durable copy.
+    write_update_info(installed, version="1.3.0")
+    second = make_installer(installed, "1.4.0", b"INSTALLER-B")
+    updater.track_download(second, "v1.4.0")
+    write_update_info(installed, version="1.4.0")  # now running 1.4.0
+
+    previous = updater.previous_installer()
+    assert previous is not None
+    assert previous["version"] == "v1.3.0"
+    assert Path(previous["installer"]).read_bytes() == b"INSTALLER-A"
+
+    # And the Revert button is really offered on the page.
+    resp = dash.get("/update")
+    assert resp.status_code == 200
+    assert "/update/revert" in resp.data.decode()
+
+
 # --- the Revert flow ------------------------------------------------------
 
 def test_revert_queues_pending_for_previous(dash, cfg, installed):
