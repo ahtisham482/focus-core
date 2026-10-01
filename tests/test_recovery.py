@@ -392,3 +392,263 @@ def test_dashboard_main_exits_nonzero_when_recovery_fails(monkeypatch,
 
     assert excinfo.value.code == 1
     assert "did not start" in capsys.readouterr().out
+
+
+# ------------------------------------------- repair 1.13 (OBJ-1..4) ---
+
+def _raising_backup_dir(dest_dir=None):
+    raise OSError("backup folder unreachable")
+
+
+def test_scan_backup_dir_failure_quit_still_offered(tmp_path, monkeypatch,
+                                                    caplog):
+    # OBJ-1: an OSError from the backup scan must never escape
+    # ensure_working_db; empty/quit are still offered, quit fails
+    # closed with the corrupt file untouched.
+    monkeypatch.setattr(backup, "backup_dir", _raising_backup_dir)
+    live = _live_garbage(tmp_path)
+    chooser = RecordingChooser("quit")
+
+    with caplog.at_level(logging.WARNING, logger="focuscore.recovery"):
+        assert recovery.ensure_working_db(str(live), choose=chooser) is False
+
+    assert live.read_bytes() == GARBAGE
+    assert _asides(tmp_path) == []
+    assert chooser.seen_options == ["empty", "quit"]
+    assert chooser.seen_context["backup_name"] is None
+    warnings_ = [
+        r for r in caplog.records if r.levelno == logging.WARNING]
+    assert any(
+        "Could not check for verified backups" in r.getMessage()
+        for r in warnings_)
+
+
+def test_scan_backup_dir_failure_empty_still_recovers(tmp_path,
+                                                      monkeypatch):
+    monkeypatch.setattr(backup, "backup_dir", _raising_backup_dir)
+    live = _live_garbage(tmp_path)
+    chooser = RecordingChooser("empty")
+
+    assert recovery.ensure_working_db(str(live), choose=chooser) is True
+
+    assert _user_version(live) == migrations.LATEST_VERSION
+    asides = _asides(tmp_path)
+    assert len(asides) == 1
+    assert asides[0].read_bytes() == GARBAGE
+
+
+def test_scan_verify_failure_quit_still_offered(tmp_path, monkeypatch):
+    _scan_folder(monkeypatch, tmp_path)
+
+    def _raising_verify(dest_dir=None):
+        raise OSError("backup folder unreadable")
+
+    monkeypatch.setattr(backup, "verify_all_backups", _raising_verify)
+    live = _live_garbage(tmp_path)
+    chooser = RecordingChooser("quit")
+
+    assert recovery.ensure_working_db(str(live), choose=chooser) is False
+    assert live.read_bytes() == GARBAGE
+    assert _asides(tmp_path) == []
+    assert chooser.seen_options == ["empty", "quit"]
+
+
+def test_scan_failure_restore_answer_is_quit(tmp_path, monkeypatch):
+    # With the scan down there is no verified backup, so even a
+    # "restore" answer must change nothing.
+    monkeypatch.setattr(backup, "backup_dir", _raising_backup_dir)
+    live = _live_garbage(tmp_path)
+    chooser = RecordingChooser("restore")
+
+    assert recovery.ensure_working_db(str(live), choose=chooser) is False
+    assert live.read_bytes() == GARBAGE
+    assert _asides(tmp_path) == []
+    assert chooser.seen_options == ["empty", "quit"]
+
+
+def _zero_byte_db(tmp_path):
+    live = tmp_path / "focuscore.db"
+    live.write_bytes(b"")
+    return live
+
+
+def test_zero_byte_quit_leaves_file_untouched(tmp_path, monkeypatch,
+                                              caplog):
+    # OBJ-2: a zero-byte DB is corruption, not a first run.
+    _scan_folder(monkeypatch, tmp_path)
+    live = _zero_byte_db(tmp_path)
+    chooser = RecordingChooser("quit")
+
+    with caplog.at_level(logging.ERROR, logger="focuscore.recovery"):
+        assert recovery.ensure_working_db(str(live), choose=chooser) is False
+
+    assert live.exists() and live.stat().st_size == 0
+    assert _asides(tmp_path) == []
+    assert chooser.seen_options == ["empty", "quit"]
+    assert any(
+        "database file is empty" in r.getMessage()
+        for r in caplog.records if r.levelno == logging.ERROR)
+
+
+def test_zero_byte_empty_starts_fresh(tmp_path, monkeypatch):
+    _scan_folder(monkeypatch, tmp_path)
+    live = _zero_byte_db(tmp_path)
+    chooser = RecordingChooser("empty")
+
+    assert recovery.ensure_working_db(str(live), choose=chooser) is True
+
+    assert _user_version(live) == migrations.LATEST_VERSION
+    store.set_setting("after_empty", "ok", path=str(live))
+    assert store.get_setting("after_empty", path=str(live)) == "ok"
+    asides = _asides(tmp_path)
+    assert len(asides) == 1
+    assert asides[0].stat().st_size == 0
+
+
+def test_zero_byte_restore_brings_backup_live(tmp_path, monkeypatch):
+    folder = _scan_folder(monkeypatch, tmp_path)
+    made = _verified_backup(tmp_path, folder)
+    live = _zero_byte_db(tmp_path)
+    chooser = RecordingChooser("restore")
+
+    assert recovery.ensure_working_db(str(live), choose=chooser) is True
+
+    assert chooser.seen_options == ["restore", "empty", "quit"]
+    assert chooser.seen_context["backup_name"] == made.name
+    assert store.get_setting(
+        "recovery_marker", path=str(live)) == "from-backup"
+    asides = _asides(tmp_path)
+    assert len(asides) == 1
+    assert asides[0].stat().st_size == 0
+
+
+def test_missing_file_never_scans_or_asks(tmp_path, monkeypatch):
+    # Boundary of OBJ-2: only an EXISTING zero-byte file is
+    # corruption. A missing file is a first run -- fresh init, no
+    # scan, no dialog, even when the scan would explode.
+    def _exploding_verify(dest_dir=None):
+        raise AssertionError("scan must not run for a missing DB")
+
+    monkeypatch.setattr(backup, "verify_all_backups", _exploding_verify)
+    db = tmp_path / "brand-new.db"
+
+    def forbidden(options, context):
+        raise AssertionError("chooser must not run for a missing DB")
+
+    assert recovery.ensure_working_db(str(db), choose=forbidden) is True
+    assert db.exists() and db.stat().st_size > 0
+
+
+def test_init_db_direct_zero_byte_unchanged(tmp_path):
+    # The zero-byte rule lives in recovery only: store.init_db
+    # called directly still treats a 0-byte file as a fresh DB.
+    live = _zero_byte_db(tmp_path)
+    store.init_db(str(live))
+    assert _user_version(live) == migrations.LATEST_VERSION
+    assert live.stat().st_size > 0
+
+
+def test_move_aside_rolls_back_when_sidecar_rename_fails(
+        tmp_path, monkeypatch, caplog):
+    # OBJ-3: main rename succeeds, -wal rename raises -> the main
+    # file is rolled back and the set is whole at the live path.
+    live = tmp_path / "focuscore.db"
+    live.write_bytes(GARBAGE)
+    Path(str(live) + "-wal").write_bytes(b"wal-bytes")
+    Path(str(live) + "-shm").write_bytes(b"shm-bytes")
+    real_rename = Path.rename
+    calls = {"n": 0}
+
+    def flaky(self, target):
+        calls["n"] += 1
+        if calls["n"] == 2:
+            raise OSError("simulated sidecar lock")
+        return real_rename(self, target)
+
+    monkeypatch.setattr(Path, "rename", flaky)
+
+    with (caplog.at_level(logging.WARNING, logger="focuscore.recovery"),
+          pytest.raises(OSError)):
+        recovery._move_aside(live)
+
+    assert live.read_bytes() == GARBAGE
+    assert Path(str(live) + "-wal").read_bytes() == b"wal-bytes"
+    assert Path(str(live) + "-shm").read_bytes() == b"shm-bytes"
+    assert _asides(tmp_path) == []
+    assert any(
+        "rolled back" in r.getMessage() for r in caplog.records)
+
+
+def test_move_aside_rollback_failure_logged_honestly(
+        tmp_path, monkeypatch, caplog):
+    # OBJ-3, worse branch: the rollback rename ALSO fails. The log
+    # must say the bytes are split, not that nothing changed.
+    live = tmp_path / "focuscore.db"
+    live.write_bytes(GARBAGE)
+    Path(str(live) + "-wal").write_bytes(b"wal-bytes")
+    Path(str(live) + "-shm").write_bytes(b"shm-bytes")
+    real_rename = Path.rename
+    calls = {"n": 0}
+
+    def flaky(self, target):
+        calls["n"] += 1
+        if calls["n"] in (2, 3):
+            raise OSError("simulated persistent lock")
+        return real_rename(self, target)
+
+    monkeypatch.setattr(Path, "rename", flaky)
+
+    with (caplog.at_level(logging.DEBUG, logger="focuscore.recovery"),
+          pytest.raises(OSError)):
+        recovery._move_aside(live)
+
+    assert not live.exists()
+    asides = _asides(tmp_path)
+    assert len(asides) == 1
+    assert asides[0].read_bytes() == GARBAGE
+    assert Path(str(live) + "-wal").read_bytes() == b"wal-bytes"
+    assert any(
+        r.levelno == logging.ERROR
+        and "could not be rolled back" in r.getMessage()
+        for r in caplog.records)
+
+
+def test_empty_flow_move_aside_failure_rolls_back_and_aborts(
+        tmp_path, monkeypatch, caplog):
+    # OBJ-3 end to end: startup aborts (False), the corrupt set is
+    # back byte-identical, and nothing claims "nothing was changed".
+    _scan_folder(monkeypatch, tmp_path)
+    live = _live_garbage(tmp_path)
+    wal_bytes, _shm_bytes = _plant_real_sidecars(live, tmp_path)
+    real_rename = Path.rename
+    state = {"armed": False, "n": 0}
+
+    def flaky(self, target):
+        if state["armed"]:
+            state["n"] += 1
+            if state["n"] == 2:
+                raise OSError("simulated sidecar lock")
+        return real_rename(self, target)
+
+    monkeypatch.setattr(Path, "rename", flaky)
+
+    def arming_chooser(options, context):
+        state["armed"] = True
+        return "empty"
+
+    with caplog.at_level(logging.DEBUG, logger="focuscore.recovery"):
+        assert recovery.ensure_working_db(
+            str(live), choose=arming_chooser) is False
+
+    assert live.read_bytes() == GARBAGE
+    assert (tmp_path / "focuscore.db-wal").read_bytes() == wal_bytes
+    assert _asides(tmp_path) == []
+    assert "nothing was changed" not in caplog.text
+
+
+def test_dialog_copy_uses_plain_safety_check():
+    # OBJ-4: the dialog says "safety check" (the phrase the Backup
+    # page already uses), never "integrity check".
+    source = Path(recovery.__file__).read_text(encoding="utf-8")
+    assert "passed its safety check" in source
+    assert "passed its integrity check" not in source

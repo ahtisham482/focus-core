@@ -46,7 +46,9 @@ def _move_aside(db):
 
     Returns the aside Path. The stamp suffix computed for the main
     file is applied verbatim to the sidecars so the whole set shares
-    one name. The corrupt bytes are never deleted.
+    one name. The corrupt bytes are never deleted. If a rename fails
+    partway, the files already moved are rolled back to the live
+    path (best effort, logged exactly) before the OSError re-raises.
     """
     stamp = datetime.now().strftime("%Y%m%d-%H%M%S")
     aside = db.parent / ("%s.corrupt-%s" % (db.name, stamp))
@@ -55,11 +57,48 @@ def _move_aside(db):
         aside = db.parent / (
             "%s.corrupt-%s-%d" % (db.name, stamp, counter))
         counter += 1
-    db.rename(aside)
-    for ext in _SIDECARS:
-        side = Path(str(db) + ext)
-        if side.exists():
-            side.rename(Path(str(aside) + ext))
+    moved = []  # (original, aside) pairs, in the order they moved
+    try:
+        db.rename(aside)
+        moved.append((db, aside))
+        for ext in _SIDECARS:
+            side = Path(str(db) + ext)
+            if side.exists():
+                target = Path(str(aside) + ext)
+                side.rename(target)
+                moved.append((side, target))
+    except OSError:
+        # A rename failed partway: some files may already sit under
+        # the aside names while the rest are still live. Roll back
+        # whatever moved so the set is whole again, and log exactly
+        # what happened instead of claiming nothing changed.
+        rollback_failures = []
+        for original, moved_to in reversed(moved):
+            try:
+                moved_to.rename(original)
+            except OSError as rb_exc:
+                rollback_failures.append((original, moved_to, rb_exc))
+        if not moved:
+            logger.warning(
+                "Moving %s aside failed before any file moved; "
+                "the original files are untouched.", db)
+        elif not rollback_failures:
+            logger.warning(
+                "Moving %s aside failed partway; rolled back %d "
+                "file(s), so the original files are back at the "
+                "live path.", db, len(moved))
+        else:
+            logger.error(
+                "Moving %s aside failed partway and %d of %d "
+                "already-moved file(s) could not be rolled back "
+                "(%s). The corrupt bytes are preserved, split "
+                "between the live path and %s; startup is aborted.",
+                db, len(rollback_failures), len(moved),
+                "; ".join(
+                    f"{orig} stays at {dest} ({exc})"
+                    for orig, dest, exc in rollback_failures),
+                aside)
+        raise
     return aside
 
 
@@ -128,7 +167,7 @@ def _restore_flow(db, db_path, name, folder):
     except OSError:
         logger.exception(
             "Could not move the corrupt database %s aside; "
-            "nothing was changed.", db)
+            "startup aborted.", db)
         return False
     try:
         backup.restore_backup(name, db_path=str(db), dest_dir=folder)
@@ -157,7 +196,7 @@ def _empty_flow(db, db_path):
     except OSError:
         logger.exception(
             "Could not move the corrupt database %s aside; "
-            "nothing was changed.", db)
+            "startup aborted.", db)
         return False
     try:
         store.init_db(db_path)
@@ -176,9 +215,15 @@ def ensure_working_db(db_path=None, choose=None):
     """Make sure the database opens; offer safe-mode recovery if not.
 
     Happy path: ``store.init_db(db_path)`` succeeds and True is
-    returned. On ``migrations.MigrationError`` /
-    ``sqlite3.DatabaseError`` the original exception is logged at
-    ERROR and the chooser is offered the recovery options:
+    returned. Two failures route to the chooser instead: the init
+    raising ``migrations.MigrationError`` /
+    ``sqlite3.DatabaseError`` (the exception is logged at ERROR),
+    and an existing zero-byte database file (corruption, not a
+    first run; logged at ERROR as "database file is empty"). A
+    missing file is always a first run and never sees the chooser.
+    The backup scan itself can never raise out of here: a scan
+    failure is logged at WARNING and treated as "no verified
+    backup found". The chooser is offered:
 
     * "restore" -- only offered when a latest verified, non-
       encrypted backup exists;
@@ -193,16 +238,42 @@ def ensure_working_db(db_path=None, choose=None):
     ``init_db``; False means "abort startup, DB untouched or fully
     restored to its corrupt-but-preserved state".
     """
-    try:
-        store.init_db(db_path)
-        return True
-    except (migrations.MigrationError, sqlite3.DatabaseError) as exc:
-        logger.error(
-            "Focus Core could not open its database: %s", exc,
-            exc_info=True)
-
     resolved = Path(store._resolve_db_path(db_path))
-    backup_name, folder, encrypted_only = _latest_verified_backup()
+    # A zero-byte file is corruption, not a first run (parent
+    # decision): SQLite would otherwise open it as an empty database
+    # and migrate it in place with no offer. A MISSING file is the
+    # true first run and goes straight to fresh init below. This
+    # check lives here only; store.init_db keeps treating a 0-byte
+    # file as fresh when called directly.
+    try:
+        is_empty_file = (
+            resolved.is_file() and resolved.stat().st_size == 0)
+    except OSError:
+        is_empty_file = False
+    if is_empty_file:
+        logger.error(
+            "Focus Core could not open its database: database file "
+            "is empty (%s).", resolved)
+    else:
+        try:
+            store.init_db(db_path)
+            return True
+        except (migrations.MigrationError, sqlite3.DatabaseError) as exc:
+            logger.error(
+                "Focus Core could not open its database: %s", exc,
+                exc_info=True)
+
+    # The backup scan must never escape: if the backup folder cannot
+    # be listed/verified, log it and offer empty/quit only (fail
+    # closed, exactly as if no verified backup existed).
+    try:
+        backup_name, folder, encrypted_only = _latest_verified_backup()
+    except Exception as scan_exc:  # noqa: BLE001 -- never escape startup
+        logger.warning(
+            "Could not check for verified backups (%s); offering "
+            "Start-empty/Quit only, with no backup to restore.",
+            scan_exc)
+        backup_name, folder, encrypted_only = None, None, False
 
     options = []
     if backup_name is not None:
@@ -266,7 +337,7 @@ def _tkinter_choice(options, context):
     if backup_name:
         lines += [
             "",
-            "A backup that passed its integrity check is "
+            "A backup that passed its safety check is "
             "available: %s" % backup_name,
         ]
     if context.get("encrypted_only"):
