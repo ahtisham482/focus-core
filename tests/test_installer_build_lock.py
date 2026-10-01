@@ -564,11 +564,17 @@ def test_uninstall_wipe_deletedata_switch_is_parsed():
 
 def test_uninstall_wipe_deletes_only_the_data_dir():
     iss = _iss()
-    assert "DelTree" in iss
+    # DelTree(Path, IsDir, DeleteFiles, DeleteSubdirsAlso) takes exactly
+    # 4 arguments; pin the full call so a 5-argument form (which Inno
+    # refuses to compile) cannot slip back in.
+    assert "DelTree(DataDir, True, True, True)" in iss
+    assert "DelTree(DataDir, True, True, True, True)" not in iss
     assert "ExpandConstant('{localappdata}\\Focus Core')" in iss
 
 
 def test_uninstall_wipe_prompt_is_interactive_only_and_runs_last():
     iss = _iss()
-    assert "WizardSilent" in iss
+    # The uninstaller's silent predicate is UninstallSilent; WizardSilent
+    # reports on Setup only and does not gate uninstaller UI.
+    assert "UninstallSilent" in iss
     assert "usPostUninstall" in iss

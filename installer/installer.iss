@@ -133,7 +133,7 @@ begin
   // shows no UI at all (and keeps the data unless /DELETEDATA was
   // given), and the page is pointless when the switch already made
   // the decision.
-  if (not DeleteDataViaSwitch) and (not WizardSilent) then
+  if (not DeleteDataViaSwitch) and (not UninstallSilent) then
   begin
     WipePage := CreateCustomPage(wpWelcome, 'Remove Focus Core',
       'Your tracked history is kept when you uninstall, unless you choose to delete it below.');
@@ -161,7 +161,7 @@ begin
       Log('Data wipe requested: deleting ' + DataDir);
       try
         if DirExists(DataDir) and
-           not DelTree(DataDir, True, True, True, True) then
+           not DelTree(DataDir, True, True, True) then
           Log('Data wipe incomplete; some files may remain in ' + DataDir);
       except
         Log('Data wipe failed; the uninstall continues.');
