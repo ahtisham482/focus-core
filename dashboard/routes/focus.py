@@ -451,8 +451,10 @@ def _fc_idle_page(focus_mod):
 
     footnote = (
         "<p class='how-it-works'>Focus sessions block distracting apps "
-        "while you work and count toward your daily ring and streak. "
-        "Everything is saved on this device.</p>")
+        "while you work: Standard mode shows a full-screen nudge, "
+        "Hardcore minimizes the window and locks for 30 seconds. Apps "
+        "are never force-closed. Sessions count toward your daily ring "
+        "and streak. Everything is saved on this device.</p>")
 
     return (hero + recent_html + streak_html + _fc_ring_card()
             + _fc_peak_card() + prefs + footnote)
