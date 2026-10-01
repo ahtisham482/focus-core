@@ -8,11 +8,14 @@ What it does:
      with SHA-256 hashes; dev-only packages like pytest are not in the
      lock and are never shipped).
   5. Copies the focuscore/ and dashboard/ packages into staging/.
-  6. Writes the .installed marker (tells the app to use the per-user
+  6. Generates THIRD-PARTY-LICENSES.txt in the staging root from the
+     staged packages' own metadata and license files (any failure
+     fails the build; see installer/third_party_licenses.py).
+  7. Writes the .installed marker (tells the app to use the per-user
      data folder instead of writing next to the code).
-  7. Downloads the WebView2 Evergreen bootstrapper (SHA-256 verified;
+  8. Downloads the WebView2 Evergreen bootstrapper (SHA-256 verified;
      run by the installer only when WebView2 is missing).
-  8. Builds icon.ico from the app icon (needs Pillow on the BUILD machine:
+  9. Builds icon.ico from the app icon (needs Pillow on the BUILD machine:
      `python -m pip install --require-hashes -r requirements-lock.txt`).
 
 Run from the repo root:
@@ -153,6 +156,27 @@ def run_embedded_python(python_dir, *args):
     subprocess.run(cmd, check=True)
 
 
+def generate_third_party_licenses(staging, python_dir, python_version):
+    """Write staging/THIRD-PARTY-LICENSES.txt from the staged tree.
+
+    Runs installer/third_party_licenses.py with the BUILD machine's
+    Python (sys.executable), never the embedded one: generation only
+    reads files. check=True means any generator failure fails the
+    build -- shipping without attribution is not an option.
+    """
+    script = Path(__file__).resolve().parent / "third_party_licenses.py"
+    cmd = [
+        sys.executable,
+        str(script),
+        "--site-packages", str(python_dir / "Lib" / "site-packages"),
+        "--python-dir", str(python_dir),
+        "--python-version", python_version,
+        "--output", str(staging / "THIRD-PARTY-LICENSES.txt"),
+    ]
+    print(f"Running: {' '.join(cmd)}")
+    subprocess.run(cmd, check=True)
+
+
 def build_icon(repo_root, staging_dir):
     """Build icon.ico from the dashboard icon (needs Pillow)."""
     try:
@@ -229,6 +253,8 @@ def main():
     (staging / ".installed").write_text(
         "Focus Core %s -- installed copy; user data lives in the per-user "
         "data folder (see focuscore.paths).\n" % args.version)
+
+    generate_third_party_licenses(staging, python_dir, pyver)
 
     # Stamp the release source + version so installed copies can check
     # GitHub Releases for one-click updates (focuscore/updater.py).

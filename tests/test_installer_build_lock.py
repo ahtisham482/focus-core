@@ -312,6 +312,11 @@ def test_main_verifies_each_download_before_using_it(tmp_path, monkeypatch):
         build, "build_icon", lambda *_a: events.append(("icon",))
     )
     monkeypatch.setattr(
+        build,
+        "generate_third_party_licenses",
+        lambda *_a: events.append(("licenses",)),
+    )
+    monkeypatch.setattr(
         sys,
         "argv",
         [
