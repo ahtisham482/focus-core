@@ -512,12 +512,21 @@ def _cached_update_status(updater_mod):
 
 @bp.route("/update")
 def update_page():
+    from focuscore import config
     from focuscore import updater as updater_mod
 
     refresh = request.args.get("refresh") == "1"
-    if refresh:
-        # Explicit "Check again" click: a deliberate action, always
-        # allowed -- the toggle governs automatic checks, not this.
+    if config.feature_enabled("updates_disabled"):
+        # Roadmap 1.21: the machine policy beats every path into this
+        # page, including the offline cached-status branch below -- a
+        # stale "update available" must never render under a pin.
+        info = updater_mod.get_update_info()
+        status = {"status": "disabled-by-policy",
+                  "current": info["version"] if info else None}
+    elif refresh:
+        # Explicit "Check again" click: a deliberate action, allowed
+        # unless the machine policy above forbids it -- the per-user
+        # toggle governs automatic checks, not this.
         status = updater_mod.check_for_update(force=True)
     elif store.get_setting("update_check_enabled", "1") == "1":
         status = updater_mod.check_for_update()
@@ -525,6 +534,18 @@ def update_page():
         # Automatic checks off: render the last known state (or "not
         # checked yet") without touching the network (roadmap 1.21).
         status = _cached_update_status(updater_mod)
+
+    if status["status"] == "disabled-by-policy":
+        current = ("You're on <b>" + escape(status["current"]) + "</b>. "
+                   if status.get("current") else "")
+        body = (
+            "<div class='card'><h3>Updates</h3>"
+            "<p><b>Updates are disabled by your IT policy.</b></p>"
+            "<p>" + current + "Your IT team manages Focus Core "
+            "updates on this device, so the app won't check for new "
+            "versions here &mdash; not even when you ask it to. Your "
+            "own update setting can't override this.</p></div>")
+        return layout("Updates", body, help_key="update")
 
     if status["status"] == "dev-copy":
         body = (
@@ -598,7 +619,9 @@ def update_check_toggle():
 
     Same shape as /settings/theme: a plain form POST + redirect. The
     setting governs only the automatic background check -- the manual
-    "Check again" button on the Updates page always works. Garbage input
+    "Check again" button on the Updates page works too, unless the
+    machine ``updates_disabled`` policy is on (roadmap 1.21), which
+    beats this setting everywhere. Garbage input
     fails safe to off (fewer internet calls, never more) -- a missing
     field resolves to off too, never on.
     """
@@ -615,6 +638,16 @@ def update_start():
     from focuscore import updater as updater_mod
 
     status = updater_mod.check_for_update(force=True)
+    if status["status"] == "disabled-by-policy":
+        # Roadmap 1.21: refuse plainly -- the generic "Nothing to
+        # update" below would mislead on a policy-pinned machine.
+        return layout(
+            "Updates",
+            "<div class='card'><p><b>Updates are disabled by your IT "
+            "policy.</b> Your IT team manages updates on this device, "
+            "so Focus Core can't update itself here.</p>"
+            "<p><a href='/update'>Back</a></p></div>",
+            help_key="update"), 403
     if status["status"] != "ok" or not status["update_available"]:
         return layout(
             "Updates",

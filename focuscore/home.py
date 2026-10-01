@@ -12,7 +12,7 @@ with exactly one button, so the user always knows the single next step.
 from datetime import datetime, timedelta
 
 from . import activitywatch as aw_mod
-from . import backup, focus, goals as goals_mod, store, updater
+from . import backup, config, focus, goals as goals_mod, store, updater
 
 # Pulse color bands shown on the home page (0-100 scale).
 PULSE_GOOD = 60  # green at/above this
@@ -195,7 +195,12 @@ def attention_cards(db_path=None, now=None, backup_dest_dir=None,
 
     # 7. A newer version is waiting (installed copies only). Reads the
     # cached check only -- never touches the network from here.
-    update = updater.read_cached_check()
+    # Roadmap 1.21: suppressed while the updates_disabled machine
+    # policy pins this install -- a stale cached "ok" must not nudge
+    # a pinned user to update.
+    update = None
+    if not config.feature_enabled("updates_disabled"):
+        update = updater.read_cached_check()
     if update and update.get("status") == "ok" \
             and update.get("update_available"):
         cards.append({

@@ -28,6 +28,15 @@ be a list of names (TOML array / REG_MULTI_SZ) or one string of
 uncached, an IT policy change takes effect on the next ingest tick --
 no app restart.
 
+Roadmap 1.21 wires the first feature flag end to end:
+``updates_disabled`` is the update kill-switch. While it is on, the
+self-updater refuses at every entry point (background check, Updates
+page, manual check, installer download, tray pending-install apply)
+and never reaches the network, so IT can pin a fleet to one version.
+The machine tier beats the per-user ``update_check_enabled`` setting;
+see docs/enterprise-deploy.md and
+tests/test_update_kill_switch_121.py.
+
 Machine tier shape (registry values under HKLM\\Software\\Focus Core):
 ``Port`` (DWORD or SZ), ``LogLevel`` (SZ), ``DataDir`` (SZ),
 ``CaptureExclusions`` (REG_MULTI_SZ or ``;``-separated SZ), and a

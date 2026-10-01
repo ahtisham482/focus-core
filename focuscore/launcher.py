@@ -349,7 +349,8 @@ def _background_update_check():
     Honors the user's automatic-checks toggle (Updates page -> setting
     ``update_check_enabled``). When off, no network traffic happens at all;
     the manual "Check again" on the Updates page still works because it is
-    the user's own action.
+    the user's own action. (The machine ``updates_disabled`` policy,
+    roadmap 1.21, beats both: ``check_for_update()`` refuses.)
     """
     try:
         from . import store

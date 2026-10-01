@@ -203,7 +203,16 @@ class TrayApp:
         silently, deletes itself) and then quits the app.
         """
         import subprocess
-        from . import launcher, updater
+        from . import config, launcher, updater
+        if config.feature_enabled("updates_disabled"):
+            # Roadmap 1.21: a pinned install must not change version.
+            # take_pending_install() already withholds the flag while
+            # the policy is on; this gate is the last line of defense
+            # at the function that actually launches an installer.
+            logger.info("pending update to %s not applied: updates "
+                        "are disabled by IT policy",
+                        pending.get("version"))
+            return
         try:
             # Roadmap 1.4 / blocked on 0.5: before launching, verify the
             # Authenticode signature of pending["installer"] with

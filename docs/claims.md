@@ -46,6 +46,10 @@ Code comments are not claims and are not registered.
 
 - [TESTED] Your history survives upgrades: a database written at schema version 1 opens in the current app with its records intact, and exports don't quietly change your numbers — JSON (focuscore.timesheet/v1) is exact, and the small roundings CSV and HTML use are written down in FORMAT.md. | surface: FORMAT.md "Stability policy" | evidence: tests/test_format_contract_119.py::test_aged_v1_database_migrates_through_init_db, ::test_export_roundtrip_json_is_exact, ::test_export_roundtrip_csv_matches_declared_rendering, ::test_format_md_documents_the_real_schema_and_policy
 
+## IT policy (docs/enterprise-deploy.md, roadmap 1.21)
+
+- [TESTED] IT can pin Focus Core to one version with a machine policy (HKLM Features updates_disabled); while it is on, no self-update path reaches the network — the background check, the Updates page, a manual "Check again", the installer download, and a queued pending install all refuse, the Home page shows no update card, and the user's own update toggle cannot override it | surface: docs/enterprise-deploy.md "Pin the fleet", Updates page policy card, Home page attention cards | evidence: tests/test_update_kill_switch_121.py::test_check_for_update_refused_under_policy + tests/test_update_kill_switch_121.py::test_policy_beats_fresh_cache + tests/test_update_kill_switch_121.py::test_update_page_shows_policy_card_and_no_network + tests/test_update_kill_switch_121.py::test_update_start_refused_under_policy + tests/test_update_kill_switch_121.py::test_tray_watcher_skips_pending_under_policy + tests/test_update_kill_switch_121.py::test_home_update_card_suppressed_under_policy + tests/test_update_kill_switch_121.py::test_positive_control_check_reaches_network_when_policy_off
+
 ## How to keep this register honest
 
 A new behavioral promise ("always", "never", "guaranteed", "automatically",

@@ -31,7 +31,7 @@ import urllib.request
 from datetime import datetime
 from pathlib import Path
 
-from . import paths
+from . import config, paths
 
 logger = logging.getLogger(__name__)
 
@@ -158,11 +158,20 @@ def read_cached_check():
 def check_for_update(force=False):
     """Check for a newer release; result is cached for a day.
 
-    Returns a dict: ``status`` is ``"ok"``, ``"dev-copy"`` or
-    ``"error"``; on ``"ok"`` it also carries ``current``, ``latest``,
-    ``update_available`` and ``asset`` (name/url/size).
+    Returns a dict: ``status`` is ``"ok"``, ``"dev-copy"``, ``"error"``
+    or ``"disabled-by-policy"``; on ``"ok"`` it also carries
+    ``current``, ``latest``, ``update_available`` and ``asset``
+    (name/url/size).
     """
     info = get_update_info()
+    if config.feature_enabled("updates_disabled"):
+        # Roadmap 1.21: the machine policy pins this install to its
+        # current version. Refuse at the choke point every check path
+        # flows through (launcher background thread, /update page
+        # including "?refresh=1", /update/start): before the cache,
+        # before any network seam -- and the refusal is never cached.
+        return {"status": "disabled-by-policy",
+                "current": info["version"] if info else None}
     if info is None:
         return {"status": "dev-copy"}
     if not force:
@@ -275,6 +284,13 @@ def download_installer(asset_url, dest_path, expected_size=0,
     path exists (focuscore/authenticode.py, roadmap 1.4 partial); it is
     not enforced yet because no signing identity exists (roadmap 0.5).
     """
+    if config.feature_enabled("updates_disabled"):
+        # Roadmap 1.21: the download primitive itself refuses while
+        # the machine policy pins this install -- defense in depth
+        # behind the check_for_update gate.
+        raise UpdateError(
+            "Updates are disabled by your IT policy, so nothing was "
+            "downloaded.")
     dest_path = Path(dest_path)
     req = urllib.request.Request(asset_url,
                                  headers={"User-Agent": USER_AGENT})
@@ -338,7 +354,17 @@ def write_pending_install(installer_path, version):
 
 
 def take_pending_install():
-    """Read and clear the pending-update flag; None when absent."""
+    """Read and clear the pending-update flag; None when absent.
+
+    Roadmap 1.21: while the ``updates_disabled`` machine policy is on,
+    the flag is LEFT IN PLACE and None is returned -- a pinned install
+    must not change version, and lifting the policy resumes normal
+    behavior with the queued update intact. Both tray callers (the
+    startup safety net and the watcher) therefore never see a pending
+    install to apply while the pin is on.
+    """
+    if config.feature_enabled("updates_disabled"):
+        return None
     path = _pending_file()
     try:
         data = json.loads(path.read_text(encoding="utf-8"))
