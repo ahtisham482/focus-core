@@ -239,3 +239,25 @@ def test_dropped_count_is_logged(cfg, feed, tmp_path, caplog):
         pipeline.run_day(DAY_ONE, db_path=db)
     messages = [r.getMessage() for r in caplog.records]
     assert any("dropped 60" in m for m in messages), messages
+
+
+def test_degenerate_exe_entry_is_ignored_and_appless_events_kept(
+        cfg, monkeypatch, tmp_path):
+    """Repair (critic M2): an exclusion entry of ".exe" normalizes to
+    the empty string at the matching layer, so before this guard it
+    acted as an exclusion for every app-less event. Entries that
+    normalize to empty must be ignored -- they name no process."""
+    cfg["machine"]["capture_exclusions"] = [".exe", "  .EXE  "]
+    assert config.get_capture_exclusions() == []
+    events = [
+        _event(0, "", "Window with no app name recorded"),
+        _event(1, "code", "store.py - Visual Studio Code"),
+    ]
+    monkeypatch.setattr(
+        pipeline, "ActivityWatchClient",
+        lambda: _FakeClient(events))
+    db = str(tmp_path / "day.db")
+    pipeline.run_day(DAY_ONE, db_path=db)
+    assert _count(
+        db, "SELECT COUNT(*) FROM activities WHERE app = ''") == 1
+    assert _count(db, "SELECT COUNT(*) FROM activities") == 2

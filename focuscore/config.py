@@ -314,6 +314,21 @@ def get_data_dir():
     return get("data_dir")
 
 
+def _canonical_process_name(name):
+    """Canonical form of a blocklist entry for matching (Roadmap 1.20).
+
+    Lower-cased, stripped, with one trailing ``.exe`` removed -- the
+    form the ingest matching layer (``pipeline._normalize_process_name``)
+    canonicalizes both sides to; it lives here too because pipeline
+    imports config, so the rule cannot be shared from there. A name
+    that canonicalizes to ``""`` (a bare ``.exe``) can name no process.
+    """
+    text = str(name or "").strip().lower()
+    if text.endswith(".exe"):
+        text = text[:-4].strip()
+    return text
+
+
 def get_capture_exclusions():
     """Capture-scope blocklist (Roadmap 1.20): process names to drop.
 
@@ -321,9 +336,14 @@ def get_capture_exclusions():
     invalid value at one tier warns and falls through. Returns the
     names as configured (stripped; case and any ``.exe`` suffix are
     the matching layer's concern), or [] when no tier sets the key.
+    Entries that canonicalize to nothing (a bare ``.exe``) are
+    ignored: an empty canonical name would match every app-less
+    event at the matching layer (critic M2).
     """
     value = get("capture_exclusions", None)
-    return list(value) if value else []
+    if not value:
+        return []
+    return [name for name in value if _canonical_process_name(name)]
 
 
 # ----------------------------------------------------- feature flags ---
