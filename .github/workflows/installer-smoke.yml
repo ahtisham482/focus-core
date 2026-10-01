@@ -414,3 +414,58 @@ jobs:
           name: smoke-uninstall-log
           path: ${{ runner.temp }}/uninstall.log
           if-no-files-found: warn
+
+  # Roadmap 2.3: the offline flavor bundles the full WebView2 standalone
+  # installer (~200 MB) instead of the tiny online bootstrapper, so the
+  # app installs on machines with no network. This job proves the flavor
+  # stages, compiles, and names itself correctly on a real Windows
+  # runner. It does NOT install the flavor (the runner already has
+  # WebView2, so the NeedsWebView2 branch would be a no-op either way)
+  # and it does NOT upload the ~200 MB artifact.
+  offline-installer:
+    runs-on: windows-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Install build deps
+        run: python installer/install_locked_pin.py Pillow
+
+      - name: Stage the app (offline flavor)
+        run: python installer/build.py --version "0.0.0.${{ github.run_number }}" --repo "${{ github.repository }}" --webview2-offline
+
+      - name: Install Inno Setup
+        run: choco install innosetup --no-progress -y
+
+      - name: Compile the offline installer
+        shell: pwsh
+        run: |
+          & "C:\Program Files (x86)\Inno Setup 6\ISCC.exe" `
+            installer\installer.iss /DAppVersion="0.0.0.${{ github.run_number }}" /DWebView2Offline
+          Get-ChildItem installer\FocusCore-Setup-*-offline.exe
+
+      - name: Assert offline flavor contents
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $exe = Get-ChildItem installer\FocusCore-Setup-*-offline.exe |
+                 Select-Object -First 1
+          if (-not $exe) { throw "No -offline installer exe found" }
+          Write-Host "Offline installer: $($exe.Name)"
+          $standalone = Get-Item installer\staging\webview2standalone.exe
+          $mb = [math]::Round($standalone.Length / 1MB, 1)
+          # Sanity band: the standalone installer is ~200 MB. The online
+          # bootstrapper is ~2 MB -- anything small here means the wrong
+          # file got staged.
+          if ($standalone.Length -lt 100MB -or $standalone.Length -gt 300MB) {
+            throw "unexpected standalone size: $mb MB"
+          }
+          if (Test-Path installer\staging\webview2bootstrapper.exe) {
+            throw "offline flavor must not stage the bootstrapper"
+          }
+          Write-Host "Offline flavor OK: standalone $mb MB, no bootstrapper"
+

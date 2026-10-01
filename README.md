@@ -156,7 +156,9 @@ python -m dashboard.app     # http://127.0.0.1:5000
 python -m pytest            # full test suite
 ```
 
-To build the Windows installer itself, see `installer/README.md`.
+To build the Windows installer itself, see `installer/README.md`
+(an offline flavor with the full WebView2 runtime is one flag away:
+`python installer/build.py --version <v> --webview2-offline`).
 
 How it works in one paragraph: `focuscore/ingest.py` reads ActivityWatch's
 local API (window/web/AFK buckets); `taxonomy.py` + `seed_data.py` map

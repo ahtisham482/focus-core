@@ -242,6 +242,92 @@ def test_webview2_bootstrapper_sha256_is_pinned():
     assert re.fullmatch(r"[0-9a-f]{64}", build.WEBVIEW2_BOOTSTRAPPER_SHA256)
 
 
+# Roadmap 2.3: the offline flavor stages the standalone WebView2 installer
+# (works with no network) INSTEAD of the online bootstrapper -- one
+# flavor, one mechanism, both hash-pinned and fail-closed.
+def test_webview2_standalone_sha256_is_pinned():
+    assert re.fullmatch(r"[0-9a-f]{64}", build.WEBVIEW2_STANDALONE_SHA256)
+    assert build.WEBVIEW2_STANDALONE_SHA256 != build.WEBVIEW2_BOOTSTRAPPER_SHA256
+    assert build.WEBVIEW2_STANDALONE_URL.startswith("https://go.microsoft.com/")
+
+
+def _fake_main_run(tmp_path, monkeypatch, extra_argv=()):
+    events = []
+
+    def fake_download_verified(_url, dest, expected, label):
+        events.append(("verify", label, expected))
+        dest.parent.mkdir(parents=True, exist_ok=True)
+        dest.write_bytes(b"placeholder")
+
+    class FakeZipFile:
+        def __init__(self, path):
+            self._path = path
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *_exc):
+            return False
+
+        def extractall(self, dest):
+            Path(dest).mkdir(parents=True, exist_ok=True)
+
+    monkeypatch.setattr(build, "download_verified", fake_download_verified)
+    monkeypatch.setattr(build, "download", lambda _u, _d: None)
+    monkeypatch.setattr(build.zipfile, "ZipFile", FakeZipFile)
+    monkeypatch.setattr(build, "enable_site_packages", lambda _d: None)
+    monkeypatch.setattr(build, "run_embedded_python", lambda _d, *_a: None)
+    monkeypatch.setattr(build, "install_locked_dependencies", lambda *_a: None)
+    monkeypatch.setattr(build.shutil, "copytree", lambda *_a, **_k: None)
+    monkeypatch.setattr(build, "build_icon", lambda *_a: None)
+    monkeypatch.setattr(build, "generate_third_party_licenses", lambda *_a: None)
+    monkeypatch.setattr(
+        sys,
+        "argv",
+        [
+            "build.py",
+            "--version",
+            "9.9.9",
+            "--staging",
+            str(tmp_path / "staging"),
+            *extra_argv,
+        ],
+    )
+
+    build.main()
+    return events, tmp_path / "staging"
+
+
+def test_webview2_offline_flag_stages_standalone_not_bootstrapper(
+    tmp_path, monkeypatch
+):
+    events, staging = _fake_main_run(
+        tmp_path, monkeypatch, extra_argv=("--webview2-offline",)
+    )
+
+    verify_labels = [e[1] for e in events if e[0] == "verify"]
+    assert "WebView2 standalone installer" in verify_labels
+    assert "WebView2 bootstrapper" not in verify_labels
+    standalone_event = next(
+        e for e in events if e[1] == "WebView2 standalone installer"
+    )
+    assert standalone_event[2] == build.WEBVIEW2_STANDALONE_SHA256
+    assert (staging / "webview2standalone.exe").is_file()
+    assert not (staging / "webview2bootstrapper.exe").exists()
+
+
+def test_default_build_stages_bootstrapper_not_standalone(
+    tmp_path, monkeypatch
+):
+    events, staging = _fake_main_run(tmp_path, monkeypatch)
+
+    verify_labels = [e[1] for e in events if e[0] == "verify"]
+    assert "WebView2 bootstrapper" in verify_labels
+    assert "WebView2 standalone installer" not in verify_labels
+    assert (staging / "webview2bootstrapper.exe").is_file()
+    assert not (staging / "webview2standalone.exe").exists()
+
+
 def test_webview2_bootstrapper_rejects_and_deletes_a_mismatch(
     tmp_path, monkeypatch
 ):

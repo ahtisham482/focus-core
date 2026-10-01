@@ -2,9 +2,10 @@
 
 Notes for IT administrators who deploy Focus Core to managed Windows
 machines. This page covers silent install and uninstall, wrapping the
-installer for Intune, pinning the fleet to a fixed version by
-disabling the app's self-updater, and what happens to Focus Core if
-this project is ever abandoned.
+installer for Intune, the **offline installer** for machines with no
+network, pinning the fleet to a fixed version by disabling the app's
+self-updater, and what happens to Focus Core if this project is ever
+abandoned.
 
 ## Install and uninstall silently
 
@@ -125,6 +126,50 @@ pilot group as the proof run. The installer itself is the same one
 consumers download, and its silent mode is exercised by CI on every
 push (above); the `.intunewin` layer is standard Intune packaging
 around it.
+
+## Offline installer (no network at install time)
+
+The default installer is small (~25 MB) but needs the network for
+one thing: if the target PC lacks the WebView2 runtime, Setup
+downloads it on the spot via a tiny bootstrapper. On air-gapped
+machines, locked-down VLANs, or PCs behind a proxy that blocks
+Microsoft's download servers, that step fails and the app window
+never opens.
+
+The **offline flavor** fixes this by bundling the full WebView2
+standalone installer inside Setup — about 200 MB extra, and the
+install works with the cable unplugged. Everything else is the same
+installer: same per-user install, same silent flags, same update
+flow, same data-folder behavior.
+
+- **Which file to ship:** `FocusCore-Setup-<version>-offline.exe`
+  (the `-offline` suffix in the file name is the only difference
+  that matters; the window says "Focus Core" either way).
+- **Build it** (on a Windows machine with Inno Setup 6, from the
+  repo root):
+
+  ```
+  python installer\build.py --version <version> --webview2-offline
+  "C:\Program Files (x86)\Inno Setup 6\ISCC.exe" installer\installer.iss /DAppVersion="<version>" /DWebView2Offline
+  ```
+
+- **Provenance:** the bundled runtime comes from Microsoft's
+  official "Evergreen Standalone Installer" link
+  (`go.microsoft.com/fwlink/?linkid=2124701`, x64). `build.py`
+  verifies it against a pinned SHA-256 and refuses to build on any
+  mismatch — exactly the fail-closed rule the Python and
+  bootstrapper downloads follow.
+- **When WebView2 installs:** only when missing. Setup checks the
+  WebView2 registration in both HKLM and HKCU (a per-user install
+  leaves no HKLM trace), so repeat silent installs and one-click
+  updates never reinstall it pointlessly.
+- **x64 only,** matching the embedded Python the installer ships.
+
+Honest status: CI builds and compiles the offline flavor on every
+push (the `offline-installer` job in `installer-smoke.yml` asserts
+the standalone installer is staged and the artifact is named
+`-offline`); installing it on a real offline PC is a manual proof —
+the Windows PC gate in the release checklist covers it.
 
 ## Pin the fleet: disable self-updates (machine policy)
 

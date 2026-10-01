@@ -13,8 +13,11 @@ What it does:
   7. Generates THIRD-PARTY-LICENSES.txt in the staging root from the
      staged packages' own metadata and license files (any failure
      fails the build; see installer/third_party_licenses.py).
-  8. Downloads the WebView2 Evergreen bootstrapper (SHA-256 verified;
-     run by the installer only when WebView2 is missing).
+  8. Downloads the WebView2 runtime for the chosen flavor (SHA-256
+     verified; run by the installer only when WebView2 is missing):
+     the Evergreen *bootstrapper* (tiny online downloader, default) or,
+     with --webview2-offline, the Evergreen *standalone* installer
+     (~200 MB, installs with no network at all).
   9. Builds icon.ico from the app icon (needs Pillow on the BUILD machine:
      `python -m pip install --require-hashes -r requirements-lock.txt`).
 
@@ -23,6 +26,12 @@ Run from the repo root:
 
 Then compile installer/installer.iss with Inno Setup 6
 (ISCC.exe installer\\installer.iss /DAppVersion="1.3.0").
+
+Offline flavor (bundles the full WebView2 standalone installer, so the
+app works on machines with no network at the moment of install):
+    python installer/build.py --version 1.3.0 --webview2-offline
+    ISCC.exe installer\\installer.iss /DAppVersion="1.3.0" /DWebView2Offline
+The setup exe is then named FocusCore-Setup-1.3.0-offline.exe.
 
 Only the standard library is used, except Pillow for the icon step.
 """
@@ -66,8 +75,28 @@ WEBVIEW2_BOOTSTRAPPER_URL = "https://go.microsoft.com/fwlink/p/?LinkId=2124703"
 # when this pin was made. The bootstrapper is evergreen upstream, so when
 # Microsoft publishes a new one this build fails closed until the new file
 # is reviewed and this hash refreshed.
+#
+# Refreshed 2026-10-01: Microsoft republished the evergreen bootstrapper
+# (the old pin 81c01751... failed closed on a fresh build, exactly as
+# designed -- the 2.2 release's installer-smoke CI run caught it red).
+# Reviewed: 2,002,128 bytes, PE32 GUI executable, byte-stable across two
+# downloads from the official Microsoft fwlink (the documented Evergreen
+# Bootstrapper link).
 WEBVIEW2_BOOTSTRAPPER_SHA256 = (
-    "81c01751c8cc385a5991abb104205d42ac70094350ee8fb9e8ea580b51bb9554")
+    "48a7b31419a8eb4fffdc7b6a02f6b4dfda60687fc897116be15370e10c2b66a7")
+# Evergreen Standalone x64 installer for the --webview2-offline flavor.
+# This is the FULL runtime (~200 MB): it installs WebView2 on machines
+# with no network at all, unlike the bootstrapper, which downloads the
+# runtime during setup. Official Microsoft fwlink for "Evergreen
+# Standalone Installer" x64 (documented on the WebView2 download page).
+WEBVIEW2_STANDALONE_URL = "https://go.microsoft.com/fwlink/?linkid=2124701"
+# SHA-256 of the standalone installer served by WEBVIEW2_STANDALONE_URL
+# when this pin was made. Same fail-closed rule as the bootstrapper:
+# when Microsoft republishes it, the build fails until the new file is
+# reviewed and this hash refreshed. (Pinned 2026-10-01: 212,373,712
+# bytes, PE32 GUI executable, downloaded from the official fwlink.)
+WEBVIEW2_STANDALONE_SHA256 = (
+    "f5acc1c3b41c89d6bf0bff79c6097b9ac7fe10812f6b268f52a040385b0886c0")
 
 
 def download(url, dest):
@@ -205,6 +234,13 @@ def main():
     parser.add_argument("--repo", default="",
                         help="GitHub repo slug for updates, e.g. owner/name "
                              "(enables one-click updates; empty disables)")
+    parser.add_argument("--webview2-offline", action="store_true",
+                        help="Offline flavor: stage the full WebView2 "
+                             "standalone installer (~200 MB, installs with "
+                             "no network) instead of the tiny online "
+                             "bootstrapper. Compile the .iss with "
+                             "/DWebView2Offline to match; the setup exe is "
+                             "then named FocusCore-Setup-<version>-offline.exe")
     args = parser.parse_args()
 
     repo_root = Path(__file__).resolve().parent.parent
@@ -263,16 +299,24 @@ def main():
         (staging / "update-info.json").write_text(json.dumps(info) + "\n")
         print("Wrote update-info.json (repo %s)" % args.repo)
 
-    download_verified(WEBVIEW2_BOOTSTRAPPER_URL,
-                      staging / "webview2bootstrapper.exe",
-                      WEBVIEW2_BOOTSTRAPPER_SHA256, "WebView2 bootstrapper")
+    if args.webview2_offline:
+        download_verified(WEBVIEW2_STANDALONE_URL,
+                          staging / "webview2standalone.exe",
+                          WEBVIEW2_STANDALONE_SHA256,
+                          "WebView2 standalone installer")
+    else:
+        download_verified(WEBVIEW2_BOOTSTRAPPER_URL,
+                          staging / "webview2bootstrapper.exe",
+                          WEBVIEW2_BOOTSTRAPPER_SHA256, "WebView2 bootstrapper")
 
     build_icon(repo_root, staging)
 
     total = sum(p.stat().st_size for p in staging.rglob("*") if p.is_file())
     print("\nStaging complete: %s (%.1f MB)" % (staging, total / 1e6))
     print("Next: compile installer/installer.iss with Inno Setup 6:")
-    print('  ISCC.exe installer\\installer.iss /DAppVersion="%s"' % args.version)
+    iscc_extra = ' /DWebView2Offline' if args.webview2_offline else ''
+    print('  ISCC.exe installer\\installer.iss /DAppVersion="%s"%s'
+          % (args.version, iscc_extra))
 
 
 if __name__ == "__main__":

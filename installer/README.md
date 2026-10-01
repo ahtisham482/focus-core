@@ -14,7 +14,7 @@ Download → Next → Next → desktop icon.
 | `python/` | Embedded Python 3.12 + pip + all of `requirements-lock.txt` (exact pins with SHA-256 hashes; dev-only packages like pytest are not in the lock) |
 | `focuscore/`, `dashboard/` | The app code |
 | `.installed` | Marker: tells the app to keep user data in `%LOCALAPPDATA%\Focus Core` instead of next to the code |
-| `webview2bootstrapper.exe` | Runs only if WebView2 is missing (most PCs already have it) |
+| `webview2bootstrapper.exe` **or** `webview2standalone.exe` | Runs only if WebView2 is missing (most PCs already have it). Default flavor stages the tiny online *bootstrapper*; `--webview2-offline` stages the full *standalone* installer (~200 MB) instead |
 | `icon.ico` | Built from `dashboard/static/icon.png` (needs Pillow on the build machine) |
 
 `installer/installer.iss` (Inno Setup 6) wraps it into the setup exe:
@@ -37,6 +37,19 @@ Download → Next → Next → desktop icon.
    ```
 3. The exe appears as `installer\FocusCore-Setup-1.3.0.exe` (~25 MB).
 
+**Offline flavor** (for machines with no network at install time —
+bundles the full WebView2 standalone installer, so the setup exe is
+~225 MB):
+
+   ```
+   python installer\build.py --version 1.3.0 --webview2-offline
+   "C:\Program Files (x86)\Inno Setup 6\ISCC.exe" installer\installer.iss /DAppVersion="1.3.0" /DWebView2Offline
+   ```
+
+   The exe appears as `installer\FocusCore-Setup-1.3.0-offline.exe`.
+   See `docs/enterprise-deploy.md` ("Offline installer") for when IT
+   wants this flavor.
+
 ## Locked installer inputs
 
 Installer builds do not float on latest upstream releases:
@@ -45,8 +58,9 @@ Installer builds do not float on latest upstream releases:
   embedded Python, with the SHA-256 of the CPython 3.12 / Windows x64
   artifact pip must download. (`requirements.txt` keeps the floating ranges
   for normal CI test runs.)
-- `installer/build.py` verifies the Python embed zip, `get-pip.py`, and
-  the WebView2 bootstrapper against pinned SHA-256 constants before using
+- `installer/build.py` verifies the Python embed zip, `get-pip.py`,
+  the WebView2 bootstrapper, and (offline flavor only) the WebView2
+  standalone installer against pinned SHA-256 constants before using
   any of them, and deletes a download whose hash does not match.
 
 To refresh the lock at release time, resolve the runtime requirements
@@ -60,6 +74,8 @@ upstream, the build fails closed until `GET_PIP_SHA256` in
 fail-closed rule applies to the evergreen WebView2 bootstrapper: if
 Microsoft publishes a new one, the build fails until
 `WEBVIEW2_BOOTSTRAPPER_SHA256` is refreshed after reviewing the new file.
+The same rule applies to the offline flavor's standalone installer
+(`WEBVIEW2_STANDALONE_SHA256`).
 
 ## CI build
 
