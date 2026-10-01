@@ -96,13 +96,26 @@ def _windows_rss_bytes():
             ("peak_pagefile_usage", ctypes.c_size_t),
         ]
 
-    psapi = ctypes.WinDLL("psapi", use_last_error=True)
     kernel32 = ctypes.WinDLL("kernel32", use_last_error=True)
+    # Windows 7+: the counter reader lives in kernel32 as
+    # K32GetProcessMemoryInfo; the psapi.dll name is the pre-7 location,
+    # kept working for compatibility. Declaring restype/argtypes is not
+    # decoration on 64-bit: without them ctypes assumes C int returns,
+    # which truncates the process HANDLE and makes the call fail.
+    try:
+        get_info = kernel32.K32GetProcessMemoryInfo
+    except AttributeError:
+        psapi = ctypes.WinDLL("psapi", use_last_error=True)
+        get_info = psapi.GetProcessMemoryInfo
+    get_info.argtypes = [wintypes.HANDLE, ctypes.POINTER(_Counters),
+                         wintypes.DWORD]
+    get_info.restype = wintypes.BOOL
+    kernel32.GetCurrentProcess.argtypes = []
+    kernel32.GetCurrentProcess.restype = wintypes.HANDLE
     counters = _Counters()
     counters.cb = ctypes.sizeof(counters)
-    ok = psapi.GetProcessMemoryInfo(kernel32.GetCurrentProcess(),
-                                    ctypes.byref(counters),
-                                    counters.cb)
+    ok = get_info(kernel32.GetCurrentProcess(), ctypes.byref(counters),
+                  counters.cb)
     return int(counters.working_set) if ok else None
 
 
