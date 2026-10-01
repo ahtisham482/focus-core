@@ -8,11 +8,11 @@ What it does:
      with SHA-256 hashes; dev-only packages like pytest are not in the
      lock and are never shipped).
   5. Copies the focuscore/ and dashboard/ packages into staging/.
-  6. Generates THIRD-PARTY-LICENSES.txt in the staging root from the
+  6. Writes the .installed marker (tells the app to use the per-user
+     data folder instead of writing next to the code).
+  7. Generates THIRD-PARTY-LICENSES.txt in the staging root from the
      staged packages' own metadata and license files (any failure
      fails the build; see installer/third_party_licenses.py).
-  7. Writes the .installed marker (tells the app to use the per-user
-     data folder instead of writing next to the code).
   8. Downloads the WebView2 Evergreen bootstrapper (SHA-256 verified;
      run by the installer only when WebView2 is missing).
   9. Builds icon.ico from the app icon (needs Pillow on the BUILD machine:

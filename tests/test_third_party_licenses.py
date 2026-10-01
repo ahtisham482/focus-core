@@ -146,6 +146,24 @@ def test_unknown_license_field_falls_through_to_classifier(site_packages, tmp_pa
     assert "License: MIT License" in _section(text, "Demo")
 
 
+def test_multiple_license_classifiers_are_all_kept(site_packages, tmp_path):
+    # Classifier-only metadata declaring several distinct licenses
+    # renders them all (deterministic sorted order), not just the first.
+    make_dist_info(
+        site_packages, "Demo", "1.0",
+        extra_headers=(
+            "Classifier: License :: OSI Approved :: MIT License",
+            "Classifier: License :: OSI Approved :: Apache Software License",
+        ),
+    )
+    text = licenses.generate_licenses_text(
+        site_packages, make_python_dir(tmp_path), "3.12.7")
+    section = _section(text, "Demo")
+    assert "MIT License" in section
+    assert "Apache Software License" in section
+    assert "License: Apache Software License / MIT License" in section
+
+
 # --- license text locations -------------------------------------------------
 
 
@@ -198,6 +216,53 @@ def test_missing_license_text_gets_the_plain_note(site_packages, tmp_path):
     section = _section(text, "Demo")
     assert licenses.MISSING_TEXT_NOTE in section
     assert "license text not present in the installed package files" in section
+
+
+def test_license_file_header_with_legacy_licenses_subdir_placement(
+        site_packages, tmp_path):
+    # Older setuptools metadata (e.g. boolean.py) declares a bare
+    # "License-File: LICENSE.txt" for a file shipped under licenses/;
+    # that resolves and must not fail closed -- the text is the
+    # package's real license text, harvested from licenses/ either way.
+    make_dist_info(
+        site_packages, "Demo", "1.0",
+        extra_headers=("License: BSD-2-Clause", "License-File: LICENSE.txt"),
+        license_texts={"licenses/LICENSE.txt": "LEGACY PLACED TEXT"},
+    )
+    text = licenses.generate_licenses_text(
+        site_packages, make_python_dir(tmp_path), "3.12.7")
+    assert "LEGACY PLACED TEXT" in _section(text, "Demo")
+
+
+def test_dangling_license_file_header_fails_closed(site_packages, tmp_path):
+    # A License-File header (PEP 639) naming a file that does not exist
+    # fails closed, like malformed METADATA: the generator raises
+    # instead of silently falling through to the missing-text note.
+    make_dist_info(
+        site_packages, "Demo", "1.0",
+        extra_headers=(
+            "License-Expression: MIT",
+            "License-File: licenses/NOPE.txt",
+        ),
+    )
+    with pytest.raises(ValueError, match="License-File"):
+        licenses.generate_licenses_text(
+            site_packages, make_python_dir(tmp_path), "3.12.7")
+
+
+def test_dangling_license_file_raises_even_with_other_text(site_packages, tmp_path):
+    # The raise happens even when another license text was harvested.
+    make_dist_info(
+        site_packages, "Demo", "1.0",
+        extra_headers=(
+            "License-Expression: MIT",
+            "License-File: licenses/NOPE.txt",
+        ),
+        license_texts={"licenses/LICENSE.txt": "THE MIT TEXT"},
+    )
+    with pytest.raises(ValueError, match="License-File"):
+        licenses.generate_licenses_text(
+            site_packages, make_python_dir(tmp_path), "3.12.7")
 
 
 # --- CPython entry and fail-closed behavior ---------------------------------

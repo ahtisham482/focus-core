@@ -22,7 +22,8 @@ the build.
 
 Failure policy (fail closed): a dist-info whose METADATA is missing,
 unparseable, or lacks a Name/Version ships in the installer but cannot
-be attributed, so generation raises instead of silently skipping it.
+be attributed, so generation raises instead of silently skipping it. A
+License-File header naming a file that does not exist raises too.
 The CPython license is read from <python-dir>/LICENSE.txt; if that
 file is absent, generation raises -- the PSF text is never hardcoded.
 """
@@ -96,10 +97,17 @@ def _declared_license(headers):
             value = " ".join(value.split())
             if value.lower() not in _UNKNOWN_LICENSES:
                 return value
+    prefix = "License :: OSI Approved ::"
+    classifiers = []
     for classifier in headers.get("classifier", []):
-        prefix = "License :: OSI Approved ::"
         if classifier.startswith(prefix):
-            return classifier[len(prefix):].strip()
+            name = classifier[len(prefix):].strip()
+            if name and name not in classifiers:
+                classifiers.append(name)
+    if classifiers:
+        # A distribution may declare several licenses via classifiers;
+        # keep them all, in a deterministic (sorted) order.
+        return " / ".join(sorted(classifiers))
     return "not declared in the installed package metadata"
 
 
@@ -146,7 +154,23 @@ def _find_license_texts(site_packages, dist_info, headers):
             if _is_license_text_file(path) or suffix in (".txt", ".md", ".rst"):
                 add(path)
     for rel in headers.get("license-file", []):
-        add(dist_info / rel)
+        # A License-File header is an explicit promise that the text
+        # ships; a referenced-but-absent file fails closed instead of
+        # silently falling through to the missing-text note. PEP 639
+        # paths are relative to the dist-info; older setuptools wrote
+        # bare names for files placed under licenses/ (e.g. boolean.py
+        # declares "License-File: LICENSE.txt" for licenses/LICENSE.txt),
+        # so accept that placement too -- it is harvested above anyway.
+        path = dist_info / rel
+        legacy = dist_info / "licenses" / rel
+        if path.is_file():
+            add(path)
+        elif legacy.is_file():
+            add(legacy)
+        else:
+            raise ValueError(
+                f"malformed dist-info {dist_info.name}: License-File "
+                f"{rel!r} does not exist")
     for path in sorted(dist_info.iterdir(), key=lambda p: p.name):
         if _is_license_text_file(path):
             add(path)
