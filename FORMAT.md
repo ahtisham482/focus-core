@@ -171,22 +171,37 @@ All three formats come from one row builder
 (`focuscore.exports.build_export_rows`), so they cannot drift apart.
 Only `accepted` entries are exported. Every export carries a redaction
 manifest saying which sensitive fields (app names, window titles,
-URLs, notes) it includes — visible in the HTML, as a `manifest` object
-in JSON, and as the first line `# manifest: {…}` in CSV. Client-facing
+URLs, notes) it includes — visible as a section in the HTML, under the
+`redaction` key in JSON, and as the first line `# manifest: {…}` in the
+client CSV. The detailed CSV below carries **no** manifest line: its
+manifest is recorded only in the export audit log. Client-facing
 exports exclude app names, window titles and URLs by default; the
 detailed CSV below is an explicit, audit-logged internal opt-in.
 
 ### JSON — `focuscore.timesheet/v1` (exact)
 
-Top level: `schema` (always `"focuscore.timesheet/v1"`), `generated_at`,
-`filters`, `manifest`, `entries`, `totals`. Each entry carries exactly:
+Top level: `schema` (always `"focuscore.timesheet/v1"`),
+`generated_at_utc` (ISO-8601 timestamp of generation, UTC), `timezone`
+(the local timezone name at generation time), `currency` (the export
+currency), `filters` (the `from`, `to`, `project_id`, `client` and
+`billable_only` selection used), `redaction` (the redaction manifest
+object: booleans for `app_names`, `window_titles`, `urls`, `notes` and
+`task`), `budget`, `entries`, `totals`. `budget` is `null` except for
+single-project exports, where it carries the budget-cap declaration
+used: `period_type`, `period_start`, `cap_seconds`,
+`cap_amount_minor`, `currency`, `effective_from_utc` and
+`changed_during_period`. Each entry carries exactly:
 `day`, `start_ts`, `end_ts`, `duration_seconds` (integer),
 `project`, `client`, `task`, `note` (empty unless notes were opted
 in), `category`, `billable` (boolean), `hourly_rate_minor` (integer
 or null), `rate_currency`, `rate_status`, `amount_minor` (integer or
 null). Totals: `seconds_total`, `seconds_billable`,
 `confirmed_minor`, `estimated_minor`, `unknown_billable_seconds`,
-`entries_without_rate`, plus the export currency. Integers everywhere:
+`entries_without_rate`, `estimated_at_current_minor`, `currency`.
+`estimated_at_current_minor` is what unknown-rate billable time would
+cost at the project's current rate; it is `0` unless estimates were
+requested. `currency` repeats the top-level export currency. Integers
+everywhere:
 a re-import reproduces durations and amounts **exactly**. JSON never
 carries app names or window titles, and exports have no entry `id` —
 identity is `(day, start_ts)` ordering, not a stable key.
@@ -203,7 +218,9 @@ part of the declared format; JSON carries the raw text).
 ### Detailed CSV (internal opt-in)
 
 The client columns plus `app,window_title` (decrypted). Still no
-`category`, no `note`.
+`category`, no `note`. It carries no `# manifest:` line — the file
+starts with the header row; the redaction manifest for this export is
+written to the export audit log only, never embedded in the file.
 
 ### HTML statement
 

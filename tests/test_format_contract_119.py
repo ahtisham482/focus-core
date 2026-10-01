@@ -19,6 +19,7 @@ Everything runs against TMP copies only, never the repo dev DB.
 
 import csv
 import json
+import re
 import shutil
 import sqlite3
 from html.parser import HTMLParser
@@ -479,3 +480,35 @@ def test_format_md_documents_the_real_schema_and_policy(tmp_path):
         assert migration.name in text, (
             f"FORMAT.md omits migration {migration.name}"
         )
+
+    # Critic repair (round 2): the documented JSON payload keys must be
+    # the REAL keys, derived from the code. If the payload shape drifts
+    # — or the doc ever again renames, drops or invents a key — this
+    # fails loudly instead of a stranger's reader dying on KeyError.
+    payload = exports.build_json_payload(
+        [], exports.compute_totals([]), {}, exports.redaction_manifest())
+    json_section = text.split("### JSON", 1)[1].split("###", 1)[0]
+    for key in payload:
+        assert f"`{key}`" in json_section, (
+            f"FORMAT.md JSON section omits real top-level key {key!r}")
+    for key in payload["totals"]:
+        assert f"`{key}`" in json_section, (
+            f"FORMAT.md JSON section omits real totals key {key!r}")
+    totals_span = json_section.split("Totals:", 1)[1].split(".", 1)[0]
+    documented_totals = set(re.findall(r"`([^`]+)`", totals_span))
+    assert documented_totals == set(payload["totals"]), (
+        "FORMAT.md totals enumeration != compute_totals keys: "
+        f"doc-only {sorted(documented_totals - set(payload['totals']))}, "
+        f"code-only {sorted(set(payload['totals']) - documented_totals)}")
+    # Phantom keys the doc once claimed (critic objections 1-2):
+    assert "`manifest`" not in json_section  # top-level key is `redaction`
+    assert "`generated_at`" not in json_section  # real: `generated_at_utc`
+
+    # Critic repair (round 2, objection 3): the detailed CSV carries NO
+    # manifest line — its manifest lives only in the audit log — and
+    # FORMAT.md must say exactly that. (rows_to_detailed_csv emitting
+    # none is pinned by test_export_roundtrip_detailed_csv_* above.)
+    detailed_section = text.split(
+        "### Detailed CSV", 1)[1].split("###", 1)[0]
+    assert "no `# manifest:`" in detailed_section
+    assert "audit log" in detailed_section
