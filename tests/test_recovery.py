@@ -76,23 +76,37 @@ def _plant_real_sidecars(live, tmp_path):
 
     Bogus sidecar bytes are deleted by SQLite itself while the failed
     ``init_db`` open is still in flight, so they could never test the
-    recovery-time rename. Real sidecars (copied out of a live WAL-mode
-    database while its connection is open) survive the failed open --
+    recovery-time rename. Real sidecars survive the failed open --
     verified: init_db then raises MigrationError and leaves them in
     place -- so recovery must move them aside with the corrupt file.
     Returns the planted (wal_bytes, shm_bytes).
+
+    The sidecars come from a dead child process: it reopens a real
+    initialized database (schema pages live in the main file, so a
+    garbage main file still fails to open), switches it to WAL, writes
+    the probe row, and dies via ``os._exit`` without closing --
+    exactly what a real crash leaves behind. Copying -wal/-shm out of
+    a still-open connection is fine on Linux but dies with
+    PermissionError on Windows, where the open connection holds the
+    -shm; a dead process holds nothing, so the copy always works.
     """
     import shutil
+    import subprocess
 
     src = tmp_path / "_sidecar_src.db"
     store.init_db(str(src))
-    conn = sqlite3.connect(str(src))
-    conn.execute("PRAGMA journal_mode=WAL")
-    conn.execute("CREATE TABLE sidecar_probe(a)")
-    conn.execute("INSERT INTO sidecar_probe VALUES (1)")
+    child = (
+        "import os, sqlite3, sys\n"
+        "conn = sqlite3.connect(sys.argv[1])\n"
+        "conn.execute('PRAGMA journal_mode=WAL')\n"
+        "conn.execute('CREATE TABLE sidecar_probe(a)')\n"
+        "conn.execute('INSERT INTO sidecar_probe VALUES (1)')\n"
+        "os._exit(0)\n"
+    )
+    subprocess.run(
+        [sys.executable, "-c", child, str(src)], check=True)
     shutil.copy(str(src) + "-wal", str(live) + "-wal")
     shutil.copy(str(src) + "-shm", str(live) + "-shm")
-    conn.close()
     return (Path(str(live) + "-wal").read_bytes(),
             Path(str(live) + "-shm").read_bytes())
 
