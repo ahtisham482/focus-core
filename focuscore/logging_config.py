@@ -47,9 +47,27 @@ def log_path():
     return os.path.join(str(d), "focuscore.log")
 
 
-def setup_logging(level=logging.INFO, process_name=None):
+def _configured_level():
+    """Level from unified config (log_level key), defaulting to INFO."""
+    try:
+        from . import config
+        name = config.get_log_level()
+    except Exception:  # noqa: BLE001 -- config must never break logging
+        name = None
+    if name:
+        resolved = logging.getLevelName(name)
+        if isinstance(resolved, int):
+            return resolved
+    return logging.INFO
+
+
+def setup_logging(level=None, process_name=None):
     """Idempotent: configure the root logger with a rotating file
     handler. Safe to call multiple times (second call is a no-op).
+
+    level: an explicit level always wins. When level is None (the
+    default), the level is resolved from unified config's ``log_level``
+    key (Roadmap 1.12), falling back to INFO.
 
     process_name tags every record from this process; it is applied
     even when the handler is already configured, so a process whose
@@ -61,6 +79,8 @@ def setup_logging(level=logging.INFO, process_name=None):
     if _configured:
         return
     _configured = True
+    if level is None:
+        level = _configured_level()
     try:
         path = log_path()
         os.makedirs(os.path.dirname(path), exist_ok=True)

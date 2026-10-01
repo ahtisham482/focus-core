@@ -7,9 +7,10 @@ console window. This module then:
        instance focuses the first one's window and exits, starting
        nothing -- so two updaters can never race either.
     1. Makes sure the dashboard server is running on 127.0.0.1
-       (port 5000 if it is free, otherwise the next free port up to
-       5009; a port already held by a real Focus Core is attached to,
-       never duplicated).
+       (the configured port -- config key ``port``, default 5000 -- if
+       it is free, otherwise the next free port in a ten-port window
+       starting there; a port already held by a real Focus Core is
+       attached to, never duplicated).
     2. Runs a quiet backup if the newest backup is stale
        (never crashes the app if the backup fails).
     3. Opens the dashboard in "app mode" -- its own window, no address
@@ -35,6 +36,7 @@ import urllib.request
 import webbrowser
 from pathlib import Path
 
+from . import config
 from . import single_instance
 
 logger = logging.getLogger(__name__)
@@ -46,7 +48,7 @@ WAIT_TIMEOUT = 20  # seconds to wait for the server to answer
 APP_URL = f"http://{HOST}:{PORT}/"
 HEALTHZ_PATH = "/healthz"
 PROBE_TIMEOUT = 0.5  # seconds; identity probes must stay snappy
-PORT_SCAN_COUNT = 10  # candidate ports: PORT .. PORT + 9
+PORT_SCAN_COUNT = 10  # candidate ports: base .. base + 9
 # Windows AppUserModelID: the OS-level identity of the app, in the
 # conventional Publisher.Product form. Without an explicit ID, Windows
 # groups our window under the Python interpreter (pythonw.exe): the
@@ -136,8 +138,19 @@ def _port_bindable(port, host=HOST):
         sock.close()
 
 
+def _base_port():
+    """First candidate port: the configured port, else PORT (5000).
+
+    Roadmap 1.12: unified config's ``port`` key moves the whole scan
+    window, so a user who cannot have 5000 scans 5100..5109 instead.
+    """
+    configured = config.get_port()
+    return configured if configured is not None else PORT
+
+
 def _candidate_ports():
-    return list(range(PORT, PORT + PORT_SCAN_COUNT))
+    base = _base_port()
+    return list(range(base, base + PORT_SCAN_COUNT))
 
 
 def _select_port():

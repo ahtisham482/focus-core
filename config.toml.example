@@ -1,0 +1,46 @@
+# Focus Core configuration -- copy this file to "config.toml" and
+# uncomment the keys you want to change.
+#
+# Where config.toml lives (Focus Core finds it on its own):
+#   - Installed copy:  %LOCALAPPDATA%\Focus Core\config.toml
+#                      (~/.focus-core/config.toml off Windows)
+#   - Portable / dev:  config.toml next to the app (the app folder)
+#
+# Precedence, highest first (note: this file beats env vars on
+# purpose -- the file is your considered choice, an env var is
+# often a stray leftover):
+#   1. Machine settings (HKLM\Software\Focus Core, set by IT)
+#   2. This file (config.toml)
+#   3. FOCUSCORE_* environment variables
+#   4. Built-in defaults
+#
+# A value that does not make sense (a port outside 1..65535, an
+# unknown log level) is ignored with a warning in the log and the
+# next tier down is used. A broken file is ignored the same way --
+# a typo here can never stop Focus Core from starting.
+#
+# This file is deployment config. Your in-app preferences live in
+# the app's own settings and are not affected by anything here.
+
+# Dashboard port. The launcher tries this port first, then the
+# next nine (5100 -> 5100..5109) until it finds a free one or a
+# Focus Core already running. Default: 5000.
+# Can also be set with the FOCUSCORE_PORT env var.
+#port = 5000
+
+# Log verbosity: CRITICAL, ERROR, WARNING, INFO, or DEBUG.
+# Default: INFO. Can also be set with FOCUSCORE_LOG_LEVEL.
+#log_level = "INFO"
+
+# Where the database, backups, and flags live. Honored ONLY in an
+# installed copy -- portable/dev copies always keep data next to
+# the app, so this can never move a portable install's database.
+# Can also be set with FOCUSCORE_DATA_DIR.
+#data_dir = "D:\\Focus Core Data"
+
+# Feature flags (on/off switches for features that ship dark).
+# Names here are matched case-insensitively. Each flag can also be
+# set with an env var: FOCUSCORE_FEATURE_<NAME> using 1/true/yes/on
+# or 0/false/no/off, e.g. FOCUSCORE_FEATURE_NEW_HOME=1.
+#[features]
+#new_home = false
