@@ -524,6 +524,25 @@ def test_contrast_named_pairs_style_css():
         assert ratio >= 4.5, (dark, "button", ratio)
 
 
+def test_contrast_mode_overrides_style_css():
+    """Win 7 repair 2: body.zen-mode / body.break-mode token blocks.
+
+    Both blocks override --bg/--accent but originally shipped no
+    --accent-strong, so zen inherited the light-theme #905f15 on a
+    near-black surface (3.62:1 -- the OBJ-1 leak inside zen mode).
+    The cascade model resolves each mode block over :root, exactly
+    as the browser does.
+    """
+    root = _tokens(_block(STYLE_CSS, ":root {"))
+    surfaces = ("--bg", "--bg-raised", "--bg-sunken")
+    for marker in ("body.zen-mode {", "body.break-mode {"):
+        merged = dict(root)
+        merged.update(_tokens(_block(STYLE_CSS, marker)))
+        for surf in surfaces:
+            ratio = _pair(merged, "--accent-strong", surf, surf)
+            assert ratio >= 4.5, (marker, surf, ratio)
+
+
 def test_contrast_status_and_pill_pairs_style_css():
     """Win 7 repair: badges, tired notes, pills, step indicator.
 

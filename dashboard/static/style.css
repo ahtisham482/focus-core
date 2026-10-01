@@ -209,6 +209,10 @@ body.zen-mode {
   --ink-faint:    #374151;
   --accent:       #818cf8;
   --accent-soft:  rgba(129,140,248,0.12);
+  /* Roadmap 1.15 repair 2: accent-strong text token for the zen
+     surfaces -- without this it inherits the light-theme #905f15
+     (3.62:1 on --bg). #a5b4fc is the zen accent's lighter step. */
+  --accent-strong: #a5b4fc;
 }
 
 /* ── BREAK MODE (warm amber light) ── */
