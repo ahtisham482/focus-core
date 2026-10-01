@@ -256,6 +256,30 @@ def ensure_server():
             "The Focus Core server did not start. Please double-click "
             "setup.bat again, and if it still fails send a screenshot "
             "to Merlin.")
+    # Roadmap 1.11 repair (MINOR-1): close the probe->bind race.
+    # wait_for_port only proved *something* listens on the chosen
+    # port; a foreign app could have grabbed the port in the gap
+    # between _select_port's bindability check and the child
+    # binding. Re-probe the Focus Core identity (/healthz). If the
+    # listener is not Focus Core, it is a hard start failure -- not
+    # a signal to scan more ports, because the spawn already
+    # happened on the chosen port and falling through would leave
+    # the foreign listener masquerading as our server.
+    if not is_focus_core(port):
+        logger.warning(
+            "port %s conflict: another program took the port while "
+            "Focus Core was starting (post-start identity probe "
+            "failed); not treating the foreign listener as Focus Core",
+            port)
+        try:
+            proc.terminate()
+        except OSError as exc:
+            logger.warning("could not stop the server process that "
+                           "failed to start: %s", exc)
+        raise RuntimeError(
+            "The Focus Core server did not start. Please double-click "
+            "setup.bat again, and if it still fails send a screenshot "
+            "to Merlin.")
     return proc, False
 
 

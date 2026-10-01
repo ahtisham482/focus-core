@@ -309,6 +309,14 @@ def test_ensure_server_free_first_port_starts_there(monkeypatch):
     base = _use_port_block(monkeypatch)
     monkeypatch.setattr(launcher, "wait_for_port", lambda **kw: True)
     starts = _record_start_server(monkeypatch)
+    real_probe = launcher.is_focus_core
+
+    def _probe(port, **kwargs):
+        if starts:
+            return True
+        return real_probe(port, **kwargs)
+
+    monkeypatch.setattr(launcher, "is_focus_core", _probe)
     proc, already = launcher.ensure_server()
     assert already is False
     assert proc is not None
@@ -322,6 +330,14 @@ def test_ensure_server_foreign_occupant_falls_back(monkeypatch, occupy):
     occupy(base)  # a foreign app squatting on the first candidate
     monkeypatch.setattr(launcher, "wait_for_port", lambda **kw: True)
     starts = _record_start_server(monkeypatch)
+    real_probe = launcher.is_focus_core
+
+    def _probe(port, **kwargs):
+        if starts:
+            return True
+        return real_probe(port, **kwargs)
+
+    monkeypatch.setattr(launcher, "is_focus_core", _probe)
     _proc, already = launcher.ensure_server()
     assert already is False
     assert starts == [base + 1]
@@ -386,15 +402,19 @@ def test_ensure_server_integration_with_popen_and_probe(monkeypatch):
     faked, the real selection logic runs, and the chosen port must
     land in the spawned command."""
     base = _use_port_block(monkeypatch)
-    monkeypatch.setattr(
-        launcher, "is_focus_core", lambda port, **kw: False)
-    monkeypatch.setattr(launcher, "wait_for_port", lambda **kw: True)
     commands = []
 
     def fake_popen(args, **kwargs):
         commands.append(args)
         return _FakeProc()
 
+    def _probe(port, **kwargs):
+        # Scan phase (before spawn): not Focus Core. Post-start
+        # identity re-probe: the spawned server is Focus Core.
+        return bool(commands)
+
+    monkeypatch.setattr(launcher, "is_focus_core", _probe)
+    monkeypatch.setattr(launcher, "wait_for_port", lambda **kw: True)
     monkeypatch.setattr(launcher.subprocess, "Popen", fake_popen)
     proc, already = launcher.ensure_server()
     assert already is False
@@ -414,6 +434,60 @@ def test_ensure_server_start_failure_keeps_the_old_message(monkeypatch):
     assert proc.terminated is True
     assert "The Focus Core server did not start. Please double-click "\
         "setup.bat again" in str(excinfo.value)
+
+
+def test_ensure_server_post_start_probe_false_raises_and_terminates(
+        monkeypatch):
+    """MINOR-1 repair: foreign app wins the probe->bind race.
+
+    The port answers TCP (wait_for_port succeeds) but the post-start
+    identity probe says "not Focus Core" -- ensure_server must treat
+    it as a hard start failure: terminate the spawned process and
+    raise the preserved start-failure RuntimeError, not scan on.
+    """
+    base = _use_port_block(monkeypatch)
+    monkeypatch.setattr(
+        launcher, "is_focus_core", lambda port, **kw: False)
+    monkeypatch.setattr(launcher, "wait_for_port", lambda **kw: True)
+    proc = _FakeProc()
+    commands = []
+
+    def fake_popen(args, **kwargs):
+        commands.append(args)
+        return proc
+
+    monkeypatch.setattr(launcher.subprocess, "Popen", fake_popen)
+    with pytest.raises(RuntimeError) as excinfo:
+        launcher.ensure_server()
+    assert proc.terminated is True
+    assert commands[0][-2:] == ["--port", str(base)]
+    assert "The Focus Core server did not start. Please double-click "\
+        "setup.bat again" in str(excinfo.value)
+
+
+def test_ensure_server_post_start_probe_true_succeeds(monkeypatch):
+    """MINOR-1 repair: post-start identity confirms Focus Core."""
+    base = _use_port_block(monkeypatch)
+    commands = []
+    proc = _FakeProc()
+
+    def fake_popen(args, **kwargs):
+        commands.append(args)
+        return proc
+
+    def _probe(port, **kwargs):
+        # Scan: no Focus Core yet. After spawn: identity confirmed.
+        return bool(commands)
+
+    monkeypatch.setattr(launcher, "is_focus_core", _probe)
+    monkeypatch.setattr(launcher, "wait_for_port", lambda **kw: True)
+    monkeypatch.setattr(launcher.subprocess, "Popen", fake_popen)
+    result_proc, already = launcher.ensure_server()
+    assert result_proc is proc
+    assert already is False
+    assert proc.terminated is False
+    assert commands[0][-2:] == ["--port", str(base)]
+    assert launcher.active_port() == base
 
 
 # ------------------------------------------------------ focus the first ---
