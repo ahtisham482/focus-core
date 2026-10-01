@@ -9,12 +9,59 @@ stored events (so per-activity overrides can be applied retroactively).
 """
 
 import argparse
+import logging
 from datetime import date, datetime, time
 
-from . import store
+from . import config, store
 from .ingest import ActivityWatchClient, ActivityWatchError
 from .scoring import productivity_pulse, resolve_activity_score
 from .taxonomy import categorize, match_key
+
+logger = logging.getLogger(__name__)
+
+
+def _normalize_process_name(name):
+    """Canonical form for capture-exclusion matching (Roadmap 1.20).
+
+    Lower-cased, stripped, with one trailing ``.exe`` removed -- so a
+    configured ``1Password``, ``1password`` and ``1Password.exe`` all
+    name the same process as a feed app of ``1Password.exe``.
+    """
+    text = str(name or "").strip().lower()
+    if text.endswith(".exe"):
+        text = text[:-4].strip()
+    return text
+
+
+def _apply_capture_exclusions(events):
+    """Drop events from capture-excluded processes (Roadmap 1.20).
+
+    Matching is an EXACT process-name match on the event's ``app``
+    field, case-insensitive with ``.exe`` ignored (see
+    :func:`_normalize_process_name`); there is deliberately no
+    substring matching, so ``not1password.exe`` is never caught by a
+    ``1password`` entry. The blocklist is read once here -- config is
+    uncached, so an IT policy change applies on the next pipeline run
+    without an app restart. Only the drop COUNT is logged: naming the
+    excluded apps in a log would recreate the data class the feature
+    exists to keep off the machine's records.
+    """
+    excluded = {
+        _normalize_process_name(name)
+        for name in config.get_capture_exclusions()
+    }
+    if not excluded:
+        return events
+    kept = [
+        event for event in events
+        if _normalize_process_name(event.get("app", "")) not in excluded
+    ]
+    dropped = len(events) - len(kept)
+    if dropped:
+        logger.debug(
+            "capture-scope blocklist: dropped %d event(s) "
+            "from excluded processes", dropped)
+    return kept
 
 
 def _demo_event(day, start_h, start_m, minutes, app, title, url=None):
@@ -57,13 +104,24 @@ def generate_demo_events(day):
 
 
 def run_day(day, demo=False, db_path=None):
-    """Run the full pipeline for one date; return the day's summary dict."""
+    """Run the full pipeline for one date; return the day's summary dict.
+
+    Roadmap 1.20: events from capture-excluded processes (the
+    ``capture_exclusions`` config key) are dropped before scoring and
+    storage, so their window titles and URLs are never written.
+    Exclusion applies at ingest only: rows stored by earlier runs
+    stay as they are -- re-running a day re-applies the then-current
+    policy through the pipeline's normal replace-the-day semantics,
+    but nothing reaches back to purge previously captured days.
+    """
     day_str = day.isoformat()
 
     if demo:
         events, afk_seconds = generate_demo_events(day)
     else:
         events, afk_seconds = ActivityWatchClient().fetch_day(day)
+
+    events = _apply_capture_exclusions(events)
 
     overrides = store.get_overrides(path=db_path)
 

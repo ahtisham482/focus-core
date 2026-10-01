@@ -19,8 +19,18 @@ Keys on day one: ``port`` (int, 1..65535), ``log_level`` (a logging
 level name), ``data_dir`` (str). Feature flags live in a ``[features]``
 subtable and are read with :func:`feature_enabled`.
 
+Roadmap 1.20 adds ``capture_exclusions``: a list of process names
+whose activity the ingest pipeline drops before storage, so an
+excluded app's window titles and URLs never reach the database (read
+once per pipeline run via :func:`get_capture_exclusions`). Values may
+be a list of names (TOML array / REG_MULTI_SZ) or one string of
+``;``- or ``,``-separated names (REG_SZ / env var). Because config is
+uncached, an IT policy change takes effect on the next ingest tick --
+no app restart.
+
 Machine tier shape (registry values under HKLM\\Software\\Focus Core):
-``Port`` (DWORD or SZ), ``LogLevel`` (SZ), ``DataDir`` (SZ), and a
+``Port`` (DWORD or SZ), ``LogLevel`` (SZ), ``DataDir`` (SZ),
+``CaptureExclusions`` (REG_MULTI_SZ or ``;``-separated SZ), and a
 ``Features`` subkey whose values are named after the flag (DWORD or
 SZ). The reader is injectable (``_machine_reader``) so Linux tests can
 exercise the tier with a fake; off Windows it returns {}.
@@ -30,6 +40,8 @@ Environment mapping (documented here -- this docstring is the map):
     FOCUSCORE_PORT            -> port
     FOCUSCORE_LOG_LEVEL       -> log_level
     FOCUSCORE_DATA_DIR        -> data_dir
+    FOCUSCORE_CAPTURE_EXCLUSIONS -> capture_exclusions
+                                 (``;``- or ``,``-separated names)
     FOCUSCORE_FEATURE_<NAME>  -> [features] entry <NAME>, where <NAME>
                                  is the flag name upper-cased with
                                  non-alphanumerics turned into "_"
@@ -105,7 +117,9 @@ def _read_machine_winreg():
     with key:
         for name, value_name in (("port", "Port"),
                                  ("log_level", "LogLevel"),
-                                 ("data_dir", "DataDir")):
+                                 ("data_dir", "DataDir"),
+                                 ("capture_exclusions",
+                                  "CaptureExclusions")):
             try:
                 raw, _reg_type = winreg.QueryValueEx(key, value_name)
             except OSError:
@@ -220,10 +234,33 @@ def _validate_data_dir(value):
     return False, None
 
 
+def _validate_capture_exclusions(value):
+    """Normalize a blocklist value to a clean list of process names.
+
+    Accepts a list/tuple of strings (TOML array, REG_MULTI_SZ) or one
+    string of ``;``- or ``,``-separated names (REG_SZ, env var).
+    Names are stripped and empties dropped. Anything else -- a bare
+    number, a mapping, a list holding a non-string -- is invalid, so
+    the caller's tier falls through with a warning like every other
+    1.12 value.
+    """
+    if isinstance(value, str):
+        names = value.replace(",", ";").split(";")
+    elif isinstance(value, (list, tuple)):
+        if not all(isinstance(item, str) for item in value):
+            return False, None
+        names = list(value)
+    else:
+        return False, None
+    cleaned = [name.strip() for name in names]
+    return True, [name for name in cleaned if name]
+
+
 _VALIDATORS = {
     "port": _validate_port,
     "log_level": _validate_log_level,
     "data_dir": _validate_data_dir,
+    "capture_exclusions": _validate_capture_exclusions,
 }
 
 
@@ -275,6 +312,18 @@ def get_log_level():
 def get_data_dir():
     """Configured data dir (str), or None when unset."""
     return get("data_dir")
+
+
+def get_capture_exclusions():
+    """Capture-scope blocklist (Roadmap 1.20): process names to drop.
+
+    Resolved machine > config.toml > env like every other key; an
+    invalid value at one tier warns and falls through. Returns the
+    names as configured (stripped; case and any ``.exe`` suffix are
+    the matching layer's concern), or [] when no tier sets the key.
+    """
+    value = get("capture_exclusions", None)
+    return list(value) if value else []
 
 
 # ----------------------------------------------------- feature flags ---
