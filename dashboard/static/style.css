@@ -91,6 +91,18 @@
   --danger:        var(--p-red-600);
   --danger-soft:   var(--p-red-100);
 
+  /* Roadmap 1.15 repair: status hues as TEXT on their -soft fills
+     (badges, tired-state notes). --warn #d97706 on --warn-soft is
+     2.86:1 and --danger #dc2626 on --danger-soft is 3.95:1 -- both
+     fail WCAG AA 4.5:1 for normal text. The -strong variants are the
+     same hues stepped darker here, lighter in the dark blocks below
+     (light on -soft: 5.62 / 5.30 / 4.57:1; dark worst case across
+     surfaces: 8.23 / 6.06 / 8.46:1). Fills keep the shipped tokens
+     above. */
+  --success-strong: var(--p-green-700);
+  --warn-strong:    #9a4a08;
+  --danger-strong:  var(--p-red-700);
+
   /* Depth state: live session ring color */
   --depth-flow:    #22c55e;   /* green   */
   --depth-deep:    #fbbf24;   /* amber   */
@@ -143,12 +155,20 @@
     --ink-faint:    #8a8172;
     --ink-on-accent:#1c1305;
     --accent:       #f2a83d;
+    /* Roadmap 1.15 repair: --accent-strong must be redefined here --
+       custom properties not overridden keep the :root value (#905f15,
+       3.4:1 on dark surfaces). The dark accent itself passes at
+       9.7/9.3/9.9:1, and the -strong status text steps lighter too. */
+    --accent-strong: #f2a83d;
     --accent-hover: #cf8f26;
     --accent-soft:  rgba(242,168,61,.13);
     --accent-border:rgba(242,168,61,.25);
     --success-soft: rgba(34,197,94,0.15);
     --warn-soft:    rgba(251,191,36,0.15);
     --danger-soft:  rgba(220,38,38,0.15);
+    --success-strong: var(--p-green-400);
+    --warn-strong:    var(--p-amber-400);
+    --danger-strong:  #f87171;
   }
 }
 [data-theme="dark"] {
@@ -165,12 +185,16 @@
   --ink-faint:    #8a8172;
   --ink-on-accent:#1c1305;
   --accent:       #f2a83d;
+  --accent-strong: #f2a83d;
   --accent-hover: #cf8f26;
   --accent-soft:  rgba(242,168,61,.13);
   --accent-border:rgba(242,168,61,.25);
   --success-soft: rgba(34,197,94,0.15);
   --warn-soft:    rgba(251,191,36,0.15);
   --danger-soft:  rgba(220,38,38,0.15);
+  --success-strong: var(--p-green-400);
+  --warn-strong:    var(--p-amber-400);
+  --danger-strong:  #f87171;
 }
 [data-theme="light"] { /* explicit light override — keep :root defaults */ }
 
@@ -548,13 +572,13 @@ tr:target td { background: var(--warn-soft); }
   text-transform: uppercase;
 }
 .badge--success, .badge.on_track, .badge.achieved {
-  background: var(--success-soft); color: var(--success);
+  background: var(--success-soft); color: var(--success-strong, var(--success));
 }
 .badge--warn, .badge.behind {
-  background: var(--warn-soft); color: var(--warn);
+  background: var(--warn-soft); color: var(--warn-strong, var(--warn));
 }
 .badge--danger, .badge.missed {
-  background: var(--danger-soft); color: var(--danger);
+  background: var(--danger-soft); color: var(--danger-strong, var(--danger));
 }
 .badge--accent {
   background: var(--accent-soft); color: var(--accent-strong, var(--accent));
@@ -563,9 +587,9 @@ tr:target td { background: var(--warn-soft); }
   background: var(--bg-sunken); color: var(--ink-muted);
 }
 /* Shield state badges */
-.badge--protected { background: var(--success-soft); color: var(--success); }
+.badge--protected { background: var(--success-soft); color: var(--success-strong, var(--success)); }
 .badge--off       { background: var(--bg-sunken); color: var(--ink-muted); }
-.badge--enforcing { background: var(--danger-soft); color: var(--danger); }
+.badge--enforcing { background: var(--danger-soft); color: var(--danger-strong, var(--danger)); }
 
 /* ════════════════════════ PROGRESS / BARS ═══════════════════════════ */
 .progress {
@@ -661,7 +685,7 @@ tr:target td { background: var(--warn-soft); }
   border-radius: var(--r-md); background: var(--bg-sunken);
   font-weight: 500;
 }
-.steps .step.now { background: var(--accent); color: white; font-weight: 700; }
+.steps .step.now { background: var(--accent); color: var(--ink-on-accent); font-weight: 700; }
 .big-emoji { font-size: 52px; margin: 8px 0; display: block; }
 
 /* ═══════════════════════ GOAL ROWS ══════════════════════════════════ */
@@ -861,6 +885,7 @@ footer a { color: var(--accent-strong, var(--accent)); }
   *, *::before, *::after {
     animation-duration: 0.001ms !important;
     animation-iteration-count: 1 !important;
+    animation-delay: 0s !important;
     transition-duration: 0.001ms !important;
   }
   /* Roadmap 1.15: smooth scrolling is motion too -- jump instantly. */
@@ -1019,7 +1044,7 @@ footer a { color: var(--accent-strong, var(--accent)); }
   color: var(--ink-muted); font-size: var(--text-sm);
   max-width: 600px; margin: 0 auto 12px;
 }
-.sug-tired { color: var(--warn); font-size: var(--text-sm); }
+.sug-tired { color: var(--warn-strong, var(--warn)); font-size: var(--text-sm); }
 .sug-form { margin: 18px 0 6px; }
 .sug-form label { font-size: var(--text-sm); color: var(--ink-muted); }
 .sug-form input[type='text'] { margin-left: 8px; }
@@ -1441,7 +1466,7 @@ button.chip:hover {
   margin: 0 0 6px;
 }
 .fc-tired {
-  color: var(--warn);
+  color: var(--warn-strong, var(--warn));
   font-size: var(--text-sm);
   margin: 0 0 6px;
 }
@@ -2067,7 +2092,7 @@ body.zen-mode .fc-live { border: none; background: transparent; box-shadow: none
   padding: 10px 0;
   border-bottom: 1px solid var(--border-subtle);
 }
-.wk-filters { margin: 0 0 12px; color: var(--ink-faint); }
+.wk-filters { margin: 0 0 12px; color: var(--ink-muted); }
 .wk-filters a { font-weight: 600; }
 
 /* Daybar inner form: plain flex row, the chrome lives on .wk-daybar */
@@ -2296,11 +2321,15 @@ button.wk-big {
 .page-main a:not(.btn):not(.tl-block) { color: var(--accent-strong, var(--accent)); }
 .page-main a:not(.btn):not(.tl-block):hover { text-decoration: underline; }
 
-/* craft rollout: status pill (invoices) */
+/* craft rollout: status pill (invoices).
+   Roadmap 1.15 repair: the base was #fff on --ink-faint (3.73 light /
+   3.84 dark); the neutral treatment now matches .badge--neutral
+   (muted on sunken, 6.24 / 7.87:1). Status variants carry their own
+   foreground inline from _invoice_status_badge. */
 .pill {
   display: inline-block; padding: 2px 10px; border-radius: var(--r-full, 999px);
   font-size: var(--text-xs); font-weight: 700; letter-spacing: 0.04em;
-  color: #fff; background: var(--ink-faint); white-space: nowrap;
+  color: var(--ink-muted); background: var(--bg-sunken); white-space: nowrap;
 }
 
 /* craft rollout: range inputs (focus volume) use the ember accent */

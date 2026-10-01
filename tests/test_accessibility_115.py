@@ -22,6 +22,11 @@ Audit + gap-close, not greenfield. Each test names the win it pins:
    properties for the named semantic pairs (ink / muted / accent as
    text / button text) on bg / bg-raised / bg-sunken, light + dark,
    for both style.css and living.css tokens. All >= 4.5:1.
+   1.15 repair: token resolution models the real cascade (:root
+   merged under each theme block, var() chains resolved), and the
+   covered pairs extend to the status badges, invoice pills,
+   step indicator, tired-state notes, week filters, living --ink3
+   meta text and the living break-phase state text.
 
 Seeding mirrors tests/test_ui_ux_v15.py (tmp DB only; the repo
 focuscore.db is never touched).
@@ -29,6 +34,7 @@ focuscore.db is never touched).
 
 import re
 import sqlite3
+from collections import Counter
 from html.parser import HTMLParser
 from pathlib import Path
 
@@ -43,6 +49,7 @@ LIVING_CSS = (ROOT / "dashboard/static/living.css").read_text(encoding="utf-8")
 NAV_JS = (ROOT / "dashboard/static/nav.js").read_text(encoding="utf-8")
 FOCUS_JS = (ROOT / "dashboard/static/focus.js").read_text(encoding="utf-8")
 FOCUS_PY = (ROOT / "dashboard/routes/focus.py").read_text(encoding="utf-8")
+APP_PY = (ROOT / "dashboard/app.py").read_text(encoding="utf-8")
 
 SEEDED_DAY = "2026-09-29"
 
@@ -117,7 +124,7 @@ _VOID = {"area", "base", "br", "col", "embed", "hr", "img", "input",
 
 
 class _Page(HTMLParser):
-    """Collects buttons, links, fields, label-for ids and wrapping."""
+    """Collects buttons, links, fields, labels, and every id."""
 
     def __init__(self):
         super().__init__(convert_charrefs=True)
@@ -126,12 +133,21 @@ class _Page(HTMLParser):
         self.links = []
         self.fields = []
         self.labels_for = set()
+        self.labels = []  # {"for": str | None, "text": str}
+        self.ids = []
         self._open = None  # (list, record) currently collecting text
+        self._open_label = None
 
     def handle_starttag(self, tag, attrs):
         d = dict(attrs)
-        if tag == "label" and "for" in d:
-            self.labels_for.add(d["for"])
+        if d.get("id"):
+            self.ids.append(d["id"])
+        if tag == "label":
+            rec = {"for": d.get("for"), "text": ""}
+            self.labels.append(rec)
+            self._open_label = rec
+            if "for" in d:
+                self.labels_for.add(d["for"])
         if tag == "button":
             rec = {"attrs": d, "text": ""}
             self.buttons.append(rec)
@@ -150,6 +166,8 @@ class _Page(HTMLParser):
 
     def handle_startendtag(self, tag, attrs):
         d = dict(attrs)
+        if d.get("id"):
+            self.ids.append(d["id"])
         if tag == "label" and "for" in d:
             self.labels_for.add(d["for"])
         if tag in ("input", "select", "textarea"):
@@ -161,6 +179,8 @@ class _Page(HTMLParser):
     def handle_endtag(self, tag):
         if tag in ("button", "a"):
             self._open = None
+        if tag == "label":
+            self._open_label = None
         if tag in self.stack:
             while self.stack and self.stack[-1] != tag:
                 self.stack.pop()
@@ -170,6 +190,8 @@ class _Page(HTMLParser):
     def handle_data(self, data):
         if self._open is not None:
             self._open["text"] += data
+        if self._open_label is not None:
+            self._open_label["text"] += data
 
 
 def _parse(html):
@@ -217,6 +239,26 @@ def test_every_field_has_associated_label_on_served_pages(seeded_client):
                     continue
             has_for = bool(a.get("id") and a["id"] in page.labels_for)
             assert has_for or field["wrapped"], (route, field)
+
+
+def test_no_duplicate_ids_or_empty_labels_on_served_pages(seeded_client):
+    """Win 4/5 hardening: ids are unique; <label for=> has real text.
+
+    A duplicate id makes a label point at the wrong field, and an
+    empty <label for=> gives a field no usable name -- neither is
+    visible to the name/label sweeps above, so pin both directly.
+    """
+    client, inv_id = seeded_client
+    routes = SEEDED_ROUTES + [f"/invoices/{inv_id}"]
+    for route in routes:
+        res = client.get(route)
+        assert res.status_code == 200, route
+        page = _parse(res.get_data(as_text=True))
+        dups = sorted(i for i, n in Counter(page.ids).items() if n > 1)
+        assert not dups, (route, dups)
+        for lab in page.labels:
+            if lab["for"]:
+                assert lab["text"].strip(), (route, lab["for"])
 
 
 def test_focus_active_page_names_and_labels(seeded_client):
@@ -281,18 +323,77 @@ def test_sr_only_utility_exists():
                      STYLE_CSS)
 
 
+def _reduce_blocks(css):
+    """Bodies of the @media (prefers-reduced-motion: reduce) blocks."""
+    out = []
+    marker = "@media (prefers-reduced-motion: reduce)"
+    pos = 0
+    while True:
+        try:
+            start = css.index(marker, pos)
+        except ValueError:
+            return out
+        open_brace = css.index("{", start)
+        depth = 0
+        j = open_brace
+        while True:
+            if css[j] == "{":
+                depth += 1
+            elif css[j] == "}":
+                depth -= 1
+                if depth == 0:
+                    break
+            j += 1
+        out.append(css[open_brace + 1:j])
+        pos = j
+
+
+def _rules(block):
+    """(selector-list, declarations) per flat rule in a CSS block."""
+    return [(sel.strip(), decls.strip()) for sel, decls
+            in re.findall(r"([^{}]+)\{([^{}]*)\}", block)]
+
+
 def test_reduced_motion_collapses_shipped_motion():
     """Win 6: both stylesheets neutralize transitions/animations."""
     for css in (STYLE_CSS, LIVING_CSS):
-        assert "@media (prefers-reduced-motion: reduce)" in css
-        block = css.split("@media (prefers-reduced-motion: reduce)", 1)[1]
-        assert "animation-duration:" in block
-        assert "animation-iteration-count: 1" in block
-        assert "transition-duration:" in block
+        blocks = _reduce_blocks(css)
+        assert blocks
+        flat = "\n".join(blocks)
+        assert "animation-duration:" in flat
+        assert "animation-iteration-count: 1" in flat
+        assert "transition-duration:" in flat
+        # Entrance delays are motion too: without this, delayed
+        # entrances sit in their hidden `from` state, then snap.
+        assert "animation-delay:" in flat
     # Smooth scrolling is motion; reduce turns it off (style.css).
     assert "html { scroll-behavior: auto; }" in STYLE_CSS
     # JS honors the same preference before animating.
     assert "prefers-reduced-motion" in NAV_JS
+
+
+def test_reduced_motion_covers_living_body_pseudo_elements():
+    """Win 6 repair: the body's own pseudo-elements are neutralized.
+
+    `body.living *::after` matches descendants only -- the 18s
+    lv-drift on `body.living::after` itself kept running under
+    reduce. Pin the pseudo-element selectors themselves, not a
+    substring of the block.
+    """
+    covered = {}
+    for block in _reduce_blocks(LIVING_CSS):
+        for selectors, decls in _rules(block):
+            for sel in selectors.split(","):
+                covered[sel.strip()] = decls
+    for pseudo in ("body.living::after", "body.living::before"):
+        assert pseudo in covered, pseudo
+        decls = covered[pseudo]
+        assert ("animation-duration" in decls
+                or "animation-name" in decls
+                or re.search(r"animation\s*:", decls)), pseudo
+        assert "animation-delay" in decls, pseudo
+    # The drift rule itself is the one being neutralized.
+    assert "animation: lv-drift" in LIVING_CSS
 
 
 def test_escape_closes_details_and_zen_mode():
@@ -325,7 +426,7 @@ def _rgb(value, bg_hex=None):
     if m and bg_hex is not None:
         fg = tuple(int(m.group(i)) / 255 for i in (1, 2, 3))
         alpha = float(m.group(4))
-        bg = _rgb(bg_hex)
+        bg = bg_hex if isinstance(bg_hex, tuple) else _rgb(bg_hex)
         return tuple(fg[i] * alpha + bg[i] * (1 - alpha) for i in range(3))
     raise AssertionError(f"unparseable color: {value!r}")
 
@@ -344,47 +445,164 @@ def _ratio(fg_value, bg_hex):
     return (hi + 0.05) / (lo + 0.05)
 
 
-def _assert_pairs(text_tokens, pair_tokens, surfaces, text_keys,
-                  button_pair):
-    for key in text_keys:
-        fg = text_tokens[key]
-        for surf in surfaces:
-            ratio = _ratio(fg, text_tokens[surf])
-            assert ratio >= 4.5, (key, surf, fg, text_tokens[surf], ratio)
-    fg_key, bg_key = button_pair
-    ratio = _ratio(pair_tokens[fg_key], pair_tokens[bg_key])
-    assert ratio >= 4.5, (fg_key, bg_key, ratio)
+# ---- cascade model (1.15 repair) ----
+#
+# Real CSS custom-property cascade: a theme block only overrides the
+# tokens it names; everything else keeps the base value. The first
+# version of these tests parsed each theme block in isolation, so a
+# token defined ONLY in :root at a dark-failing luminance (exactly
+# what --accent-strong shipped as) was invisible to the dark check.
+# Merge base-under-theme and resolve var() chains before measuring.
+
+def _val(tokens, key):
+    """Resolve a token's value through any var() chain."""
+    seen = set()
+    value = tokens[key]
+    while True:
+        m = re.fullmatch(r"var\((--[\w-]+)\)", value.strip())
+        if not m:
+            return value.strip()
+        key = m.group(1)
+        assert key not in seen, f"cyclic var() at {key}"
+        seen.add(key)
+        value = tokens[key]
+
+
+def _ratio_on(fg_value, bg_value, surface_hex):
+    """Contrast of fg on bg, bg composited over the page surface."""
+    bg_rgb = _rgb(bg_value, surface_hex)
+    fg_rgb = _rgb(fg_value, bg_rgb)
+    hi = max(_lum(fg_rgb), _lum(bg_rgb))
+    lo = min(_lum(fg_rgb), _lum(bg_rgb))
+    return (hi + 0.05) / (lo + 0.05)
+
+
+def _pair(tokens, fg_key, bg_key, surface_key):
+    return _ratio_on(_val(tokens, fg_key), _val(tokens, bg_key),
+                     _val(tokens, surface_key))
+
+
+def _style_theme(dark):
+    root = _tokens(_block(STYLE_CSS, ":root {"))
+    if not dark:
+        return root
+    merged = dict(root)
+    merged.update(_tokens(_block(
+        STYLE_CSS, "@media (prefers-color-scheme: dark) {")))
+    merged.update(_tokens(_block(STYLE_CSS, '[data-theme="dark"] {')))
+    return merged
+
+
+def _living_theme(light):
+    base = _tokens(_block(LIVING_CSS, "body.living {"))
+    if not light:
+        return base
+    merged = dict(base)
+    merged.update(_tokens(_block(
+        LIVING_CSS, 'html[data-theme="light"] body.living {')))
+    merged.update(_tokens(_block(
+        LIVING_CSS, 'html:not([data-theme]) body.living {')))
+    return merged
 
 
 def test_contrast_named_pairs_style_css():
-    """Win 7: ink / muted / accent-text / button text, light + dark."""
-    light = _tokens(_block(STYLE_CSS, ":root {"))
-    dark = _tokens(_block(STYLE_CSS, '[data-theme="dark"] {'))
+    """Win 7: ink / muted / accent-text / button text, light + dark.
+
+    Tokens resolve through the cascade (:root under the dark blocks),
+    so a text token that only exists in :root is measured at its real
+    dark value -- the 1.15 ship regressed exactly there.
+    """
     surfaces = ("--bg", "--bg-raised", "--bg-sunken")
-    for tokens in (light, dark):
-        accent_text = tokens.get("--accent-strong", tokens["--accent"])
-        merged = dict(tokens)
-        merged["--accent"] = accent_text
-        _assert_pairs(merged, tokens, surfaces,
-                      ("--ink", "--ink-muted", "--accent"),
-                      ("--ink-on-accent", "--accent"))
+    for dark in (False, True):
+        tokens = _style_theme(dark)
+        for key in ("--ink", "--ink-muted", "--accent-strong"):
+            for surf in surfaces:
+                ratio = _pair(tokens, key, surf, surf)
+                assert ratio >= 4.5, (dark, key, surf, ratio)
+        # Button text on the accent fill (both themes).
+        ratio = _pair(tokens, "--ink-on-accent", "--accent", "--bg")
+        assert ratio >= 4.5, (dark, "button", ratio)
+
+
+def test_contrast_status_and_pill_pairs_style_css():
+    """Win 7 repair: badges, tired notes, pills, step indicator.
+
+    Normal-size informational text the first pass left under 4.5:1
+    behind text-only -strong tokens / smallest same-hue steps.
+    """
+    surfaces = ("--bg", "--bg-raised", "--bg-sunken")
+    for dark in (False, True):
+        tokens = _style_theme(dark)
+        # Status badges: -strong text on the -soft fill, over any
+        # surface the badge can sit on.
+        for fg_key, bg_key in (
+                ("--success-strong", "--success-soft"),
+                ("--warn-strong", "--warn-soft"),
+                ("--danger-strong", "--danger-soft")):
+            for surf in surfaces:
+                ratio = _pair(tokens, fg_key, bg_key, surf)
+                assert ratio >= 4.5, (dark, fg_key, surf, ratio)
+        # Tired-state sentences sit directly on page surfaces.
+        for surf in surfaces:
+            ratio = _pair(tokens, "--warn-strong", surf, surf)
+            assert ratio >= 4.5, (dark, "tired", surf, ratio)
+        # Invoice pills (foreground/background pairs from
+        # _invoice_status_badge) + the neutral default pill.
+        for fg, bg in (("--ink-muted", "--bg-sunken"),
+                       ("--ink-on-accent", "--accent"),
+                       ("#ffffff", "--success"),
+                       ("#ffffff", "--danger")):
+            lit = dict(tokens)
+            lit["#ffffff"] = "#ffffff"
+            fg_v = lit[fg] if fg.startswith("#") else _val(tokens, fg)
+            ratio = _ratio_on(fg_v, _val(tokens, bg),
+                              _val(tokens, "--bg"))
+            assert ratio >= 4.5, (dark, fg, bg, ratio)
+    # Wiring: the shipped rules actually use the fixed pairings.
+    for marker, needle in (
+            (".badge--success", "var(--success-strong"),
+            (".badge--warn", "var(--warn-strong"),
+            (".badge--danger", "var(--danger-strong"),
+            (".badge--protected", "var(--success-strong"),
+            (".badge--enforcing", "var(--danger-strong"),
+            (".sug-tired", "var(--warn-strong"),
+            (".fc-tired", "var(--warn-strong")):
+        i = STYLE_CSS.index(marker)
+        assert needle in STYLE_CSS[i:i + 220], marker
+    i = STYLE_CSS.index(".wk-filters")
+    assert "color: var(--ink-muted)" in STYLE_CSS[i:i + 120]
+    i = STYLE_CSS.index(".steps .step.now")
+    assert "color: var(--ink-on-accent)" in STYLE_CSS[i:i + 120]
+    i = STYLE_CSS.index(".pill {")
+    pill = STYLE_CSS[i:i + 320]
+    assert "color: var(--ink-muted)" in pill
+    assert "background: var(--bg-sunken)" in pill
+    i = APP_PY.index("_invoice_status_badge")
+    badge_fn = APP_PY[i:APP_PY.index("\ndef ", i + 1)]
+    for needle in ("var(--bg-sunken)", "var(--ink-muted)",
+                   "var(--accent)", "var(--ink-on-accent)",
+                   "var(--success)", "var(--danger)"):
+        assert needle in badge_fn, needle
 
 
 def test_contrast_named_pairs_living_css():
-    """Win 7: living tokens, dark base + light overrides."""
-    dark = _tokens(_block(LIVING_CSS, "body.living {"))
-    overrides = _tokens(_block(
-        LIVING_CSS, 'html[data-theme="light"] body.living {'))
-    light = dict(dark)
-    light.update(overrides)  # light overrides layer over the dark base
+    """Win 7: living tokens, dark base + light overrides (cascade)."""
     surfaces = ("--bg", "--bg2")
-    for tokens in (dark, light):
-        ember_text = tokens.get("--ember-strong", tokens["--ember"])
-        merged = dict(tokens)
-        merged["--ember"] = ember_text
-        _assert_pairs(merged, tokens, surfaces,
-                      ("--ink", "--ink2", "--ember"),
-                      ("--ember-ink", "--ember"))
+    for light in (False, True):
+        tokens = _living_theme(light)
+        ember_text = ("--ember-strong" if "--ember-strong" in tokens
+                      else "--ember")
+        warn_text = ("--warn-strong" if "--warn-strong" in tokens
+                     else "--warn")
+        for key in ("--ink", "--ink2", "--ink3", ember_text, warn_text):
+            for surf in surfaces:
+                ratio = _pair(tokens, key, surf, surf)
+                assert ratio >= 4.5, (light, key, surf, ratio)
+        ratio = _pair(tokens, "--ember-ink", "--ember", "--bg")
+        assert ratio >= 4.5, (light, "ember button", ratio)
+    # Wiring: the break-phase state text uses the strong variant.
+    i = LIVING_CSS.index('#lv-orb[data-phase="break"] #lv-orb-state')
+    assert "var(--warn-strong" in LIVING_CSS[i:i + 120]
 
 
 def test_contrast_spot_fix_is_smallest_same_hue_change():

@@ -47,13 +47,22 @@ body.living [data-tnum] {
   font-variant-numeric: tabular-nums;
 }
 
-/* reduced motion: first-class, not an afterthought */
+/* reduced motion: first-class, not an afterthought.
+   Roadmap 1.15 repair: `body.living *` matches descendants only, so
+   the body's OWN ::before/::after (the 18s lv-drift wash) escaped
+   this rule and kept animating forever; both are named explicitly.
+   animation-delay is zeroed too, so delayed entrances don't sit in
+   their hidden `from` state and then snap. */
 @media (prefers-reduced-motion: reduce) {
+  body.living,
+  body.living::before,
+  body.living::after,
   body.living *,
   body.living *::before,
   body.living *::after {
     animation-duration: .01ms !important;
     animation-iteration-count: 1 !important;
+    animation-delay: 0s !important;
     transition-duration: .01ms !important;
   }
 }
@@ -630,7 +639,9 @@ html[data-theme="light"] body.living {
   --bg1: #f2ebdb;
   --ink: #211a12;
   --ink2: rgba(33,26,18,.72);
-  --ink3: rgba(33,26,18,.52);
+  /* Roadmap 1.15 repair: .52 alpha was 3.37-3.46:1 as 13-15px meta
+     text (cal hints, stale notices); .62 reaches 4.54:1 or better. */
+  --ink3: rgba(33,26,18,.62);
   --line: rgba(33,26,18,.14);
   --glass: rgba(255,255,255,.62);
   --ember: #bd7c1b;
@@ -640,6 +651,10 @@ html[data-theme="light"] body.living {
   --ember-strong: #905f15;
   --ember-deep: #9c6110;
   --warn: #a86e12;
+  /* Roadmap 1.15 repair: --warn as the break-phase state TEXT was
+     3.97/3.61:1 on paper; the stroke keeps --warn, text steps darker
+     (5.16/4.69:1). Dark keeps --warn itself (10.78:1) via fallback. */
+  --warn-strong: #8f5e0b;
 }
 @media (prefers-color-scheme: light) {
   html:not([data-theme]) body.living {
@@ -649,13 +664,14 @@ html[data-theme="light"] body.living {
     --bg1: #f2ebdb;
     --ink: #211a12;
     --ink2: rgba(33,26,18,.72);
-    --ink3: rgba(33,26,18,.52);
+    --ink3: rgba(33,26,18,.62);
     --line: rgba(33,26,18,.14);
     --glass: rgba(255,255,255,.62);
     --ember: #bd7c1b;
     --ember-strong: #905f15;
     --ember-deep: #9c6110;
     --warn: #a86e12;
+    --warn-strong: #8f5e0b;
   }
 }
 /* On paper the frosted surfaces need a soft shadow for definition. */
@@ -1091,7 +1107,7 @@ html[data-theme="light"] body.living .lv-nav {
   background: radial-gradient(circle, rgba(245,181,68,.22) 0%,
               rgba(245,181,68,.07) 45%, transparent 68%);
 }
-#lv-orb[data-phase="break"] #lv-orb-state { color: var(--warn); }
+#lv-orb[data-phase="break"] #lv-orb-state { color: var(--warn-strong, var(--warn)); }
 /* ---- time-up: the orb asks for attention, gently ---- */
 #lv-orb.lv-done #lv-orb-time {
   animation: lv-done-pulse 2s ease-in-out infinite;

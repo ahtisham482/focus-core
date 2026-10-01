@@ -1450,10 +1450,18 @@ def json_dumps(payload):
 # ------------------------------------------------ Phase 10: invoicing ---
 
 def _invoice_status_badge(status):
-    colors = {"draft": "var(--ink-faint)", "sent": "var(--accent)",
-              "paid": "var(--success)", "void": "var(--danger)"}
-    return ("<span class='pill' style='background:%s'>%s</span>"
-            % (colors.get(status, "var(--ink-faint)"), escape(status.upper())))
+    # Roadmap 1.15 repair: (background, foreground) pairs, each >=
+    # 4.5:1 in both themes. White on --ink-faint (draft) was 3.73 /
+    # 3.84:1 and white on --accent (sent) was 3.46 / 2.01:1; sent now
+    # uses the button pairing --ink-on-accent on --accent (5.30 /
+    # 9.12:1) and draft the neutral badge treatment (muted on sunken).
+    colors = {"draft": ("var(--bg-sunken)", "var(--ink-muted)"),
+              "sent": ("var(--accent)", "var(--ink-on-accent)"),
+              "paid": ("var(--success)", "#fff"),
+              "void": ("var(--danger)", "#fff")}
+    bg, fg = colors.get(status, ("var(--bg-sunken)", "var(--ink-muted)"))
+    return ("<span class='pill' style='background:%s;color:%s'>%s</span>"
+            % (bg, fg, escape(status.upper())))
 
 
 def _invoice_detail_body(detail):
