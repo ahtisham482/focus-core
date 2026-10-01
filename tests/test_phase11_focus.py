@@ -291,7 +291,10 @@ def test_peak_escalation_in_snapshot_zero_sqlite(tmp_path, monkeypatch):
 
 def test_no_peak_no_escalation(tmp_path):
     db = str(tmp_path / "p.db")
-    chronotype.set_window("00:00", "00:01", db_path=db)
+    start = datetime.now() + timedelta(hours=3)
+    end = start + timedelta(minutes=1)
+    chronotype.set_window(
+        start.strftime("%H:%M"), end.strftime("%H:%M"), db_path=db)
     snap = shield._build_snapshot(db)
     assert snap.force_hardcore is False
 
