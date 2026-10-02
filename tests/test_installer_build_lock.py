@@ -728,3 +728,22 @@ def test_run_launch_entries_run_as_original_user():
     assert len(launch_lines) == 2
     for ln in launch_lines:
         assert "runasoriginaluser" in ln, ln
+
+
+def test_machine_install_step_uses_start_process_not_call_operator():
+    # CI trap (2026-10-02): the machine-installer job used
+    # `& $exe.FullName` + $LASTEXITCODE. The call operator can return
+    # while Inno Setup is still starting, leaving $LASTEXITCODE empty
+    # ($null -ne 0 is $true), so the step failed even though the
+    # installer was fine. The per-user smoke job learned this on
+    # 2026-09-29; the machine job must use the same Start-Process
+    # -PassThru + HasExited poll + ExitCode pattern.
+    workflow = (ROOT / ".github" / "workflows" / "installer-smoke.yml").read_text()
+    machine_step = workflow.split("Silent-install the machine flavor")[1].split(
+        "- name: Upload machine install log")[0]
+    assert "& $exe.FullName" not in machine_step
+    assert "$LASTEXITCODE -ne 0" not in machine_step
+    assert "Start-Process" in machine_step
+    assert "-PassThru" in machine_step
+    assert "HasExited" in machine_step
+    assert "ExitCode" in machine_step

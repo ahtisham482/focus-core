@@ -723,15 +723,43 @@ jobs:
       - name: Silent-install the machine flavor
         # The documented per-machine install command
         # (docs/enterprise-deploy.md), run as IT would.
+        # Uses Start-Process -PassThru, NOT `& $exe` + $LASTEXITCODE:
+        # the call operator can return while Setup is still starting,
+        # leaving $LASTEXITCODE empty ($null -ne 0 is $true) -- the same
+        # trap the per-user smoke job hit on 2026-09-29.
         timeout-minutes: 15
         shell: pwsh
         run: |
           $ErrorActionPreference = 'Stop'
           $exe = Get-ChildItem installer\FocusCore-Setup-*-machine.exe |
                  Select-Object -First 1
-          & $exe.FullName /VERYSILENT /SUPPRESSMSGBOXES /NORESTART `
-            /LOG="$env:TEMP\FocusCore-machine-install.log"
-          if ($LASTEXITCODE -ne 0) { throw "machine install failed: $LASTEXITCODE" }
+          if (-not $exe) { throw "No -machine installer exe found" }
+          $log = "$env:RUNNER_TEMP\machine-install.log"
+          $proc = Start-Process -FilePath $exe.FullName `
+                    -ArgumentList "/VERYSILENT", "/SUPPRESSMSGBOXES", `
+                      "/NORESTART", "/LOG=$log" `
+                    -PassThru
+          $deadline = (Get-Date).AddMinutes(10)
+          while (-not $proc.HasExited) {
+            if ((Get-Date) -gt $deadline) {
+              throw "machine installer hung (setup.exe never exited)"
+            }
+            Start-Sleep -Seconds 5
+          }
+          if ($proc.ExitCode -ne 0) {
+            throw "Machine installer exited with code $($proc.ExitCode)"
+          }
+          # Belt and braces: the all-users desktop icon proves Setup
+          # really finished writing files, not just that its bootstrap
+          # process exited.
+          $lnk = "C:\Users\Public\Desktop\Focus Core.lnk"
+          $deadline = (Get-Date).AddSeconds(300)
+          while ((Get-Date) -lt $deadline) {
+            $stillRunning = Get-Process -ErrorAction SilentlyContinue |
+              Where-Object { $_.ProcessName -like "FocusCore-Setup*" }
+            if ((-not $stillRunning) -and (Test-Path $lnk)) { break }
+            Start-Sleep -Seconds 5
+          }
           if (-not (Test-Path "C:\Program Files\Focus Core\python\pythonw.exe")) {
             throw "machine install did not land in {autopf}"
           }
@@ -739,6 +767,33 @@ jobs:
                  "{FAFD1C6B-54C9-4A1A-AD3C-8BE1DD383D28}_is1"
           if (-not (Test-Path $key)) { throw "HKLM uninstall key missing" }
           Write-Host "Machine install OK: Program Files + HKLM key"
+          # The silent [Run] entry auto-launches the app (with
+          # runasoriginaluser after the 2.6 repair). Prove it fired --
+          # this is the live-Windows check of that repair -- then stop
+          # that copy so the uninstall step starts clean.
+          $launched = $null
+          $deadline = (Get-Date).AddSeconds(60)
+          while (-not $launched -and (Get-Date) -lt $deadline) {
+            $launched = Get-CimInstance Win32_Process `
+                           -Filter "Name = 'pythonw.exe'" |
+              Where-Object { $_.CommandLine -like "*focuscore.launcher*" }
+            if (-not $launched) { Start-Sleep -Seconds 2 }
+          }
+          if (-not $launched) {
+            throw "machine silent install did not auto-launch the app"
+          }
+          $launched | ForEach-Object {
+            Stop-Process -Id $_.ProcessId -Force -ErrorAction SilentlyContinue
+          }
+          Write-Host "Auto-launch verified; app stopped"
+
+      - name: Upload machine install log on failure
+        if: failure() || cancelled()
+        uses: actions/upload-artifact@v4
+        with:
+          name: machine-install-log
+          path: ${{ runner.temp }}/machine-install.log
+          if-no-files-found: warn
 
       - name: Silent-uninstall the machine flavor
         timeout-minutes: 10
