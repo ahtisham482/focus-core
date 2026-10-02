@@ -288,7 +288,7 @@ def test_update_page_refresh_forces_check_when_toggle_off(dash, urlopen_spy,
     monkeypatch.setattr(updater_mod, "read_cached_check", lambda: None)
     called = []
 
-    def _latest(repo):
+    def _latest(repo, flavor="user"):
         called.append(repo)
         return ("1.0.0", "FocusCore-Setup-1.0.0.exe", "u", 1, "c")
 

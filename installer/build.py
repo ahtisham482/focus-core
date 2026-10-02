@@ -243,6 +243,12 @@ def main():
                              "bootstrapper. Compile the .iss with "
                              "/DWebView2Offline to match; the setup exe is "
                              "then named FocusCore-Setup-<version>-offline.exe")
+    parser.add_argument("--per-machine", action="store_true",
+                        help="Machine flavor: stamp flavor=machine in "
+                             "update-info.json (the updater then picks the "
+                             "-machine installer). Compile the .iss with "
+                             "/DPerMachine to match; the setup exe is then "
+                             "named FocusCore-Setup-<version>-machine.exe")
     args = parser.parse_args()
 
     repo_root = Path(__file__).resolve().parent.parent
@@ -294,12 +300,17 @@ def main():
 
     generate_third_party_licenses(staging, python_dir, pyver)
 
-    # Stamp the release source + version so installed copies can check
-    # GitHub Releases for one-click updates (focuscore/updater.py).
+    # Stamp the release source + version + installer flavor so installed
+    # copies can check GitHub Releases for one-click updates
+    # (focuscore/updater.py) and pick the installer matching their own
+    # flavor (Roadmap 2.6: a per-machine install must never download the
+    # per-user setup exe).
     if args.repo:
-        info = {"repo": args.repo, "version": args.version}
+        info = {"repo": args.repo, "version": args.version,
+                "flavor": "machine" if args.per_machine else "user"}
         (staging / "update-info.json").write_text(json.dumps(info) + "\n")
-        print("Wrote update-info.json (repo %s)" % args.repo)
+        print("Wrote update-info.json (repo %s, flavor %s)"
+              % (args.repo, info["flavor"]))
 
     if args.webview2_offline:
         download_verified(WEBVIEW2_STANDALONE_URL,

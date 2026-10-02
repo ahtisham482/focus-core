@@ -2,6 +2,7 @@
 
 import hashlib
 import importlib.util
+import json
 import re
 import subprocess
 import sys
@@ -578,3 +579,152 @@ def test_uninstall_wipe_prompt_is_interactive_only_and_runs_last():
     # reports on Setup only and does not gate uninstaller UI.
     assert "UninstallSilent" in iss
     assert "usPostUninstall" in iss
+
+
+# --------------------------------------- Roadmap 2.6: per-machine flavor --
+
+def _per_machine_blocks(iss):
+    """The PerMachine branch of every `#ifdef PerMachine` block
+    (up to `#else`/`#endif`, whichever comes first)."""
+    blocks = []
+    for chunk in iss.split("#ifdef PerMachine")[1:]:
+        branch = chunk.split("#else")[0].split("#endif")[0]
+        blocks.append(branch)
+    return blocks
+
+
+def test_permachine_flavor_is_admin_autopf():
+    iss = _iss()
+    assert "#ifdef PerMachine" in iss
+    assert "PrivilegesRequired=admin" in iss
+    assert r"{autopf}\Focus Core" in iss
+    # The user flavor keeps its non-admin defaults.
+    assert "PrivilegesRequired=lowest" in iss
+    assert r"{localappdata}\Programs\Focus Core" in iss
+
+
+def test_permachine_appid_is_distinct():
+    iss = _iss()
+    guids = re.findall(r"AppId=\{\{([^}]+)\}", iss)
+    assert len(guids) == 2, "expected a user and a machine AppId"
+    assert guids[0] != guids[1]
+    # The user flavor keeps its long-standing identity.
+    assert "C7A3F2E1-8B4D-4F6A-9E2C-1D5A7B3F9E2C4" in \
+        [g.upper() for g in guids]
+    # The machine flavor carries a well-formed GUID of its own.
+    machine = next(g for g in guids
+                   if g.upper() != "C7A3F2E1-8B4D-4F6A-9E2C-1D5A7B3F9E2C4")
+    assert re.fullmatch(r"[0-9A-Fa-f]{8}(-[0-9A-Fa-f]{4}){3}-[0-9A-Fa-f]{12}",
+                        machine)
+
+
+def test_artifact_names_cover_all_four_flavor_combinations():
+    iss = _iss()
+    # Two orthogonal defines compose into four artifact names:
+    # FocusCore-Setup-<ver>[ -machine][ -offline].exe
+    assert "#ifdef WebView2Offline" in iss
+    assert '"-machine"' in iss and '"-offline"' in iss
+    assert ("OutputBaseFilename=FocusCore-Setup-{#AppVersion}"
+            "{#MachineSuffix}{#OfflineSuffix}") in iss
+
+
+def test_permachine_icons_use_all_users_locations():
+    iss = _iss()
+    assert r"{commonstartup}\Focus Core" in iss
+    # {autoprograms}/{autodesktop} auto-resolve per flavor; only the
+    # startup entry needs a per-flavor branch, and the machine branch
+    # must never use the per-user {userstartup}.
+    for block in _per_machine_blocks(iss):
+        assert "{userstartup}" not in block
+    assert "{userstartup}" in iss  # user flavor keeps it
+
+
+def test_permachine_uninstall_wipe_targets_machine_data_dir():
+    iss = _iss()
+    assert "MachineDataDir" in iss
+    assert "HKLM" in iss and "'DataDir'" in iss
+    assert r"{commonappdata}\Focus Core" in iss
+    # In an admin uninstaller {localappdata} resolves to the ADMIN's
+    # profile -- the wrong target. The machine wipe must never name a
+    # per-user profile folder.
+    code = iss.split("[Code]")[1]
+    for block in _per_machine_blocks(code):
+        assert "{localappdata}" not in block
+
+
+def test_build_per_machine_stamps_flavor_machine(tmp_path, monkeypatch):
+    _events, staging = _fake_main_run(
+        tmp_path, monkeypatch,
+        extra_argv=("--per-machine", "--repo", "someone/focus-core"))
+    info = json.loads(
+        (staging / "update-info.json").read_text(encoding="utf-8"))
+    assert info["flavor"] == "machine"
+    assert info["repo"] == "someone/focus-core"
+
+
+def test_build_default_stamps_flavor_user(tmp_path, monkeypatch):
+    _events, staging = _fake_main_run(
+        tmp_path, monkeypatch, extra_argv=("--repo", "someone/focus-core"))
+    info = json.loads(
+        (staging / "update-info.json").read_text(encoding="utf-8"))
+    assert info["flavor"] == "user"
+
+
+# ----------------- Roadmap 2.6 repair: registry paths (critic FAIL) ---
+
+def _reg_key_args(iss):
+    """(root, key) for every Reg* call in the iss [Code] section.
+
+    Pascal Script has no backslash escapes: a key is exactly the
+    characters written between the quotes.
+    """
+    code = iss.split("[Code]")[1]
+    return re.findall(
+        r"Reg(?:QueryStringValue|ValueExists|QueryDWordValue|DeleteKey"
+        r"|DeleteValue)\(\s*(HKLM|HKCU|HKCR|HKU)\s*,\s*'([^']*)'",
+        code)
+
+
+def test_iss_registry_keys_use_single_backslash():
+    # Critic FAIL (2.6): 'Software\\Focus Core' in Pascal Script is a
+    # LITERAL double backslash. The registry does not normalize '\\'
+    # the way file paths do, so such a key can never exist. Every
+    # registry key named in the iss must use single backslashes.
+    bad = [(root, key) for root, key in _reg_key_args(_iss())
+           if "\\\\" in key]
+    assert bad == [], f"doubled backslash in registry keys: {bad!r}"
+
+
+def test_machine_registry_key_matches_app():
+    from focuscore import config
+    # The app's machine-tier key, exactly as an IT admin creates it via
+    # regedit / Group Policy: single backslash.
+    assert config.MACHINE_REGISTRY_PATH == r"Software\Focus Core"
+    # ...and the uninstaller's MachineDataDir must read the SAME key,
+    # or the wipe and the app disagree about where IT's DataDir lives.
+    keys = [key for _root, key in _reg_key_args(_iss())
+            if "Focus Core" in key and "EdgeUpdate" not in key]
+    assert keys == [config.MACHINE_REGISTRY_PATH]
+
+
+def test_needs_webview2_keys_use_single_backslash():
+    # Same bug class (critic FAIL): the doubled keys never matched, so
+    # WebView2 was pointlessly reinstalled on every machine install.
+    iss = _iss()
+    guid = "{F3017226-FE2A-4295-8BDF-00C3A9A7E4C5}"
+    assert f"'SOFTWARE\\Microsoft\\EdgeUpdate\\Clients\\{guid}'" in iss
+    assert (f"'SOFTWARE\\WOW6432Node\\Microsoft\\EdgeUpdate\\Clients\\{guid}'"
+            in iss)
+
+
+def test_run_launch_entries_run_as_original_user():
+    # Critic FAIL (2.6): the machine installer runs elevated; without
+    # runasoriginaluser the app first-launches as admin/SYSTEM and
+    # %LOCALAPPDATA% resolves to the wrong profile.
+    iss = _iss()
+    run_section = iss.split("[Run]")[1].split("[UninstallDelete]")[0]
+    launch_lines = [ln for ln in run_section.splitlines()
+                    if "-m focuscore.launcher" in ln]
+    assert len(launch_lines) == 2
+    for ln in launch_lines:
+        assert "runasoriginaluser" in ln, ln

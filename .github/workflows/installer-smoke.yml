@@ -677,3 +677,113 @@ jobs:
           }
           Write-Host "Offline flavor OK: standalone $mb MB, no bootstrapper"
 
+
+  # Roadmap 2.6: the per-machine flavor (PrivilegesRequired=admin,
+  # {autopf} target, its own AppId). Runners are admin, so this job
+  # actually installs and uninstalls the flavor -- the only proof the
+  # admin flavor works end to end. It does NOT upload the artifact.
+  machine-installer:
+    runs-on: windows-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Install build deps
+        run: python installer/install_locked_pin.py Pillow
+
+      - name: Stage the app (machine flavor)
+        run: python installer/build.py --version "0.0.0.${{ github.run_number }}" --repo "${{ github.repository }}" --per-machine
+
+      - name: Install Inno Setup
+        run: choco install innosetup --no-progress -y
+
+      - name: Compile the machine installer
+        shell: pwsh
+        run: |
+          & "C:\Program Files (x86)\Inno Setup 6\ISCC.exe" `
+            installer\installer.iss /DAppVersion="0.0.0.${{ github.run_number }}" /DPerMachine
+          Get-ChildItem installer\FocusCore-Setup-*-machine.exe
+
+      - name: Assert machine artifact name
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $exe = Get-ChildItem installer\FocusCore-Setup-*-machine.exe |
+                 Select-Object -First 1
+          if (-not $exe) { throw "No -machine installer exe found" }
+          if ($exe.Name -like "*-offline*") {
+            throw "machine job must not build the offline flavor"
+          }
+          Write-Host "Machine installer: $($exe.Name)"
+
+      - name: Silent-install the machine flavor
+        # The documented per-machine install command
+        # (docs/enterprise-deploy.md), run as IT would.
+        timeout-minutes: 15
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $exe = Get-ChildItem installer\FocusCore-Setup-*-machine.exe |
+                 Select-Object -First 1
+          & $exe.FullName /VERYSILENT /SUPPRESSMSGBOXES /NORESTART `
+            /LOG="$env:TEMP\FocusCore-machine-install.log"
+          if ($LASTEXITCODE -ne 0) { throw "machine install failed: $LASTEXITCODE" }
+          if (-not (Test-Path "C:\Program Files\Focus Core\python\pythonw.exe")) {
+            throw "machine install did not land in {autopf}"
+          }
+          $key = "HKLM:\Software\Microsoft\Windows\CurrentVersion\Uninstall\" +
+                 "{FAFD1C6B-54C9-4A1A-AD3C-8BE1DD383D28}_is1"
+          if (-not (Test-Path $key)) { throw "HKLM uninstall key missing" }
+          Write-Host "Machine install OK: Program Files + HKLM key"
+
+      - name: Silent-uninstall the machine flavor
+        timeout-minutes: 10
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $app = "C:\Program Files\Focus Core"
+          $uninstaller = "$app\unins000.exe"
+          if (-not (Test-Path $uninstaller)) {
+            throw "Uninstaller missing: $uninstaller"
+          }
+          # Stop the running app first (the silent install launches it):
+          # the uninstaller cannot delete files a running process holds.
+          Get-CimInstance Win32_Process |
+            Where-Object { $_.ExecutablePath -and
+              $_.ExecutablePath.StartsWith($app) } |
+            ForEach-Object {
+              Stop-Process -Id $_.ProcessId -Force -ErrorAction SilentlyContinue
+            }
+          $deadline = (Get-Date).AddMinutes(2)
+          while ((Get-Date) -lt $deadline) {
+            $stillAlive = Get-CimInstance Win32_Process |
+              Where-Object { $_.ExecutablePath -and
+                $_.ExecutablePath.StartsWith($app) }
+            if (-not $stillAlive) { break }
+            Start-Sleep -Seconds 2
+          }
+          $log = "$env:RUNNER_TEMP\machine-uninstall.log"
+          Start-Process -FilePath $uninstaller `
+                    -ArgumentList "/VERYSILENT", "/SUPPRESSMSGBOXES", `
+                      "/NORESTART", "/LOG=$log"
+          # unins000.exe hands off to a temporary copy of itself, so
+          # wait for every unins* process to finish AND the program
+          # folder to actually disappear.
+          $deadline = (Get-Date).AddMinutes(5)
+          while ((Get-Date) -lt $deadline) {
+            $stillRunning = Get-Process -ErrorAction SilentlyContinue |
+              Where-Object { $_.ProcessName -like "unins*" }
+            if ((-not $stillRunning) -and (-not (Test-Path $app))) { break }
+            Start-Sleep -Seconds 5
+          }
+          if (Test-Path $app) {
+            throw "Silent uninstall finished but $app is still there"
+          }
+          $key = "HKLM:\Software\Microsoft\Windows\CurrentVersion\Uninstall\" +
+                 "{FAFD1C6B-54C9-4A1A-AD3C-8BE1DD383D28}_is1"
+          if (Test-Path $key) { throw "HKLM uninstall key remains" }
+          Write-Host "Machine uninstall OK"

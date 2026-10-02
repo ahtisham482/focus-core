@@ -72,7 +72,7 @@ def net(monkeypatch):
     """Fake the updater's release lookup; trap any real socket use."""
     calls = []
 
-    def fake_latest_release(repo):
+    def fake_latest_release(repo, flavor="user"):
         calls.append(("latest_release", repo))
         return ("v9.9.9", "FocusCore-Setup-9.9.9.exe",
                 "https://example.invalid/FocusCore-Setup-9.9.9.exe",

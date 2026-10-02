@@ -75,8 +75,8 @@ def net(monkeypatch):
     """
     calls = []
 
-    def fake_latest_release(repo):
-        calls.append(("latest_release", repo))
+    def fake_latest_release(repo, flavor="user"):
+        calls.append(("latest_release", repo, flavor))
         return ("v9.9.9", "FocusCore-Setup-9.9.9.exe",
                 "https://example.invalid/FocusCore-Setup-9.9.9.exe",
                 12345, "https://example.invalid/SHA256SUMS")
@@ -180,7 +180,7 @@ def test_positive_control_check_reaches_network_when_policy_off(
     assert result["status"] == "ok"
     assert result["update_available"] is True
     assert result["latest"] == "v9.9.9"
-    assert [name for name, _ in net] == ["latest_release"]
+    assert [name for name, *_ in net] == ["latest_release"]
 
 
 # --- the launcher background check --------------------------------------
@@ -199,7 +199,7 @@ def test_background_check_reaches_network_when_policy_off(
     monkeypatch.setattr(store, "DEFAULT_DB_PATH",
                         str(tmp_path / "bg.db"))
     launcher._background_update_check()
-    assert [name for name, _ in net] == ["latest_release"]
+    assert [name for name, *_ in net] == ["latest_release"]
 
 
 # --- the /update page ----------------------------------------------------
@@ -250,7 +250,7 @@ def test_positive_control_update_page_refresh_checks(
     resp = dash.get("/update?refresh=1")
     assert resp.status_code == 200
     assert "Version v9.9.9 is available" in resp.data.decode()
-    assert "latest_release" in [name for name, _ in net]
+    assert "latest_release" in [name for name, *_ in net]
 
 
 # --- /update/start --------------------------------------------------------
@@ -282,7 +282,7 @@ def test_update_start_proceeds_when_policy_off(dash, cfg, installed,
     assert len(calls["download"]) == 1
     assert len(calls["pending"]) == 1
     assert calls["pending"][0][1] == "v9.9.9"
-    assert "latest_release" in [name for name, _ in net]
+    assert "latest_release" in [name for name, *_ in net]
 
 
 # --- the download primitive ---------------------------------------------

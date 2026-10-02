@@ -3,9 +3,93 @@
 Notes for IT administrators who deploy Focus Core to managed Windows
 machines. This page covers silent install and uninstall, wrapping the
 installer for Intune, the **offline installer** for machines with no
-network, pinning the fleet to a fixed version by disabling the app's
-self-updater, and what happens to Focus Core if this project is ever
-abandoned.
+network, the **per-machine installer** for fleet installs, pinning the
+fleet to a fixed version by disabling the app's self-updater, and what
+happens to Focus Core if this project is ever abandoned.
+
+## Per-machine install (fleet)
+
+For fleets, IT installs once per machine instead of once per user.
+Ship **`FocusCore-Setup-<version>-machine.exe`** (built with the
+`/DPerMachine` Inno define):
+
+- Installs to `C:\Program Files\Focus Core` (`{autopf}`) with
+  `PrivilegesRequired=admin` — the installer asks for elevation.
+- Carries its own application identity (distinct AppId), so it never
+  fights a per-user install over "already installed" state. The two
+  flavors can even coexist on one machine.
+- Shortcuts and the optional startup entry go to the all-users
+  locations (`{autoprograms}`, `{autodesktop}`, `{commonstartup}`).
+- The machine and offline flavors compose:
+  `FocusCore-Setup-<version>-machine-offline.exe` bundles the full
+  WebView2 installer for air-gapped fleets.
+
+### Intune (System context)
+
+Wrap it exactly like the per-user installer (`.intunewin` via
+`IntuneWinAppUtil.exe`), then set:
+
+- **Install command:**
+  `FocusCore-Setup-<version>-machine.exe /VERYSILENT /SUPPRESSMSGBOXES /NORESTART /LOG="%TEMP%\FocusCore-install.log"`
+- **Uninstall command:**
+  `"C:\Program Files\Focus Core\unins000.exe" /VERYSILENT /SUPPRESSMSGBOXES /NORESTART`
+- **Install behavior:** System. (The 2.2 section above documents the
+  per-user installer with **Install behavior:** User — that stays
+  correct for the per-user file; use System only with the `-machine`
+  file.)
+- **Detection rule:** Rule type **Registry** — Key path
+  `HKEY_LOCAL_MACHINE\SOFTWARE\Microsoft\Windows\CurrentVersion\Uninstall\{FAFD1C6B-54C9-4A1A-AD3C-8BE1DD383D28}_is1`,
+  Value name `DisplayVersion`, detection method **String comparison**,
+  Operator **Equals**, Value `<version>`. (The per-user flavor's key
+  lives under `HKEY_CURRENT_USER` with its own AppId — the two never
+  collide.)
+- **First-launch token:** the machine installer runs elevated, but its
+  "start the app" entries use Inno's `runasoriginaluser`, so an
+  interactive install — or a one-click update, which shows a UAC
+  prompt — launches the app as the installing user, never as admin,
+  keeping `%LOCALAPPDATA%` on the right profile. Under Intune
+  **System** context there is no original-user token, so the flag is
+  ignored there: a silent System install may still first-launch the
+  app as SYSTEM, and it lands per-user only when a user actually
+  opens it. (The interactive "Launch Focus Core now" entry already
+  carries `skipifsilent`, so silent installs never offer it twice.)
+
+### Data-dir policy
+
+Default for **both** flavors: each user's data stays in their own
+`%LOCALAPPDATA%\Focus Core` — the correct Windows pattern (standard
+users cannot write to a shared folder without ACL surgery, so the
+installer never forces a machine data dir).
+
+To keep the fleet's data in one machine location instead, set the
+machine-tier override (Group Policy, SCCM, or Intune):
+
+- Key: `HKEY_LOCAL_MACHINE\Software\Focus Core`
+- Value: `DataDir` (string), e.g. `C:\ProgramData\Focus Core`
+
+The app reads this first in installed mode; make sure the folder
+grants the Users group write access. The uninstaller's data wipe
+(`/DELETEDATA`, Roadmap 2.4) follows the same rule in the machine
+flavor: it wipes the `DataDir` value when set, else
+`%PROGRAMDATA%\Focus Core` when it exists — and it never touches
+per-user profile folders (`C:\Users\*\AppData\Local\Focus Core` are
+IT's to wipe with their own tooling).
+
+### Updates on machine installs
+
+The one-click updater is flavor-aware: a machine install downloads
+the `-machine` setup exe, never the per-user one. Because the
+machine installer needs admin rights, applying the update shows a
+**UAC prompt** — that is the honest behavior (explicit elevation,
+not a silent privilege grab); the app never tries to auto-elevate.
+Fleets that manage updates centrally should pin the version instead
+(the machine policy below): with `updates_disabled` set, the app
+never checks, downloads, or applies anything.
+
+Honest status: the machine flavor compiles and its silent
+install/uninstall runs in CI on every push
+(`installer-smoke.yml`, job `machine-installer`); no customer fleet
+has deployed it yet — treat the first pilot group as the proof run.
 
 ## Install and uninstall silently
 

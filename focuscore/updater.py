@@ -1,7 +1,10 @@
 """One-click updates for installed copies (Sprint 2, Phase 3).
 
 Installed copies carry ``update-info.json`` (stamped by installer/build.py):
-``{"repo": "owner/name", "version": "1.4.0"}``. They check the GitHub
+``{"repo": "owner/name", "version": "1.4.0", "flavor": "user"}``.
+``flavor`` is ``"machine"`` for per-machine installs (Roadmap 2.6); the
+updater then picks the ``-machine`` setup exe from the release, never
+the per-user one. They check the GitHub
 Releases API for a newer version, download the new
 ``FocusCore-Setup-<ver>.exe``, make a safety backup, and hand off to the
 installer, which upgrades in place and reopens the app.
@@ -63,7 +66,13 @@ class UpdateError(Exception):
 
 
 def get_update_info():
-    """``{"repo": ..., "version": ...}`` or None for dev/portable copies."""
+    """``{"repo": ..., "version": ..., "flavor": ...}`` or None for
+    dev/portable copies.
+
+    ``flavor`` is ``"machine"`` for per-machine installs, ``"user"``
+    otherwise; installs stamped before Roadmap 2.6 have no flavor key
+    and read as ``"user"`` (they were all per-user).
+    """
     info_file = paths.APP_ROOT / UPDATE_INFO_NAME
     if not info_file.exists():
         return None
@@ -74,7 +83,8 @@ def get_update_info():
     if not isinstance(info, dict) or not info.get("repo") \
             or not info.get("version"):
         return None
-    return {"repo": info["repo"], "version": info["version"]}
+    return {"repo": info["repo"], "version": info["version"],
+            "flavor": info.get("flavor") or "user"}
 
 
 def parse_version(text):
@@ -110,15 +120,30 @@ def _http_get_json(url):
         return json.loads(resp.read().decode("utf-8"))
 
 
-def latest_release(repo):
+def _asset_flavor(name):
+    """``"machine"`` for per-machine installer assets, else ``"user"``.
+
+    Roadmap 2.6: the machine flavor's setup exe carries a ``-machine``
+    segment (``FocusCore-Setup-<ver>-machine[-offline].exe``); the
+    ``-offline`` segment is orthogonal and stays ``"user"``.
+    """
+    stem = name[:-4] if name.lower().endswith(".exe") else name
+    return "machine" if "machine" in stem.split("-") else "user"
+
+
+def latest_release(repo, flavor="user"):
     """``(tag, asset_name, asset_url, asset_size, checksums_url)``.
 
     ``checksums_url`` is the download URL of the release's ``SHA256SUMS``
     asset, or None when the release has none. The updater refuses to
     install from a release without one (fail closed).
 
+    Roadmap 2.6: ``flavor`` selects the installer matching this install
+    (``"machine"`` or ``"user"``) -- a per-machine install must never
+    download the per-user setup exe and end up with a second copy.
+
     Raises UpdateError when the API can't be reached, the repo is
-    private, or no installer asset is attached.
+    private, or no installer asset for this flavor is attached.
     """
     try:
         data = _http_get_json(API_URL.format(repo=repo))
@@ -146,11 +171,16 @@ def latest_release(repo):
         name = asset.get("name") or ""
         if name == CHECKSUMS_NAME:
             checksums_url = asset.get("browser_download_url")
-        elif name.startswith(INSTALLER_PREFIX) and name.endswith(".exe"):
+        elif name.startswith(INSTALLER_PREFIX) and name.endswith(".exe") \
+                and _asset_flavor(name) == flavor:
             installer = (data["tag_name"], name,
                          asset.get("browser_download_url"),
                          asset.get("size") or 0)
     if installer is None:
+        if flavor == "machine":
+            raise UpdateError(
+                "The newest release has no per-machine installer attached "
+                "yet.")
         raise UpdateError("The newest release has no installer attached yet.")
     return installer + (checksums_url,)
 
@@ -198,7 +228,7 @@ def check_for_update(force=False):
             return cached
     try:
         tag, asset_name, asset_url, asset_size, checksums_url = \
-            latest_release(info["repo"])
+            latest_release(info["repo"], flavor=info.get("flavor", "user"))
         result = {
             "status": "ok",
             "current": info["version"],
@@ -553,12 +583,19 @@ def clear_update_failure():
 def attempted_version_from_name(name):
     """Best-effort version from an installer file name.
 
-    Release installers are FocusCore-Setup-<version>.exe; anything else
-    falls back to the bare file stem (still names what ran).
+    Release installers are FocusCore-Setup-<version>[-machine][-offline].exe;
+    the flavor suffixes (Roadmap 2.6) are stripped so the version still
+    parses. Anything else falls back to the bare file stem (still names
+    what ran).
     """
     stem = name[:-4] if name.lower().endswith(".exe") else name
     if stem.startswith(INSTALLER_PREFIX):
         candidate = stem[len(INSTALLER_PREFIX):]
+        for suffix in ("-machine-offline", "-offline-machine",
+                       "-machine", "-offline"):
+            if candidate.endswith(suffix):
+                candidate = candidate[:-len(suffix)]
+                break
         if parse_version(candidate):
             return candidate
     return stem
@@ -577,6 +614,11 @@ def write_update_launcher(installer_path):
     way installer.iss launches it (``pythonw.exe -m
     focuscore.launcher``; roadmap 2.1) -- the app never just vanishes.
     The caller launches the bat (detached) and then quits the app.
+
+    Roadmap 2.6: for the machine flavor the bat runs the per-machine
+    installer, and Windows shows a UAC prompt -- the honest behavior
+    (explicit elevation). The app never tries to auto-elevate.
+
     Returns the bat path.
     """
     bat = Path(tempfile.gettempdir()) / (

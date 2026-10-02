@@ -63,7 +63,8 @@ def test_is_newer(current, latest, expected):
 def test_get_update_info_ok(app_root):
     write_update_info(app_root)
     assert updater.get_update_info() == {"repo": "someone/focus-core",
-                                        "version": "1.3.0"}
+                                        "version": "1.3.0",
+                                        "flavor": "user"}
 
 
 def test_get_update_info_missing_is_dev_copy(app_root):
@@ -450,3 +451,107 @@ def test_update_launcher_bat(tmp_path, monkeypatch):
     assert "FocusCore-Setup.exe" in text
     assert "/SILENT" in text
     assert "timeout" in text
+
+
+# --------------------------------------- Roadmap 2.6: flavor-aware updates --
+
+def test_get_update_info_surfaces_flavor_machine(app_root):
+    (app_root / "update-info.json").write_text(
+        json.dumps({"repo": "someone/focus-core", "version": "1.3.0",
+                    "flavor": "machine"}))
+    assert updater.get_update_info() == {"repo": "someone/focus-core",
+                                        "version": "1.3.0",
+                                        "flavor": "machine"}
+
+
+def test_get_update_info_defaults_flavor_user(app_root):
+    # Installs stamped before 2.6 have no flavor key: they are user
+    # installs and must keep updating exactly as before.
+    write_update_info(app_root)
+    assert updater.get_update_info()["flavor"] == "user"
+
+
+def _flavored_release():
+    return {"tag_name": "v1.4.0", "assets": [
+        {"name": "FocusCore-Setup-1.4.0.exe",
+         "browser_download_url": "https://example.com/setup-user.exe",
+         "size": 24200000},
+        {"name": "FocusCore-Setup-1.4.0-machine.exe",
+         "browser_download_url": "https://example.com/setup-machine.exe",
+         "size": 24300000},
+        {"name": "FocusCore-Setup-1.4.0-offline.exe",
+         "browser_download_url": "https://example.com/setup-offline.exe",
+         "size": 24200001},
+        {"name": "SHA256SUMS",
+         "browser_download_url": "https://example.com/SHA256SUMS"},
+    ]}
+
+
+def test_latest_release_picks_machine_asset_for_machine_flavor(monkeypatch):
+    monkeypatch.setattr(updater, "_http_get_json",
+                        lambda url: _flavored_release())
+    _tag, name, url, _size, _sums = updater.latest_release(
+        "someone/focus-core", flavor="machine")
+    assert name == "FocusCore-Setup-1.4.0-machine.exe"
+    assert url == "https://example.com/setup-machine.exe"
+
+
+def test_latest_release_picks_user_asset_for_user_flavor(monkeypatch):
+    monkeypatch.setattr(updater, "_http_get_json",
+                        lambda url: _flavored_release())
+    _tag, name, _url, _size, _sums = updater.latest_release(
+        "someone/focus-core", flavor="user")
+    # Never the machine installer for a user install (which of the
+    # two user assets wins is the pre-existing last-match order).
+    assert name in ("FocusCore-Setup-1.4.0.exe",
+                    "FocusCore-Setup-1.4.0-offline.exe")
+
+
+def test_latest_release_offline_asset_counts_as_user_flavor(monkeypatch):
+    payload = {"tag_name": "v1.4.0", "assets": [
+        {"name": "FocusCore-Setup-1.4.0-offline.exe",
+         "browser_download_url": "https://example.com/setup-offline.exe",
+         "size": 1},
+        {"name": "SHA256SUMS",
+         "browser_download_url": "https://example.com/SHA256SUMS"},
+    ]}
+    monkeypatch.setattr(updater, "_http_get_json", lambda url: payload)
+    _tag, name, _u, _s, _c = updater.latest_release(
+        "someone/focus-core", flavor="user")
+    assert name == "FocusCore-Setup-1.4.0-offline.exe"
+
+
+def test_latest_release_machine_flavor_without_machine_asset_raises(
+        monkeypatch):
+    payload = {"tag_name": "v1.4.0", "assets": [
+        {"name": "FocusCore-Setup-1.4.0.exe",
+         "browser_download_url": "https://example.com/setup.exe",
+         "size": 1},
+    ]}
+    monkeypatch.setattr(updater, "_http_get_json", lambda url: payload)
+    with pytest.raises(updater.UpdateError):
+        updater.latest_release("someone/focus-core", flavor="machine")
+
+
+def test_check_for_update_uses_machine_asset_for_machine_install(
+        monkeypatch, tmp_path):
+    monkeypatch.setattr(paths, "data_dir", lambda: tmp_path)
+    monkeypatch.setattr(
+        updater, "get_update_info",
+        lambda: {"repo": "r", "version": "1.3.0", "flavor": "machine"})
+    monkeypatch.setattr(updater, "_http_get_json",
+                        lambda url: _flavored_release())
+    result = updater.check_for_update(force=True)
+    assert result["status"] == "ok"
+    assert result["asset"]["name"] == "FocusCore-Setup-1.4.0-machine.exe"
+
+
+@pytest.mark.parametrize("name,expected", [
+    ("FocusCore-Setup-1.4.0.exe", "1.4.0"),
+    ("FocusCore-Setup-1.4.0-machine.exe", "1.4.0"),
+    ("FocusCore-Setup-1.4.0-offline.exe", "1.4.0"),
+    ("FocusCore-Setup-1.4.0-machine-offline.exe", "1.4.0"),
+    ("weird-name.exe", "weird-name"),
+])
+def test_attempted_version_from_name_strips_flavor_suffixes(name, expected):
+    assert updater.attempted_version_from_name(name) == expected
