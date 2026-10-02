@@ -12,7 +12,7 @@ promise to its test or manual check.
 
 - **Your data is processed on your own computer only.** The developer
   never receives, aggregates, or sells user data. Focus Core has no
-  accounts, no analytics, no telemetry, no crash reporting, and no ads.
+  accounts, no analytics, no telemetry, no automatic crash reporting, and no ads.
   Nothing is sold or shared. (PRIVACY.md, "What Focus Core never does";
   registered in docs/claims.md with its tests.)
 - **The complete list of internet uses is three** — the same three

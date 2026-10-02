@@ -236,34 +236,44 @@ def _no_window_kwargs():
     return {}
 
 
-def start_server(port=PORT):
+def start_server(port=PORT, _tray_spawned=True):
     """Start the dashboard server quietly in the background.
 
     Returns the Popen handle so the owner (tray) can stop it later.
-    The child is flagged FOCUSCORE_DASHBOARD_CHILD=1: the tray owns
-    the Roadmap 2.5 crash-report session marker, and a second owner
-    would mistake the fresh marker for a leftover on every launch.
+    _tray_spawned=True (default): the tray owns the Roadmap 2.5
+    crash-report session marker, so the child is flagged
+    FOCUSCORE_DASHBOARD_CHILD=1 and skips the marker logic -- a second
+    owner would mistake the fresh marker for a leftover on every
+    launch (critic B1). _tray_spawned=False: the no-tray fallback, where
+    nobody else owns a session; the child is left unflagged and owns
+    the marker itself (Merlin follow-up).
     """
+    env = {**os.environ}
+    if _tray_spawned:
+        env["FOCUSCORE_DASHBOARD_CHILD"] = "1"
     return subprocess.Popen(
         [sys.executable, "-m", "dashboard.app", "--port", str(port)],
         cwd=str(PROJECT_ROOT),
-        env={**os.environ, "FOCUSCORE_DASHBOARD_CHILD": "1"},
+        env=env,
         stdout=subprocess.DEVNULL,
         stderr=subprocess.DEVNULL,
         **_no_window_kwargs())
 
 
-def ensure_server():
+def ensure_server(_tray_spawned=True):
     """Make sure the server is up. Returns (process_or_None, already_running).
 
     process is the Popen handle when WE started the server, else None.
     The chosen port is remembered (see app_url()) so the tray and the
     app window open the server that is actually running.
+    _tray_spawned is passed through to start_server (see above): the
+    no-tray fallback passes False so its dashboard owns the 2.5
+    crash-report session.
     """
     port, already_running = _select_port()
     if already_running:
         return None, True
-    proc = start_server(port)
+    proc = start_server(port, _tray_spawned=_tray_spawned)
     if not wait_for_port(port=port):
         try:
             proc.terminate()
@@ -406,7 +416,9 @@ def main():
         print("Focus Core: tray unavailable (%s); using simple mode." % exc)
 
     try:
-        ensure_server()
+        # No tray: the spawned dashboard is NOT flagged as a child, so
+        # it owns the Roadmap 2.5 crash-report session marker itself.
+        ensure_server(_tray_spawned=False)
     except RuntimeError as exc:
         _tell_user(str(exc))
         return

@@ -376,11 +376,15 @@ def test_dashboard_children_are_flagged_at_spawn():
     start = launcher_src.index("def start_server")
     end = launcher_src.index("\ndef ", start + 1)
     spawn_block = launcher_src[start:end]
-    # Every dashboard child -- first spawn and the tray's mid-session
-    # respawn alike -- funnels through launcher.start_server and must
-    # be flagged as a child (critic B1).
+    # Tray-spawned dashboard children -- first spawn and the tray's
+    # mid-session respawn alike -- funnel through launcher.start_server
+    # with the default _tray_spawned=True and must be flagged as a
+    # child (critic B1). The no-tray fallback instead passes
+    # _tray_spawned=False so its dashboard owns the session itself
+    # (see test_launcher_fallback_child_owns_session).
     assert "dashboard.app" in spawn_block
-    assert '"FOCUSCORE_DASHBOARD_CHILD": "1"' in spawn_block
+    assert "_tray_spawned=True" in spawn_block
+    assert "FOCUSCORE_DASHBOARD_CHILD" in spawn_block
     assert "env" in spawn_block
     crash_src = (REPO_ROOT / "focuscore" / "crashreport.py").read_text(
         encoding="utf-8")
@@ -399,3 +403,74 @@ def test_report_files_pruned_to_newest_five(data_dir):
     assert "crash-report-20200106-000000.txt" in saved
     newest = (data_dir / saved[-1]).read_text(encoding="utf-8")
     assert "RuntimeError" in newest
+
+
+# --------------------------------- Merlin follow-up: fallback ownership --
+
+def _spawn_env(monkeypatch, **kwargs):
+    """Run launcher.ensure_server with a fake Popen; return the child env."""
+    from focuscore import launcher
+    captured = {}
+
+    class _Proc:
+        def terminate(self):
+            pass
+
+    def fake_popen(cmd, **kw):
+        captured.update(kw.get("env", {}))
+        return _Proc()
+
+    monkeypatch.setattr(launcher.subprocess, "Popen", fake_popen)
+    monkeypatch.setattr(launcher, "_select_port", lambda: (54321, False))
+    monkeypatch.setattr(launcher, "wait_for_port", lambda port: True)
+    monkeypatch.setattr(launcher, "is_focus_core", lambda port: True)
+    launcher.ensure_server(**kwargs)
+    return captured
+
+
+def test_launcher_fallback_child_owns_session(monkeypatch):
+    # No-tray fallback: the spawned dashboard must NOT carry the child
+    # flag, so it owns the crash-report session marker itself --
+    # otherwise nobody owns it and fallback mode never offers.
+    env = _spawn_env(monkeypatch, _tray_spawned=False)
+    assert "FOCUSCORE_DASHBOARD_CHILD" not in env
+
+
+def test_launcher_tray_spawn_stays_flagged(monkeypatch):
+    # The tray path (default): still flagged, the tray owns the marker.
+    env = _spawn_env(monkeypatch)
+    assert env.get("FOCUSCORE_DASHBOARD_CHILD") == "1"
+
+
+def test_begin_session_live_owner_is_not_a_leftover(data_dir):
+    # A marker whose owner pid is still alive is someone else's LIVE
+    # session (e.g. a fallback dashboard still running when the tray
+    # starts later): no offer, marker untouched, hooks only.
+    (data_dir / "session-mark.json").write_text(
+        json.dumps({"pid": os.getpid(),
+                    "started_at": "2026-10-02T10:00:00+00:00",
+                    "version": __version__}), encoding="utf-8")
+    crashreport.begin_session()
+    assert crashreport.pending_report() is None
+    assert not list(data_dir.glob("crash-report-*.txt"))
+    payload = json.loads(
+        (data_dir / "session-mark.json").read_text(encoding="utf-8"))
+    assert payload["pid"] == os.getpid()  # untouched, not stolen
+
+
+def test_begin_session_dead_owner_creates_offer_and_retakes(data_dir):
+    # Tray owned the marker, then died: the fallback child must turn
+    # the leftover into the one-time offer and take ownership itself.
+    _plant_leftover_marker(data_dir, crash_type="ValueError")  # pid 4242
+    crashreport.begin_session()
+    assert "ValueError" in (crashreport.pending_report() or "")
+    payload = json.loads(
+        (data_dir / "session-mark.json").read_text(encoding="utf-8"))
+    assert payload["pid"] == os.getpid()
+
+
+def test_conduct_no_absolute_no_crash_reporting_claim():
+    # docs/CONDUCT.md must not promise absolute "no crash reporting"
+    # while 2.5 offers an opt-in report (qualified PRIVACY.md wording).
+    text = (REPO_ROOT / "docs" / "CONDUCT.md").read_text(encoding="utf-8")
+    assert "no crash reporting" not in text.lower()

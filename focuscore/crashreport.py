@@ -17,8 +17,10 @@ it honest:
   never break app startup, shutdown, or the home page.
 
 Session bookkeeping: begin_session() runs at each app start, but
-exactly ONE process per launch owns the session marker -- the tray, or
-the dashboard when it runs standalone. The tray spawns the dashboard
+exactly ONE process per launch owns the session marker -- the tray,
+the dashboard when it runs standalone, or a dashboard child spawned
+by the no-tray launcher fallback (left unflagged for exactly this
+reason). The tray spawns the dashboard
 as a child process carrying FOCUSCORE_DASHBOARD_CHILD=1; a child skips
 the marker/pending logic entirely (it would otherwise read the owner's
 fresh marker as a leftover and invent an offer on every clean launch --
@@ -124,6 +126,25 @@ def previous_run_unclean():
         return (_folder() / MARKER_NAME).is_file()
     except Exception:  # noqa: BLE001 -- a broken check reads as "clean"
         return False
+
+
+def _pid_alive(pid):
+    """Best-effort: is this pid a running process right now?
+
+    Used so a live session owned by another process (e.g. a no-tray
+    fallback dashboard still running when the tray starts later) is
+    never mistaken for a leftover. Unknown errors fall back to False,
+    i.e. the old treat-as-leftover behaviour.
+    """
+    try:
+        os.kill(pid, 0)
+    except ProcessLookupError:
+        return False
+    except PermissionError:
+        return True  # exists; we just may not signal it
+    except OSError:
+        return False
+    return True
 
 
 # --------------------------------------------------- exception capture --
@@ -267,10 +288,14 @@ def begin_session():
     carries FOCUSCORE_DASHBOARD_CHILD and skips the marker/pending
     logic -- it only installs the exception hooks, so a child crash
     still records its type for the owner's next start (critic B1).
-    The owner reads a leftover marker from the previous run, turns it
-    into a one-time offer, consumes the recorded exception type,
-    writes this session's marker (cleared on clean exit via atexit),
-    and installs the exception-type hooks.
+    A dashboard spawned by the no-tray launcher fallback is NOT
+    flagged, so it owns the session itself. The owner reads a leftover
+    marker from the previous run, turns it into a one-time offer,
+    consumes the recorded exception type, writes this session's marker
+    (cleared on clean exit via atexit), and installs the
+    exception-type hooks. A marker whose owner pid is still alive is
+    someone else's live session, not a leftover: hooks only, the
+    marker is left untouched and no offer is invented.
     """
     try:
         if os.environ.get(CHILD_ENV):
@@ -282,6 +307,13 @@ def begin_session():
         except Exception:  # noqa: BLE001 -- unreadable record = no record
             crash = None
         if previous_run_unclean():
+            owner = (_read_json(_folder() / MARKER_NAME) or {}).get("pid")
+            if (isinstance(owner, int) and not isinstance(owner, bool)
+                    and owner > 0 and _pid_alive(owner)):
+                # Live session owned by another process -- not ours to
+                # claim and not a crash. Hooks only (Merlin follow-up).
+                install_crash_hooks()
+                return
             _create_pending(crash)
         _unlink(_folder() / CRASH_NAME)  # consumed: one incident, one offer
         mark_session_start()

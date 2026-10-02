@@ -165,7 +165,7 @@ def _record_start_server(monkeypatch, proc=None):
     """Replace launcher.start_server with a recorder; returns calls."""
     calls = []
 
-    def fake_start_server(port=launcher.PORT):
+    def fake_start_server(port=launcher.PORT, _tray_spawned=True):
         calls.append(port)
         return proc if proc is not None else _FakeProc()
 
@@ -579,14 +579,16 @@ def test_launcher_main_first_instance_simple_mode(monkeypatch):
     monkeypatch.setattr(tray, "available", lambda: False)
     monkeypatch.setattr(
         launcher, "ensure_server",
-        lambda: order.append("server") or (None, True))
+        lambda _tray_spawned=True: order.append(("server", _tray_spawned))
+        or (None, True))
     monkeypatch.setattr(launcher, "maybe_backup", lambda: None)
     monkeypatch.setattr(
         launcher, "open_app_window",
         lambda: order.append("window") or "browser")
     assert launcher.main() is None
     assert order[0] == "mutex"  # the guard runs before everything
-    assert "server" in order and "window" in order
+    assert ("server", False) in order  # simple mode: unflagged child owns 2.5
+    assert "window" in order
 
 
 def test_tray_run_second_instance_starts_nothing(monkeypatch, tmp_path):
