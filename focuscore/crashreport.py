@@ -128,6 +128,33 @@ def previous_run_unclean():
         return False
 
 
+def _pid_alive_windows(pid):
+    """Process-existence check for Windows, without signals.
+
+    os.kill(pid, 0) -- the Unix existence check -- must NEVER be used
+    here: on Windows, 0 == CTRL_C_EVENT, so CPython's os.kill sends a
+    real Ctrl+C to the target process instead of checking it. (CI
+    2026-10-02: this interrupted the pytest run itself.) OpenProcess +
+    GetExitCodeProcess checks existence with no signal involved.
+    """
+    try:
+        import ctypes
+        kernel32 = ctypes.windll.kernel32
+        handle = kernel32.OpenProcess(0x1000, False, pid)  # QUERY_LIMITED
+        if not handle:
+            return False
+        try:
+            exit_code = ctypes.wintypes.DWORD()
+            if not kernel32.GetExitCodeProcess(
+                    handle, ctypes.byref(exit_code)):
+                return False
+            return exit_code.value == 259  # STILL_ACTIVE
+        finally:
+            kernel32.CloseHandle(handle)
+    except Exception:  # noqa: BLE001 -- unknown -> old treat-as-leftover
+        return False
+
+
 def _pid_alive(pid):
     """Best-effort: is this pid a running process right now?
 
@@ -136,6 +163,8 @@ def _pid_alive(pid):
     never mistaken for a leftover. Unknown errors fall back to False,
     i.e. the old treat-as-leftover behaviour.
     """
+    if os.name == "nt":
+        return _pid_alive_windows(pid)
     try:
         os.kill(pid, 0)
     except ProcessLookupError:

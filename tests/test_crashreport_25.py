@@ -474,3 +474,15 @@ def test_conduct_no_absolute_no_crash_reporting_claim():
     # while 2.5 offers an opt-in report (qualified PRIVACY.md wording).
     text = (REPO_ROOT / "docs" / "CONDUCT.md").read_text(encoding="utf-8")
     assert "no crash reporting" not in text.lower()
+
+
+def test_pid_alive_current_process_without_signalling():
+    # Must be True and must not signal anything. On Windows,
+    # os.kill(pid, 0) sends CTRL_C_EVENT (0 == CTRL_C_EVENT), which
+    # interrupted CI's own pytest run on 2026-10-02 -- so the Windows
+    # branch uses OpenProcess, never os.kill.
+    assert crashreport._pid_alive(os.getpid()) is True
+
+
+def test_pid_alive_nonexistent_pid_is_false():
+    assert crashreport._pid_alive(999999999) is False
