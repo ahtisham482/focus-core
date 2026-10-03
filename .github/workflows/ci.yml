@@ -35,6 +35,17 @@ jobs:
       # .ruff-baseline. Never raise the count to pass a failing run.
       - name: Ruff ratchet (full default ruleset can only shrink)
         run: python installer/check_ruff_ratchet.py
+      # Mypy ratchet (roadmap 3.4): NON-BLOCKING. mypy findings never
+      # fail CI on their own -- this step runs only the ratchet, which
+      # fails when the error count on the annotated modules
+      # (focuscore/store.py + focuscore/money.py) rises above the
+      # committed .mypy-baseline. Refresh after an intentional cleanup
+      # with `python installer/check_mypy_ratchet.py --refresh` and
+      # commit .mypy-baseline. Never raise the count to pass a run.
+      - name: Install mypy (pinned, roadmap 3.4; CI-only tool)
+        run: pip install mypy==2.4.0
+      - name: Mypy ratchet (annotated-module errors can only shrink)
+        run: python installer/check_mypy_ratchet.py
 
   pip-audit:
     name: pip-audit (dependency vulnerabilities)

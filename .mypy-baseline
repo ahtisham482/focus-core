@@ -1,0 +1,4 @@
+# Mypy ratchet baseline (roadmap 3.4). See
+# installer/check_mypy_ratchet.py for the refresh procedure.
+mypy_version: 2.4.0
+count: 0

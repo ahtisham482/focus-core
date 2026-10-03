@@ -4,7 +4,7 @@ money is NEVER a float. Rates and amounts are integer minor units
 
 from decimal import Decimal, InvalidOperation, ROUND_HALF_UP
 
-CURRENCY_SYMBOLS = {
+CURRENCY_SYMBOLS: dict[str, str] = {
     "USD": "$",
     "EUR": "\u20ac",
     "GBP": "\u00a3",
@@ -13,7 +13,7 @@ CURRENCY_SYMBOLS = {
 }
 
 
-def format_minor(amount_minor, currency="USD"):
+def format_minor(amount_minor: int | None, currency: str = "USD") -> str:
     """Format integer minor units as a money string, e.g. 950000 -> $9,500.00."""
     if amount_minor is None:
         return "\u2014"
@@ -25,7 +25,9 @@ def format_minor(amount_minor, currency="USD"):
     return ("-" + text) if negative else text
 
 
-def amount_minor_for(duration_seconds, rate_minor):
+def amount_minor_for(
+    duration_seconds: int | None, rate_minor: int | None
+) -> int | None:
     """Cost of duration_seconds at rate_minor (per hour), half-up to 1 minor unit."""
     if duration_seconds is None or rate_minor is None:
         return None
@@ -38,7 +40,7 @@ def amount_minor_for(duration_seconds, rate_minor):
     )
 
 
-def pct_of_minor(amount_minor, pct):
+def pct_of_minor(amount_minor: int | None, pct: int) -> int:
     """Integer percent of integer minor units, truncated (Qwen Q12).
 
     pct is an integer percentage (20 = 20%). Pure integer arithmetic,
@@ -49,7 +51,7 @@ def pct_of_minor(amount_minor, pct):
     return int(amount_minor) * int(pct) // 100
 
 
-def parse_rate_to_minor(text):
+def parse_rate_to_minor(text: object | None) -> int | None:
     """Parse '95.50' -> 9550. Returns None for blank/invalid."""
     if text is None:
         return None
@@ -65,7 +67,7 @@ def parse_rate_to_minor(text):
     return int((value * Decimal(100)).quantize(Decimal("1"), rounding=ROUND_HALF_UP))
 
 
-def parse_hours_to_seconds(text):
+def parse_hours_to_seconds(text: object | None) -> int | None:
     """Parse '7.5' hours -> 27000 seconds. Returns None for blank/invalid."""
     if text is None:
         return None
@@ -81,7 +83,7 @@ def parse_hours_to_seconds(text):
     return int((value * Decimal(3600)).quantize(Decimal("1"), rounding=ROUND_HALF_UP))
 
 
-def format_hours(total_seconds):
+def format_hours(total_seconds: int | None) -> str:
     """27000 -> '7.5h'; 5400 -> '1.5h'; 3600 -> '1h'."""
     if total_seconds is None:
         return "\u2014"
@@ -90,7 +92,7 @@ def format_hours(total_seconds):
     return "%sh" % text
 
 
-def format_duration(total_seconds):
+def format_duration(total_seconds: int | None) -> str:
     """5400 -> '1h 30m'; 3000 -> '50m'."""
     if total_seconds is None:
         return "\u2014"

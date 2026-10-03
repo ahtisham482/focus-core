@@ -9,6 +9,7 @@ import sqlite3
 import logging
 from datetime import date, datetime, timedelta
 from pathlib import Path
+from typing import Any
 from urllib.request import pathname2url
 
 from . import columncrypto, paths
@@ -17,7 +18,7 @@ from . import columncrypto, paths
 logger = logging.getLogger(__name__)
 
 
-def __getattr__(name):
+def __getattr__(name: str) -> Any:
     # Roadmap 1.7 (PEP 562, the 1.6 pattern): DEFAULT_DB_PATH is
     # resolved lazily on each access instead of being frozen at
     # import, so paths.data_dir() grandfathering (an existing
@@ -31,11 +32,13 @@ def __getattr__(name):
         "module %r has no attribute %r" % (__name__, name))
 
 
-def __dir__():
+def __dir__() -> list[str]:
     return sorted(set(globals()) | {"DEFAULT_DB_PATH"})
 
 
-def _resolve_db_path(path=None):
+def _resolve_db_path(
+    path: str | Path | None = None
+) -> str | Path:
     """The DB path for this call: explicit arg, else an assigned
     DEFAULT_DB_PATH (monkeypatched), else paths.db_path() now."""
     if path is not None:
@@ -160,7 +163,7 @@ CREATE INDEX IF NOT EXISTS idx_ts_entries_day ON timesheet_entries(day);
 """
 
 
-def get_db(path=None):
+def get_db(path: str | Path | None = None) -> sqlite3.Connection:
     conn = sqlite3.connect(str(_resolve_db_path(path)))
     # Roadmap 1.7: FK enforcement is per-connection in SQLite. Safe
     # because migration 0011 (orphan quarantine) always runs via
@@ -171,7 +174,9 @@ def get_db(path=None):
     return conn
 
 
-def run_integrity_check(path=None):
+def run_integrity_check(
+    path: str | Path | None = None
+) -> tuple[bool, list[str]]:
     """Nightly integrity probe (roadmap 1.7): ``(ok, problems)``.
 
     Runs PRAGMA integrity_check + foreign_key_check on a read-only
@@ -202,7 +207,9 @@ def run_integrity_check(path=None):
         return False, ["integrity check failed: %s" % exc]
 
 
-def checkpoint_wal(path=None):
+def checkpoint_wal(
+    path: str | Path | None = None
+) -> dict[str, int] | None:
     """Sprint 4 (Qwen item 10): TRUNCATE-checkpoint the WAL on a
     dedicated connection. Called nightly by the supervisor (tray) and
     on graceful shutdown. Keeps the -wal file from growing unboundedly
@@ -223,14 +230,14 @@ def checkpoint_wal(path=None):
         return None
 
 
-def init_db(path=None):
+def init_db(path: str | Path | None = None) -> None:
     from . import migrations
 
     resolved = _resolve_db_path(path)
     # Roadmap 1.7: when the migrations-applied flag says this process
     # already migrated this exact file, skip everything below --
     # nothing opens a connection just to re-check.
-    _version, opened = migrations.apply_migrations_with_status(resolved)
+    _version, opened = migrations.apply_migrations_with_status(str(resolved))
     if not opened:
         return
     # Sprint 4 (Qwen item 12): idempotent index for the invoice_lines
@@ -254,7 +261,10 @@ def init_db(path=None):
 
 
 
-def save_events(day, events, path=None):
+def save_events(
+    day: str, events: list[dict[str, Any]],
+    path: str | Path | None = None
+) -> None:
     """Store one day's categorized events (idempotent: replaces the day)."""
     init_db(path)
     conn = get_db(path)
@@ -282,7 +292,10 @@ def save_events(day, events, path=None):
         conn.close()
 
 
-def save_day_stats(day, afk_seconds, total_seconds, path=None):
+def save_day_stats(
+    day: str, afk_seconds: float, total_seconds: float,
+    path: str | Path | None = None
+) -> None:
     init_db(path)
     conn = get_db(path)
     try:
@@ -296,7 +309,10 @@ def save_day_stats(day, afk_seconds, total_seconds, path=None):
         conn.close()
 
 
-def set_override(match_key, score, path=None):
+def set_override(
+    match_key: str, score: int,
+    path: str | Path | None = None
+) -> None:
     """Remember a per-activity score override for future pipeline runs."""
     init_db(path)
     conn = get_db(path)
@@ -310,7 +326,9 @@ def set_override(match_key, score, path=None):
         conn.close()
 
 
-def get_overrides(path=None):
+def get_overrides(
+    path: str | Path | None = None
+) -> dict[str, int]:
     init_db(path)
     conn = get_db(path)
     try:
@@ -322,7 +340,10 @@ def get_overrides(path=None):
         conn.close()
 
 
-def apply_override_to_day(day, match_key, score, path=None):
+def apply_override_to_day(
+    day: str, match_key: str, score: int,
+    path: str | Path | None = None
+) -> None:
     """Apply an override to already-stored events of one day (live update)."""
     init_db(path)
     conn = get_db(path)
@@ -337,7 +358,10 @@ def apply_override_to_day(day, match_key, score, path=None):
         conn.close()
 
 
-def add_category(name, parent, score, path=None):
+def add_category(
+    name: str, parent: str | None, score: int,
+    path: str | Path | None = None
+) -> None:
     """Add a custom sub-category (score=None inherits the parent's score)."""
     init_db(path)
     conn = get_db(path)
@@ -352,12 +376,15 @@ def add_category(name, parent, score, path=None):
         conn.close()
 
 
-def get_categories(path=None):
+def get_categories(
+    path: str | Path | None = None
+) -> dict[str, dict[str, Any]]:
     """Default categories merged with custom ones (custom wins on name)."""
     from .taxonomy import DEFAULT_CATEGORIES
 
-    merged = {c["name"]: {"score": c["default_score"], "parent": None}
-              for c in DEFAULT_CATEGORIES}
+    merged: dict[str, dict[str, Any]] = {
+        str(c["name"]): {"score": c["default_score"], "parent": None}
+        for c in DEFAULT_CATEGORIES}
     init_db(path)
     conn = get_db(path)
     try:
@@ -368,7 +395,9 @@ def get_categories(path=None):
     return merged
 
 
-def get_day_activities(day, path=None):
+def get_day_activities(
+    day: str, path: str | Path | None = None
+) -> list[dict[str, Any]]:
     init_db(path)
     conn = get_db(path)
     try:
@@ -388,7 +417,10 @@ def get_day_activities(day, path=None):
         conn.close()
 
 
-def get_activities_range(start_ts, end_ts, path=None):
+def get_activities_range(
+    start_ts: int, end_ts: int,
+    path: str | Path | None = None
+) -> list[dict[str, Any]]:
     """Bounded time-range scan (Phase 11, council remediation).
 
     Uses idx_activities_ts -- no full-day scans, no unbounded LIMIT.
@@ -412,7 +444,9 @@ def get_activities_range(start_ts, end_ts, path=None):
         conn.close()
 
 
-def get_day_summary(day, path=None):
+def get_day_summary(
+    day: str, path: str | Path | None = None
+) -> dict[str, Any]:
     """Aggregate one day.
 
     Returns {"seconds_by_level": {-2:.., -1:.., 0:.., 1:.., 2:..},
@@ -424,8 +458,8 @@ def get_day_summary(day, path=None):
     conn = get_db(path)
     try:
         seconds_by_level = {2: 0.0, 1: 0.0, 0: 0.0, -1: 0.0, -2: 0.0}
-        seconds_by_category = {}
-        uncat = {}
+        seconds_by_category: dict[str, float] = {}
+        uncat: dict[str, dict[str, Any]] = {}
         for row in conn.execute(
             "SELECT score, category, duration, match_key, app, title "
             "FROM activities WHERE day = ?",
@@ -465,7 +499,7 @@ def get_day_summary(day, path=None):
 
 # ---------------------------------------------------------------- goals ---
 
-def _goal_row(row):
+def _goal_row(row: sqlite3.Row) -> dict[str, Any]:
     return {
         "id": row["id"],
         "name": row["name"],
@@ -479,9 +513,12 @@ def _goal_row(row):
     }
 
 
-def add_goal(name, direction, target_type, target_name=None,
-             threshold_minutes=None, threshold_pulse=None, pinned=False,
-             path=None):
+def add_goal(name: str, direction: str, target_type: str,
+             target_name: str | None = None,
+             threshold_minutes: int | None = None,
+             threshold_pulse: int | None = None,
+             pinned: bool = False,
+             path: str | Path | None = None) -> int | None:
     """Create a goal; returns its new id."""
     from datetime import datetime
 
@@ -502,7 +539,9 @@ def add_goal(name, direction, target_type, target_name=None,
         conn.close()
 
 
-def list_goals(path=None):
+def list_goals(
+    path: str | Path | None = None
+) -> list[dict[str, Any]]:
     init_db(path)
     conn = get_db(path)
     try:
@@ -512,7 +551,9 @@ def list_goals(path=None):
         conn.close()
 
 
-def delete_goal(goal_id, path=None):
+def delete_goal(
+    goal_id: int, path: str | Path | None = None
+) -> None:
     init_db(path)
     conn = get_db(path)
     try:
@@ -522,7 +563,9 @@ def delete_goal(goal_id, path=None):
         conn.close()
 
 
-def set_pinned(goal_id, pinned, path=None):
+def set_pinned(
+    goal_id: int, pinned: bool, path: str | Path | None = None
+) -> None:
     init_db(path)
     conn = get_db(path)
     try:
@@ -535,7 +578,7 @@ def set_pinned(goal_id, pinned, path=None):
 
 # --------------------------------------------------------------- alerts ---
 
-def _alert_row(row):
+def _alert_row(row: sqlite3.Row) -> dict[str, Any]:
     return {
         "id": row["id"],
         "name": row["name"],
@@ -549,8 +592,9 @@ def _alert_row(row):
     }
 
 
-def add_alert(name, target_type, target_name, threshold_minutes,
-              message="", cooldown_minutes=60, enabled=True, path=None):
+def add_alert(name: str, target_type: str, target_name: str, threshold_minutes: int,
+              message: str = "", cooldown_minutes: int = 60, enabled: bool = True,
+              path: str | Path | None = None) -> int | None:
     """Create an alert; returns its new id."""
     from datetime import datetime
 
@@ -571,7 +615,9 @@ def add_alert(name, target_type, target_name, threshold_minutes,
         conn.close()
 
 
-def list_alerts(path=None):
+def list_alerts(
+    path: str | Path | None = None
+) -> list[dict[str, Any]]:
     init_db(path)
     conn = get_db(path)
     try:
@@ -581,7 +627,9 @@ def list_alerts(path=None):
         conn.close()
 
 
-def delete_alert(alert_id, path=None):
+def delete_alert(
+    alert_id: int, path: str | Path | None = None
+) -> None:
     init_db(path)
     conn = get_db(path)
     try:
@@ -593,7 +641,9 @@ def delete_alert(alert_id, path=None):
         conn.close()
 
 
-def set_alert_enabled(alert_id, enabled, path=None):
+def set_alert_enabled(
+    alert_id: int, enabled: bool, path: str | Path | None = None
+) -> None:
     init_db(path)
     conn = get_db(path)
     try:
@@ -604,7 +654,10 @@ def set_alert_enabled(alert_id, enabled, path=None):
         conn.close()
 
 
-def record_firing(alert_id, fired_at, current_minutes, path=None):
+def record_firing(
+    alert_id: int, fired_at: datetime, current_minutes: float,
+    path: str | Path | None = None
+) -> None:
     """Remember that an alert fired (drives the cooldown)."""
     init_db(path)
     conn = get_db(path)
@@ -620,7 +673,9 @@ def record_firing(alert_id, fired_at, current_minutes, path=None):
         conn.close()
 
 
-def last_firing_at(alert_id, path=None):
+def last_firing_at(
+    alert_id: int, path: str | Path | None = None
+) -> datetime | None:
     """Datetime of the most recent firing, or None if never fired."""
     from datetime import datetime
 
@@ -637,7 +692,9 @@ def last_firing_at(alert_id, path=None):
         conn.close()
 
 
-def recent_firings(limit=20, path=None):
+def recent_firings(
+    limit: int = 20, path: str | Path | None = None
+) -> list[dict[str, Any]]:
     """Newest firings first, with the alert name attached."""
     init_db(path)
     conn = get_db(path)
@@ -660,7 +717,7 @@ def recent_firings(limit=20, path=None):
 
 # -------------------------------------------------------- focus sessions ---
 
-def _session_row(row):
+def _session_row(row: sqlite3.Row) -> dict[str, Any]:
     keys = set(row.keys())
     return {
         "id": row["id"],
@@ -692,10 +749,13 @@ def _session_row(row):
     }
 
 
-def create_session(label, planned_minutes, started_at, planned_end_at,
-                   block_level, enforcement_mode="strict", path=None,
-                   session_type="classic", suggested_minutes=None,
-                   target_cycles=1):
+def create_session(label: str, planned_minutes: int, started_at: str,
+                   planned_end_at: str,
+                   block_level: str, enforcement_mode: str = "strict",
+                   path: str | Path | None = None,
+                   session_type: str = "classic",
+                   suggested_minutes: int | None = None,
+                   target_cycles: int = 1) -> int | None:
     """Insert a new focus session; returns its new id."""
     if enforcement_mode not in ("strict", "hardcore"):
         enforcement_mode = "strict"
@@ -721,7 +781,9 @@ def create_session(label, planned_minutes, started_at, planned_end_at,
         conn.close()
 
 
-def get_active_session(path=None):
+def get_active_session(
+    path: str | Path | None = None
+) -> dict[str, Any] | None:
     """The currently active session, or None."""
     init_db(path)
     conn = get_db(path)
@@ -735,7 +797,9 @@ def get_active_session(path=None):
         conn.close()
 
 
-def get_session(session_id, path=None):
+def get_session(
+    session_id: int, path: str | Path | None = None
+) -> dict[str, Any] | None:
     init_db(path)
     conn = get_db(path)
     try:
@@ -747,7 +811,10 @@ def get_session(session_id, path=None):
         conn.close()
 
 
-def end_session(session_id, status, ended_at, path=None):
+def end_session(
+    session_id: int, status: str, ended_at: str,
+    path: str | Path | None = None
+) -> None:
     """Mark a session 'completed' or 'aborted' with its end time."""
     init_db(path)
     conn = get_db(path)
@@ -763,7 +830,7 @@ def end_session(session_id, status, ended_at, path=None):
 
 # ------------------------------------------------- Pomodoro cycle tracking ---
 
-def _cycle_row(row):
+def _cycle_row(row: sqlite3.Row) -> dict[str, Any]:
     return {
         "id": row["id"],
         "session_id": row["session_id"],
@@ -781,8 +848,9 @@ def _cycle_row(row):
     }
 
 
-def start_cycle(session_id, kind, planned_minutes, started_at,
-                started_monotonic, path=None):
+def start_cycle(session_id: int, kind: str, planned_minutes: int, started_at: str,
+                started_monotonic: float,
+                path: str | Path | None = None) -> int | None:
     """Start a work/break cycle; returns its id.
 
     The partial unique index (R3) raises sqlite3.IntegrityError if the
@@ -807,7 +875,10 @@ def start_cycle(session_id, kind, planned_minutes, started_at,
         conn.close()
 
 
-def end_cycle(cycle_id, status, ended_at, path=None):
+def end_cycle(
+    cycle_id: int, status: str, ended_at: str,
+    path: str | Path | None = None
+) -> None:
     """Mark a cycle completed/skipped/aborted."""
     if status not in ("completed", "skipped", "aborted"):
         raise ValueError("bad cycle status: %r" % (status,))
@@ -824,8 +895,9 @@ def end_cycle(cycle_id, status, ended_at, path=None):
         conn.close()
 
 
-def resync_cycle_monotonic(cycle_id, started_monotonic,
-                           elapsed_offset_seconds, path=None):
+def resync_cycle_monotonic(cycle_id: int, started_monotonic: float,
+                           elapsed_offset_seconds: float,
+                           path: str | Path | None = None) -> None:
     """Resync a cycle's monotonic clock (daemon restart / R1).
 
     Keeps previously credited time in elapsed_offset_seconds —
@@ -844,7 +916,9 @@ def resync_cycle_monotonic(cycle_id, started_monotonic,
         conn.close()
 
 
-def get_active_cycle(session_id, path=None):
+def get_active_cycle(
+    session_id: int, path: str | Path | None = None
+) -> dict[str, Any] | None:
     """The session's active cycle, or None."""
     init_db(path)
     conn = get_db(path)
@@ -859,7 +933,10 @@ def get_active_cycle(session_id, path=None):
         conn.close()
 
 
-def update_cycle_ticks(cycle_id, wall_iso, mono, focused_seconds, path=None):
+def update_cycle_ticks(
+    cycle_id: int, wall_iso: str, mono: float, focused_seconds: float,
+    path: str | Path | None = None
+) -> None:
     """Persist the latest settle tick and accumulated focus seconds."""
     init_db(path)
     conn = get_db(path)
@@ -875,7 +952,9 @@ def update_cycle_ticks(cycle_id, wall_iso, mono, focused_seconds, path=None):
         conn.close()
 
 
-def cycles_for_session(session_id, path=None):
+def cycles_for_session(
+    session_id: int, path: str | Path | None = None
+) -> list[dict[str, Any]]:
     """All cycles for a session, oldest first."""
     init_db(path)
     conn = get_db(path)
@@ -890,7 +969,9 @@ def cycles_for_session(session_id, path=None):
         conn.close()
 
 
-def bump_completed_cycles(session_id, path=None):
+def bump_completed_cycles(
+    session_id: int, path: str | Path | None = None
+) -> int:
     """Increment focus_sessions.completed_cycles; returns the new count."""
     init_db(path)
     conn = get_db(path)
@@ -910,7 +991,9 @@ def bump_completed_cycles(session_id, path=None):
         conn.close()
 
 
-def work_cycles_completed_today(day, path=None):
+def work_cycles_completed_today(
+    day: str, path: str | Path | None = None
+) -> int:
     """Completed work cycles started on the given day (YYYY-MM-DD)."""
     init_db(path)
     conn = get_db(path)
@@ -926,7 +1009,9 @@ def work_cycles_completed_today(day, path=None):
         conn.close()
 
 
-def list_sessions(limit=20, path=None):
+def list_sessions(
+    limit: int = 20, path: str | Path | None = None
+) -> list[dict[str, Any]]:
     """Recent sessions, newest first."""
     init_db(path)
     conn = get_db(path)
@@ -941,7 +1026,9 @@ def list_sessions(limit=20, path=None):
         conn.close()
 
 
-def get_day_sessions(day_str, path=None):
+def get_day_sessions(
+    day_str: str, path: str | Path | None = None
+) -> list[dict[str, Any]]:
     """Completed sessions that started on `day_str` (Phase 12 timeline
     annotations)."""
     init_db(path)
@@ -959,9 +1046,12 @@ def get_day_sessions(day_str, path=None):
         conn.close()
 
 
-def record_block(session_id, ts, app, title, url, score, category,
-                 path=None, action_taken="blocked", process_name="",
-                 window_handle=0, _conn=None):
+def record_block(session_id: int, ts: int, app: str, title: str, url: str, score: int,
+                 category: str,
+                 path: str | Path | None = None, action_taken: str = "blocked",
+                 process_name: str = "",
+                 window_handle: int = 0,
+                 _conn: sqlite3.Connection | None = None) -> None:
     """Remember one blocked distraction (session or always-on shield).
 
     action_taken / process_name / window_handle fill the M0
@@ -1000,7 +1090,10 @@ def record_block(session_id, ts, app, title, url, score, category,
         conn.close()
 
 
-def increment_intercepted(session_id, path=None, _conn=None):
+def increment_intercepted(
+    session_id: int, path: str | Path | None = None,
+    _conn: sqlite3.Connection | None = None
+) -> None:
     """Bump the M0 intercepted_count on a focus session.
 
     Sprint 4: ``_conn`` batches into the caller's transaction (see
@@ -1025,7 +1118,9 @@ def increment_intercepted(session_id, path=None, _conn=None):
         conn.close()
 
 
-def count_blocks_today(path=None, day=None):
+def count_blocks_today(
+    path: str | Path | None = None, day: str | None = None
+) -> int:
     """How many blocks were recorded today (HUD + /shield)."""
     init_db(path)
     conn = get_db(path)
@@ -1041,7 +1136,9 @@ def count_blocks_today(path=None, day=None):
         conn.close()
 
 
-def get_today_blocks(limit=50, path=None):
+def get_today_blocks(
+    limit: int = 50, path: str | Path | None = None
+) -> list[dict[str, Any]]:
     """Today's block log for /shield (newest first)."""
     init_db(path)
     conn = get_db(path)
@@ -1062,7 +1159,9 @@ def get_today_blocks(limit=50, path=None):
         conn.close()
 
 
-def count_blocks(session_id, path=None):
+def count_blocks(
+    session_id: int, path: str | Path | None = None
+) -> int:
     init_db(path)
     conn = get_db(path)
     try:
@@ -1075,7 +1174,9 @@ def count_blocks(session_id, path=None):
         conn.close()
 
 
-def session_days_with_completion(path=None):
+def session_days_with_completion(
+    path: str | Path | None = None
+) -> set[str]:
     """Set of 'YYYY-MM-DD' days that have at least one completed session."""
     init_db(path)
     conn = get_db(path)
@@ -1093,8 +1194,8 @@ def session_days_with_completion(path=None):
 
 # ------------------------------------------------------------ timesheets ---
 
-def _project_row(row):
-    def _col(name, default=None):
+def _project_row(row: sqlite3.Row) -> dict[str, Any]:
+    def _col(name: str, default: Any = None) -> Any:
         try:
             return row[name]
         except (IndexError, KeyError):
@@ -1119,7 +1220,10 @@ def _project_row(row):
     }
 
 
-def add_project(name, client="", path=None):
+def add_project(
+    name: str, client: str = "",
+    path: str | Path | None = None
+) -> int | None:
     """Create a project; returns its new id."""
     from datetime import datetime
 
@@ -1138,7 +1242,9 @@ def add_project(name, client="", path=None):
         conn.close()
 
 
-def list_projects(path=None):
+def list_projects(
+    path: str | Path | None = None
+) -> list[dict[str, Any]]:
     init_db(path)
     conn = get_db(path)
     try:
@@ -1148,7 +1254,9 @@ def list_projects(path=None):
         conn.close()
 
 
-def delete_project(project_id, path=None):
+def delete_project(
+    project_id: int, path: str | Path | None = None
+) -> None:
     """Delete a project; its timesheet entries keep their time but lose
     the project link (project_id set to NULL)."""
     init_db(path)
@@ -1165,7 +1273,7 @@ def delete_project(project_id, path=None):
         conn.close()
 
 
-def _entry_row(row):
+def _entry_row(row: sqlite3.Row) -> dict[str, Any]:
     return {
         "id": row["id"],
         "day": row["day"],
@@ -1200,9 +1308,12 @@ _ENTRY_SELECT = (
 )
 
 
-def create_entry(day, start_ts, end_ts, minutes, category, app="",
-                 title="", project_id=None, task="", note="",
-                 status="accepted", path=None):
+def create_entry(day: str, start_ts: int, end_ts: int, minutes: float,
+                 category: str, app: str = "",
+                 title: str = "", project_id: int | None = None,
+                 task: str = "", note: str = "",
+                 status: str = "accepted",
+                 path: str | Path | None = None) -> int | None:
     """Insert a timesheet entry; returns its new id.
 
     Phase 9 (Qwen M1): when the entry is tagged to a project that has a
@@ -1243,7 +1354,9 @@ def create_entry(day, start_ts, end_ts, minutes, category, app="",
         conn.close()
 
 
-def get_entry(entry_id, path=None):
+def get_entry(
+    entry_id: int, path: str | Path | None = None
+) -> dict[str, Any] | None:
     init_db(path)
     conn = get_db(path)
     try:
@@ -1254,7 +1367,11 @@ def get_entry(entry_id, path=None):
         conn.close()
 
 
-def list_entries(day=None, day_from=None, day_to=None, path=None):
+def list_entries(
+    day: str | None = None, day_from: str | None = None,
+    day_to: str | None = None,
+    path: str | Path | None = None
+) -> list[dict[str, Any]]:
     """Timesheet entries, optionally filtered to one day or a date range,
     ordered by day then start time."""
     init_db(path)
@@ -1281,7 +1398,10 @@ def list_entries(day=None, day_from=None, day_to=None, path=None):
         conn.close()
 
 
-def update_entry(entry_id, fields, path=None):
+def update_entry(
+    entry_id: int, fields: dict[str, Any],
+    path: str | Path | None = None
+) -> None:
     """Update allowed columns of one entry. ``fields`` maps column name
     to new value; only whitelisted columns are written."""
     allowed = {"day", "start_ts", "end_ts", "minutes", "category", "app",
@@ -1304,7 +1424,9 @@ def update_entry(entry_id, fields, path=None):
         conn.close()
 
 
-def delete_entry(entry_id, path=None):
+def delete_entry(
+    entry_id: int, path: str | Path | None = None
+) -> None:
     init_db(path)
     conn = get_db(path)
     try:
@@ -1315,7 +1437,9 @@ def delete_entry(entry_id, path=None):
         conn.close()
 
 
-def lock_day(day, path=None):
+def lock_day(
+    day: str, path: str | Path | None = None
+) -> None:
     """Finalize a day: mark all its entries locked (no more edits)."""
     init_db(path)
     conn = get_db(path)
@@ -1327,7 +1451,9 @@ def lock_day(day, path=None):
         conn.close()
 
 
-def day_is_locked(day, path=None):
+def day_is_locked(
+    day: str, path: str | Path | None = None
+) -> bool:
     """True when the day has at least one entry and all are locked."""
     entries = list_entries(day=day, path=path)
     return bool(entries) and all(e["locked"] for e in entries)
@@ -1337,7 +1463,10 @@ def day_is_locked(day, path=None):
 # Settings (Phase 7) -- simple key/value store, created by migration 5.
 # ---------------------------------------------------------------------------
 
-def get_setting(key, default=None, path=None):
+def get_setting(
+    key: str, default: Any = None,
+    path: str | Path | None = None
+) -> Any:
     """Read a setting; returns default when missing. Never raises."""
     try:
         init_db(path)
@@ -1353,7 +1482,9 @@ def get_setting(key, default=None, path=None):
         return default
 
 
-def set_setting(key, value, path=None):
+def set_setting(
+    key: str, value: Any, path: str | Path | None = None
+) -> None:
     """Write a setting (upsert). Never raises."""
     try:
         init_db(path)
@@ -1381,8 +1512,10 @@ RULE_ACTIONS = ("soft", "firm", "hardcore")
 RULE_TYPES = ("app", "category")
 
 
-def create_block_rule(name, rule_type, key, action, days="all",
-                      start_time="", end_time="", path=None):
+def create_block_rule(name: str, rule_type: str, key: str, action: str,
+                      days: str = "all",
+                      start_time: str = "", end_time: str = "",
+                      path: str | Path | None = None) -> int | None:
     """Insert a block rule; returns its new id. Raises ValueError on bad input."""
     name = (name or "").strip()
     rule_type = (rule_type or "").strip().lower()
@@ -1422,7 +1555,9 @@ def create_block_rule(name, rule_type, key, action, days="all",
         conn.close()
 
 
-def get_block_rules(path=None, only_enabled=False):
+def get_block_rules(
+    path: str | Path | None = None, only_enabled: bool = False
+) -> list[dict[str, Any]]:
     """All block rules (dicts), newest first."""
     init_db(path)
     conn = get_db(path)
@@ -1436,7 +1571,9 @@ def get_block_rules(path=None, only_enabled=False):
         conn.close()
 
 
-def set_block_rule_enabled(rule_id, enabled, path=None):
+def set_block_rule_enabled(
+    rule_id: int, enabled: bool, path: str | Path | None = None
+) -> bool:
     """Enable/disable a rule; returns True when a row changed."""
     init_db(path)
     conn = get_db(path)
@@ -1451,7 +1588,9 @@ def set_block_rule_enabled(rule_id, enabled, path=None):
         conn.close()
 
 
-def delete_block_rule(rule_id, path=None):
+def delete_block_rule(
+    rule_id: int, path: str | Path | None = None
+) -> bool:
     """Delete a rule; returns True when a row was removed."""
     init_db(path)
     conn = get_db(path)
@@ -1468,7 +1607,10 @@ def delete_block_rule(rule_id, path=None):
 # Emergency passes (Phase 7) -- timed, logged, never fail closed.
 # ---------------------------------------------------------------------------
 
-def create_pass(minutes, reason, now=None, path=None):
+def create_pass(
+    minutes: float, reason: str, now: datetime | None = None,
+    path: str | Path | None = None
+) -> dict[str, Any]:
     """Create an emergency pass; returns the pass dict.
 
     On SQLite failure (locked/busy) falls back to a JSONL sidecar file
@@ -1483,7 +1625,7 @@ def create_pass(minutes, reason, now=None, path=None):
         raise ValueError("Pass length must be 1-120 minutes.")
     reason = (reason or "").strip() or "no reason given"
     started_at = now.isoformat(timespec="seconds")
-    row = {"started_at": started_at, "minutes": minutes,
+    row: dict[str, Any] = {"started_at": started_at, "minutes": minutes,
            "reason": reason}
     try:
         init_db(path)
@@ -1518,7 +1660,9 @@ def create_pass(minutes, reason, now=None, path=None):
         return row
 
 
-def get_active_pass(now=None, path=None):
+def get_active_pass(
+    now: datetime | None = None, path: str | Path | None = None
+) -> dict[str, Any] | None:
     """The currently active pass, or None. Never raises."""
     now = now or datetime.now()
     try:
@@ -1546,7 +1690,9 @@ def get_active_pass(now=None, path=None):
     return None
 
 
-def get_recent_passes(limit=20, path=None):
+def get_recent_passes(
+    limit: int = 20, path: str | Path | None = None
+) -> list[dict[str, Any]]:
     """Recent passes (newest first) for the /shield audit list."""
     init_db(path)
     conn = get_db(path)
