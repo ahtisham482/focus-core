@@ -7,6 +7,23 @@ network, the **per-machine installer** for fleet installs, pinning the
 fleet to a fixed version by disabling the app's self-updater, and what
 happens to Focus Core if this project is ever abandoned.
 
+## System requirements
+
+- **OS:** 64-bit Windows 10 or 11. Both installer flavors ship an
+  amd64 embedded Python, so 32-bit Windows is not supported
+  (`ArchitecturesInstallIn64BitMode=x64` in the installer).
+- **Disk:** the installer download is ~25 MB (~225 MB for the offline
+  flavor, which bundles the full WebView2 runtime). Keep a few hundred
+  MB free for the program plus the user's data.
+- **WebView2 runtime:** installed automatically by Setup when missing;
+  no need to pre-deploy it (the offline flavor carries it for
+  air-gapped machines).
+- **Rights:** the per-user installer needs no admin rights. The
+  per-machine (`-machine`) installer asks for elevation.
+- **Network:** none required to run. The only network uses are the
+  update check (pinnable, below), opt-in crash reports, and backups
+  the user points at their own Google Drive.
+
 ## Per-machine install (fleet)
 
 For fleets, IT installs once per machine instead of once per user.
@@ -76,6 +93,20 @@ flavor: it wipes the `DataDir` value when set, else
 `%PROGRAMDATA%\Focus Core` when it exists — and it never touches
 per-user profile folders (`C:\Users\*\AppData\Local\Focus Core` are
 IT's to wipe with their own tooling).
+
+### Machine policy reference
+
+Every machine-tier setting in one place. All live under
+`HKEY_LOCAL_MACHINE`; the app reads them fresh at each use, so set
+them before or after install — no reinstall needed.
+
+| Key | Value | Type | Meaning |
+|---|---|---|---|
+| `HKLM\Software\Focus Core` | `DataDir` | String | Machine-wide data folder override (default: each user's `%LOCALAPPDATA%\Focus Core`). The folder must grant the Users group write access. |
+| `HKLM\Software\Focus Core\Features` | `updates_disabled` | DWORD `1` | Pins the fleet: the self-updater never checks, downloads, or applies anything; the Updates page says so. |
+
+A user cannot override either one: the machine tier beats the user's
+config file, environment variables, and the in-app toggles.
 
 ### Updates on machine installs
 
@@ -377,6 +408,89 @@ function, and a positive control with the policy off proves the test
 would catch real traffic. Those tests exercise the registry tier
 through a test double — the live HKLM read is the same code path the
 app itself runs, and step 2 above confirms it on a real machine.
+
+## Logs and diagnostics
+
+When something goes wrong on a managed machine, look here:
+
+- **Install/uninstall log:** whatever path you passed to `/LOG=`
+  (the documented commands above use `%TEMP%` or `C:\Logs`). This is
+  the first thing to read on a non-zero exit code.
+- **App log:** `%LOCALAPPDATA%\Focus Core\focuscore.log` on the user's
+  profile (rotating copies `.1`–`.5`). It records startup, the
+  dashboard server, update checks, and errors. There is no
+  machine-wide app log — each user has their own.
+- **One-click diagnostics bundle:** the Backup page has an "Export
+  diagnostics" button (`/backup/diagnostics`). It builds a small zip
+  with the log tail, settings, and version info — with user names and
+  home paths scrubbed out. Ask the user to send it to you; it is safe
+  to attach to a ticket.
+
+## Backup and restore (admin view)
+
+- **Where the data lives:** one SQLite file per user,
+  `%LOCALAPPDATA%\Focus Core\focuscore.db` (or the `DataDir` override
+  above). Copying that file while the app is closed backs up all
+  tracked data and settings. (The data folder also holds small state
+  files — config.toml, logs, the kill-switch flag, crash files — but
+  the .db is what matters for restore.)
+- **User backups:** the Backup page lets the user back up to a local
+  folder or their own Google Drive ("Focus Core Backups") and restore
+  from either. Restores are per-user and done from the same page.
+- **Retention:** detailed activity is kept 12 months by default
+  (configurable: 3/6/12/24 months or forever); daily totals, invoices,
+  and timesheets are never auto-deleted. If a machine is reimaged,
+  the user's Drive backup is the way their history survives.
+
+## Troubleshooting
+
+- **SmartScreen warning on first run:** expected. The installer is
+  unsigned until the code-signing application completes — click
+  "More info" then "Run anyway". This is a reputation warning, not a
+  detection (see the antivirus section above).
+- **No Windows Firewall prompt:** the dashboard binds 127.0.0.1
+  (loopback) only — Windows never prompts for loopback listeners, and
+  the app needs no inbound access. If a firewall prompt ever names
+  Focus Core, it is not from this app.
+- **The app window never opens after install:** the WebView2 runtime
+  is probably missing and its download was blocked. Check the install
+  log, then ship the offline (`-offline`) installer flavor instead.
+- **First run:** on an interactive install the user is offered
+  "Launch Focus Core now" at the end of setup (skipped on silent
+  installs). Separately, one-click updates run the installer silently
+  and reopen the app afterwards. The first launch opens the dashboard
+  and walks the user through a short welcome tour including
+  ActivityWatch setup. On a fleet rollout this simply appears for the
+  signed-in user — deploy in a maintenance window if nothing may
+  appear on screens.
+- **A user's data looks wrong or the app misbehaves:** ask for the
+  diagnostics bundle (above) before reinstalling — reinstalling keeps
+  the data folder, so it rarely fixes data problems.
+- **Update stuck or unwanted:** set the `updates_disabled` machine
+  policy (reference above) and the app stops touching the network
+  for updates entirely.
+
+## Privacy at a glance (for IT security review)
+
+- **Local-first:** all tracking data stays on the machine. There is
+  no account system, no license check, and no telemetry — ever.
+- **The only network traffic:** update checks against the GitHub
+  Releases API (pinnable off, above), crash reports the user
+  explicitly chooses to send through their own mail app, and backups
+  the user points at their own Google Drive. Nothing else phones
+  home.
+- **Data minimization on disk:** detailed activity auto-prunes after
+  12 months by default; the user can also erase everything from the
+  Backup page (typed confirmation required).
+
+## Support
+
+There is no SLA and no support contract today — that is the owner's
+business decision, not an oversight. Support happens through GitHub
+Issues on the public repository; the options the owner is weighing
+are written up in `docs/support-decision.md` (flagged, not
+scheduled). For deployment problems, the logs and diagnostics
+section above is the fastest path to an answer.
 
 ## If this project is abandoned (continuity)
 

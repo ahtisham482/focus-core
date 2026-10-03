@@ -403,6 +403,40 @@ ARTICLES = {
             + "field first — shortcuts stay quiet while you type.",
         ],
     },
+    "accessibility": {
+        "title": "Accessibility statement",
+        "href": "/help/accessibility",
+        # Explicit + joins: implicit multi-line concatenation inside a
+        # collection trips the ruff ratchet (ISC004).
+        "what": ("How usable Focus Core is with a keyboard, a screen "
+                 + "reader, or large text - and the honest limits of "
+                 + "what has been checked so far."),
+        "do": [
+            "Charts with more than one data point have a View as table "
+            + "button that opens the same numbers as a plain table, "
+            + "which screen readers can read row by row.",
+            "Single-number indicators (a goal row, a live progress bar) "
+            + "have no table button because their numbers are already "
+            + "shown as plain text next to them.",
+            "Text size (Small, Default, Large) is in the top bar next "
+            + "to the light and dark mode buttons. Everything on the "
+            + "page scales with it.",
+            "Every control is a normal button, link, or form field, so "
+            + "the Tab key reaches everything and screen readers "
+            + "announce each control's name.",
+            "All keyboard shortcuts are listed under Help, Keyboard "
+            + "shortcuts.",
+        ],
+        "trouble": [
+            "No formal accessibility audit has been run on Focus Core, "
+            + "and no conformance level (such as WCAG AA) is claimed. "
+            + "What is written here is what has actually been built "
+            + "and checked, nothing more.",
+            "Found a barrier? Please report it as a GitHub issue at "
+            + "github.com/ahtisham482/focus-core/issues so it can be "
+            + "fixed - accessibility reports are treated as bugs.",
+        ],
+    },
 }
 
 # Dashboard nav key -> help article key (most are identical).
