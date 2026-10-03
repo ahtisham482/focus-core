@@ -389,6 +389,29 @@ jobs:
           if ($r.StatusCode -ne 200) { throw "/ -> $($r.StatusCode)" }
           Write-Host "Server alive after restore"
 
+      - name: Check Defender threat history (roadmap 2.10)
+        # One-time AV gate: the app has been installed, launched,
+        # exercised and restored above -- if Defender disliked any of
+        # it, the detection is in its history now. Threat history is
+        # append-only, so scoping to our paths keeps this non-flaky.
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $status = Get-MpComputerStatus
+          Write-Host "Defender AM running: $($status.AMRunning)"
+          $hits = Get-MpThreatDetection | Where-Object {
+            ($_.Resources -join ";") -match "Focus ?Core"
+          }
+          if ($hits) {
+            $hits | ForEach-Object {
+              Write-Host ("DETECTION: {0} on {1}" -f $_.ThreatID,
+                ($_.Resources -join ", "))
+            }
+            throw ("Defender logged {0} detection(s) touching " -f
+              @($hits).Count + "Focus Core paths")
+          }
+          Write-Host "Defender threat history clean for Focus Core paths"
+
       - name: Silent-uninstall the product
         # The documented uninstall command (docs/enterprise-deploy.md),
         # run exactly as IT would: proves the silent uninstall removes

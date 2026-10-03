@@ -760,3 +760,19 @@ def test_machine_install_step_uses_start_process_not_call_operator():
     assert "-PassThru" in machine_step
     assert "HasExited" in machine_step
     assert "ExitCode" in machine_step
+
+
+def test_defender_check_step_queries_threat_history():
+    """Roadmap 2.10: the smoke job must ask Defender whether it flagged
+    anything of ours. Pin the step's presence and its key properties so
+    the gate can't be silently dropped: it runs after the app has been
+    exercised (before uninstall), queries Get-MpThreatDetection scoped
+    to Focus Core paths, and fails the job on any hit."""
+    workflow = (ROOT / ".github" / "workflows" / "installer-smoke.yml").read_text()
+    assert "Check Defender threat history" in workflow
+    step = workflow.split("Check Defender threat history")[1].split(
+        "- name: Silent-uninstall the product")[0]
+    assert "Get-MpThreatDetection" in step
+    assert "Get-MpComputerStatus" in step
+    assert "Focus Core" in step
+    assert "throw" in step

@@ -93,6 +93,30 @@ install/uninstall runs in CI on every push
 (`installer-smoke.yml`, job `machine-installer`); no customer fleet
 has deployed it yet — treat the first pilot group as the proof run.
 
+## For IT: antivirus pre-allow list
+
+Before rolling out, read `docs/av-false-positives.md` and pre-allow
+accordingly. The short version:
+
+- The shield **minimizes** distracting windows during focus sessions —
+  it never terminates other programs. The only processes Focus Core
+  ever kills are its own dashboard server child.
+- The dashboard listens on **127.0.0.1 only** — no inbound network
+  access needed; a firewall prompt can be safely answered "no".
+- It phones home to exactly three places: `api.github.com` (update
+  checks, can be disabled), your own mail app (crash reports, only if
+  the user clicks send), and a local backup folder.
+- A low-level keyboard hook swallows **only** Alt+Tab/Win during
+  hardcore focus locks — no keystroke logging of any kind.
+- The installer is **unsigned** until our code-signing application
+  completes, so SmartScreen shows a reputation warning on first run.
+  That is expected, not a detection.
+
+Every push to `main` runs a Defender threat-history check in CI
+(`installer-smoke.yml`, step "Check Defender threat history"); the
+24-hour Windows 10/11 run and the enterprise-AV pilot are MANUAL
+steps documented in the same guide.
+
 ## Install and uninstall silently
 
 The installer (`FocusCore-Setup-<version>.exe`, built with Inno Setup
