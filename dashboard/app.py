@@ -1919,7 +1919,13 @@ def create_app(config=None):
         core,
         focus,
         invoices,
-        system,
+        system_backup,
+        system_intelligence,
+        system_ops,
+        system_reports,
+        system_settings,
+        system_shield,
+        system_update,
         timesheet,
     )
 
@@ -1928,8 +1934,11 @@ def create_app(config=None):
     # it triggers this factory while still loading (no ``bp`` yet), and
     # Flask forbids adding routes to an already-registered blueprint.
     # Skipping the still-loading module lets its import finish; a fresh
-    # ``create_app()`` (or the normal app-first import) registers all six.
-    for _module in (budgets, core, focus, invoices, system, timesheet):
+    # ``create_app()`` (or the normal app-first import) registers all twelve.
+    for _module in (budgets, core, focus, invoices, system_backup,
+                      system_intelligence, system_ops, system_reports,
+                      system_settings, system_shield, system_update,
+                      timesheet):
         _bp = getattr(_module, "bp", None)
         if _bp is not None:
             app.register_blueprint(_bp)

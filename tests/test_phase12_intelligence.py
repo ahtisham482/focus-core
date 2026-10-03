@@ -337,7 +337,7 @@ def test_intelligence_report_bad_day_falls_back(tmp_path, monkeypatch):
 
 def test_timeline_svg_rect_bound_on_high_churn(tmp_path, monkeypatch):
     """GLM P12-6: fixed binning -- DOM never inflates past 300 rects."""
-    import dashboard.routes.system as sys_routes
+    import dashboard.routes.system_intelligence as sys_routes
     db = str(tmp_path / "i.db")
     store.init_db(db)
     day = date.today().isoformat()

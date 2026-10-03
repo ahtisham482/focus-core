@@ -412,7 +412,7 @@ def test_toggle_card_copy_matches_what_is_sent(monkeypatch, tmp_path):
     # MEDIUM-1 (card copy): the Updates-page toggle card must describe the
     # same request as PRIVACY.md -- IP + the updater User-Agent, no version.
     monkeypatch.setattr(store, "DEFAULT_DB_PATH", str(tmp_path / "u.db"))
-    import dashboard.routes.system as system_mod
+    import dashboard.routes.system_update as system_mod
     card = system_mod._update_toggle_card_html().lower()
     assert "the app version" not in card
     assert "ip address" in card

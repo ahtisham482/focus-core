@@ -29,7 +29,13 @@ ROUTE_MODULES = [
     "core",
     "focus",
     "invoices",
-    "system",
+    "system_backup",
+    "system_intelligence",
+    "system_ops",
+    "system_reports",
+    "system_settings",
+    "system_shield",
+    "system_update",
     "timesheet",
 ]
 
