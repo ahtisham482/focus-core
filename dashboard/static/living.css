@@ -141,7 +141,7 @@ body.living footer.page-footer {
 .lv-links a {
   color: var(--ink2);
   text-decoration: none;
-  font-size: 14px;
+  font-size: 0.875rem;
   padding: 8px 14px;
   border-radius: 999px;
   transition: color .25s var(--out), background .25s var(--out);
@@ -157,7 +157,7 @@ body.living footer.page-footer {
   gap: 8px;
   padding: 8px 15px;
   border-radius: 999px;
-  font-size: 13px;
+  font-size: 0.8125rem;
   color: var(--ink2);
   border: 1px solid var(--line);
   text-decoration: none;
@@ -199,12 +199,12 @@ body.living footer.page-footer {
 .lv-dateline {
   text-transform: uppercase;
   letter-spacing: .14em;
-  font-size: 12px;
+  font-size: 0.75rem;
   color: var(--ink3);
   margin: 0 0 20px;
 }
 .lv-h1 {
-  font-size: clamp(44px, 5.2vw, 76px);
+  font-size: clamp(2.75rem, 5.2vw, 4.75rem);
   line-height: 1.02;
   letter-spacing: -.03em;
   font-weight: 650;
@@ -221,7 +221,7 @@ body.living footer.page-footer {
 .lv-ember-i { color: var(--ember-strong, var(--ember)); font-style: italic; }
 .lv-sub {
   color: var(--ink2);
-  font-size: 17px;
+  font-size: 1.0625rem;
   line-height: 1.55;
   max-width: 44ch;
   margin: 0 0 32px;
@@ -238,7 +238,7 @@ body.living footer.page-footer {
   border-radius: 999px;
   padding: 16px 32px;
   font-weight: 650;
-  font-size: 16px;
+  font-size: 1rem;
   text-decoration: none;
   border: none;
   cursor: pointer;
@@ -255,7 +255,7 @@ body.living footer.page-footer {
   border-radius: 999px;
   padding: 16px 32px;
   font-weight: 600;
-  font-size: 16px;
+  font-size: 1rem;
   color: var(--ink);
   text-decoration: none;
   border: 1px solid var(--line);
@@ -293,7 +293,7 @@ body.living footer.page-footer {
   display: flex;
   align-items: center;
   gap: 9px;
-  font-size: 13px;
+  font-size: 0.8125rem;
   text-transform: uppercase;
   letter-spacing: .12em;
   color: var(--ink2);
@@ -305,14 +305,14 @@ body.living footer.page-footer {
   animation: lv-pulse 2.2s ease-in-out infinite;
 }
 .lv-pulse-num {
-  font-size: clamp(72px, 7vw, 108px);
+  font-size: clamp(4.5rem, 7vw, 6.75rem);
   font-weight: 650;
   letter-spacing: -.04em;
   line-height: 1;
   font-variant-numeric: tabular-nums;
   margin: 0 0 14px;
 }
-.lv-pulse-sub { color: var(--ink2); font-size: 15px; margin: 0; }
+.lv-pulse-sub { color: var(--ink2); font-size: 0.9375rem; margin: 0; }
 
 /* ---- footer strip ---- */
 .lv-foot {
@@ -322,7 +322,7 @@ body.living footer.page-footer {
   display: flex;
   justify-content: space-between;
   color: var(--ink3);
-  font-size: 13px;
+  font-size: 0.8125rem;
 }
 
 /* ---- entrance stagger (pure CSS: no-JS safe, no flash) ---- */
@@ -381,7 +381,7 @@ body.living footer.page-footer {
   from { stroke-dashoffset: 326.7; }
 }
 .lv-ring-name {
-  font-size: 13px;
+  font-size: 0.8125rem;
   color: var(--ink2);
   margin: 10px 0 2px;
   white-space: nowrap;
@@ -389,7 +389,7 @@ body.living footer.page-footer {
   text-overflow: ellipsis;
 }
 .lv-ring-val {
-  font-size: 12px;
+  font-size: 0.75rem;
   color: var(--ink3);
   margin: 0;
   font-variant-numeric: tabular-nums;
@@ -399,7 +399,7 @@ body.living footer.page-footer {
 /* ---- targets section ---- */
 .lv-targets { padding: 4px 0 12px; }
 .lv-sec-title {
-  font-size: 20px;
+  font-size: 1.25rem;
   font-weight: 650;
   letter-spacing: -.01em;
   margin: 0 0 20px;
@@ -424,28 +424,28 @@ body.living footer.page-footer {
 }
 .lv-target-label {
   color: var(--ink2);
-  font-size: 14px;
+  font-size: 0.875rem;
   margin: 0 0 8px;
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
 }
 .lv-target-val {
-  font-size: 34px;
+  font-size: 2.125rem;
   font-weight: 650;
   letter-spacing: -.02em;
   margin: 0 0 4px;
   font-variant-numeric: tabular-nums;
 }
 .lv-target-val span {
-  font-size: 15px;
+  font-size: 0.9375rem;
   color: var(--ink3);
   font-weight: 500;
   letter-spacing: 0;
 }
-.lv-target-note { font-size: 13px; color: var(--ink2); margin: 0 0 16px; }
+.lv-target-note { font-size: 0.8125rem; color: var(--ink2); margin: 0 0 16px; }
 .lv-target-note.ok { color: var(--ember-strong, var(--ember)); }
-.lv-target-empty { color: var(--ink2); font-size: 15px; margin: 0; }
+.lv-target-empty { color: var(--ink2); font-size: 0.9375rem; margin: 0; }
 .lv-target-empty a { color: var(--ember-strong, var(--ember)); }
 
 /* spring bar: fills via scaleX */
@@ -487,12 +487,12 @@ body.living footer.page-footer {
   /* top bar: safe-area + compact brand/shield (links already hidden) */
   .lv-nav { padding-top: env(safe-area-inset-top); }
   .lv-nav-inner { height: 60px; }
-  .lv-brand span { font-size: 16px; }
-  .lv-shield { font-size: 12px; padding: 8px 13px 8px 11px; }
+  .lv-brand span { font-size: 1rem; }
+  .lv-shield { font-size: 0.75rem; padding: 8px 13px 8px 11px; }
 
   /* hero: native single-column order, tighter display type */
-  .lv-h1 { font-size: 42px; }
-  .lv-sub { font-size: 16px; }
+  .lv-h1 { font-size: 2.625rem; }
+  .lv-sub { font-size: 1rem; }
   .lv-ctas { flex-direction: column; align-items: stretch; }
   .lv-btn, .lv-ghost {
     width: 100%;
@@ -502,15 +502,15 @@ body.living footer.page-footer {
 
   /* pulse card */
   .lv-pulse { padding: 28px 24px; border-radius: 24px; }
-  .lv-pulse-num { font-size: 64px; }
+  .lv-pulse-num { font-size: 4rem; }
   .lv-rings { gap: 16px; }
   .lv-ring { width: 96px; }
   .lv-ring svg { width: 84px; height: 84px; }
 
   /* sections */
-  .lv-sec-title { font-size: 18px; }
+  .lv-sec-title { font-size: 1.125rem; }
   .lv-target-card { padding: 20px; }
-  .lv-target-val { font-size: 30px; }
+  .lv-target-val { font-size: 1.875rem; }
   .lv-cal-form { flex-direction: column; }
   .lv-cal-form button { width: 100%; }
 
@@ -537,7 +537,7 @@ body.living footer.page-footer {
     min-height: 52px;
     border-radius: 14px;
     color: var(--ink3);
-    font-size: 11px;
+    font-size: 0.6875rem;
     font-weight: 600;
     letter-spacing: .02em;
     text-decoration: none;
@@ -570,12 +570,12 @@ body.living footer.page-footer {
   font-variant-numeric: tabular-nums;
   color: var(--ember-strong, var(--ember));
   font-weight: 600;
-  font-size: 15px;
+  font-size: 0.9375rem;
   min-width: 82px;
   flex: none;
 }
-.lv-cal-name { color: var(--ink); font-size: 16px; }
-.lv-cal-quiet { color: var(--ink3); font-size: 15px; margin: 0 0 16px; }
+.lv-cal-name { color: var(--ink); font-size: 1rem; }
+.lv-cal-quiet { color: var(--ink3); font-size: 0.9375rem; margin: 0 0 16px; }
 .lv-cal-form { display: flex; gap: 10px; margin: 0 0 10px; max-width: 640px; }
 .lv-cal-form input {
   flex: 1;
@@ -585,7 +585,7 @@ body.living footer.page-footer {
   border-radius: 12px;
   padding: 12px 14px;
   color: var(--ink);
-  font-size: 14px;
+  font-size: 0.875rem;
   font-family: inherit;
 }
 .lv-cal-form input::placeholder { color: var(--ink3); }
@@ -597,27 +597,27 @@ body.living footer.page-footer {
   padding: 0 22px;
   min-height: 44px;
   font-weight: 650;
-  font-size: 14px;
+  font-size: 0.875rem;
   font-family: inherit;
   cursor: pointer;
   flex: none;
 }
-.lv-cal-hint { color: var(--ink3); font-size: 13px; margin: 0; max-width: 640px; }
+.lv-cal-hint { color: var(--ink3); font-size: 0.8125rem; margin: 0; max-width: 640px; }
 .lv-cal-ev.lv-cal-done { opacity: .55; }
 .lv-cal-ev.lv-cal-now .lv-cal-name { font-weight: 650; }
 .lv-cal-ev.lv-cal-now .lv-cal-time { color: var(--ember-strong, var(--ember-deep)); }
 .lv-cal-stale {
-  color: var(--ink3); font-size: 13px; margin: 0 0 10px; max-width: 640px;
+  color: var(--ink3); font-size: 0.8125rem; margin: 0 0 10px; max-width: 640px;
   border-left: 3px solid var(--ember); padding-left: 10px;
 }
 .lv-cal-error {
-  color: #b3261e; font-size: 14px; margin: 0 0 10px; max-width: 640px;
+  color: #b3261e; font-size: 0.875rem; margin: 0 0 10px; max-width: 640px;
 }
 .lv-linkbtn {
   background: none;
   border: 0;
   color: var(--ink3);
-  font-size: 13px;
+  font-size: 0.8125rem;
   font-family: inherit;
   cursor: pointer;
   padding: 10px 0 0;
@@ -769,7 +769,7 @@ html[data-theme="light"] body.living .lv-nav {
 }
 .lv-orb-time {
   margin: 0;
-  font-size: 84px;
+  font-size: 5.25rem;
   font-weight: 650;
   letter-spacing: -.02em;
   font-variant-numeric: tabular-nums;
@@ -778,7 +778,7 @@ html[data-theme="light"] body.living .lv-nav {
 }
 .lv-orb-state {
   margin: 10px 0 0;
-  font-size: 12px;
+  font-size: 0.75rem;
   font-weight: 600;
   text-transform: uppercase;
   letter-spacing: .3em;
@@ -798,7 +798,7 @@ html[data-theme="light"] body.living .lv-nav {
   border-radius: 999px;
   background: var(--glass);
   color: var(--ink2);
-  font-size: 13.5px;
+  font-size: 0.8438rem;
 }
 .lv-orb-shield .dot {
   width: 8px; height: 8px; border-radius: 50%;
@@ -818,7 +818,7 @@ html[data-theme="light"] body.living .lv-nav {
 .lv-label-row { width: 100%; text-align: left; }
 .lv-label-row label {
   display: block;
-  font-size: 12px;
+  font-size: 0.75rem;
   font-weight: 600;
   text-transform: uppercase;
   letter-spacing: .14em;
@@ -833,7 +833,7 @@ html[data-theme="light"] body.living .lv-nav {
   border-radius: 14px;
   padding: 14px 16px;
   color: var(--ink);
-  font-size: 16px;
+  font-size: 1rem;
   font-family: inherit;
 }
 .lv-label-row input:focus {
@@ -874,7 +874,7 @@ html[data-theme="light"] body.living .lv-nav {
   background: none;
   color: var(--ink2);
   font-family: inherit;
-  font-size: 14.5px;
+  font-size: 0.9062rem;
   font-weight: 600;
   padding: 11px 22px;
   min-height: 44px;
@@ -902,7 +902,7 @@ html[data-theme="light"] body.living .lv-nav {
   border-radius: 50%;
   background: transparent;
   color: var(--ink);
-  font-size: 20px;
+  font-size: 1.25rem;
   font-family: inherit;
   cursor: pointer;
   display: flex; align-items: center; justify-content: center;
@@ -913,13 +913,13 @@ html[data-theme="light"] body.living .lv-nav {
 .lv-step-val {
   min-width: 92px;
   text-align: center;
-  font-size: 15px;
+  font-size: 0.9375rem;
   color: var(--ink2);
   font-variant-numeric: tabular-nums;
 }
 .lv-step-val b {
   color: var(--ink);
-  font-size: 20px;
+  font-size: 1.25rem;
   font-weight: 700;
   display: inline-block;
   transition: filter .18s, opacity .18s;
@@ -927,7 +927,7 @@ html[data-theme="light"] body.living .lv-nav {
 .lv-step-val b.lv-swap { filter: blur(5px); opacity: 0; }
 .lv-step-note {
   margin: 12px 0 0;
-  font-size: 13.5px;
+  font-size: 0.8438rem;
   color: var(--ink3);
 }
 .lv-stepper.small { margin-top: 0; }
@@ -940,7 +940,7 @@ html[data-theme="light"] body.living .lv-nav {
   align-items: center;
   gap: 14px;
   margin-top: 18px;
-  font-size: 14px;
+  font-size: 0.875rem;
   color: var(--ink2);
 }
 .lv-cycles[hidden] { display: none; }
@@ -958,7 +958,7 @@ html[data-theme="light"] body.living .lv-nav {
 .lv-shield-more summary {
   cursor: pointer;
   padding: 12px 0;
-  font-size: 14px;
+  font-size: 0.875rem;
   font-weight: 600;
   color: var(--ink2);
   min-height: 44px;
@@ -969,10 +969,10 @@ html[data-theme="light"] body.living .lv-nav {
   align-items: center;
   gap: 14px;
   padding: 10px 0 2px;
-  font-size: 14px;
+  font-size: 0.875rem;
   color: var(--ink2);
 }
-.lv-shield-row > span { min-width: 92px; color: var(--ink3); font-size: 13px; }
+.lv-shield-row > span { min-width: 92px; color: var(--ink3); font-size: 0.8125rem; }
 .lv-shield-row label {
   display: inline-flex;
   align-items: center;
@@ -983,7 +983,7 @@ html[data-theme="light"] body.living .lv-nav {
 .lv-shield-row input[type="radio"] { accent-color: var(--ember); width: 17px; height: 17px; }
 .lv-note {
   margin: 2px 0 10px;
-  font-size: 12.5px;
+  font-size: 0.7812rem;
   color: var(--ink3);
 }
 
@@ -997,7 +997,7 @@ html[data-theme="light"] body.living .lv-nav {
   background: linear-gradient(180deg, var(--ember), var(--ember-deep));
   color: #1a1206;
   font-family: inherit;
-  font-size: 17px;
+  font-size: 1.0625rem;
   font-weight: 700;
   letter-spacing: .01em;
   cursor: pointer;
@@ -1010,21 +1010,21 @@ html[data-theme="light"] body.living .lv-nav {
 /* suggestion line */
 .lv-suggest {
   margin: 26px 0 0;
-  font-size: 14.5px;
+  font-size: 0.9062rem;
   color: var(--ink2);
   max-width: 420px;
 }
 .lv-suggest b { color: var(--ember-strong, var(--ember)); }
 .lv-tired {
   margin: 8px 0 0;
-  font-size: 13.5px;
+  font-size: 0.8438rem;
   color: var(--ink3);
   max-width: 420px;
 }
 
 /* recent sessions: quiet rows */
 .lv-recent { padding: 10px 0 4px; }
-.lv-quiet { color: var(--ink3); font-size: 15px; margin: 0; }
+.lv-quiet { color: var(--ink3); font-size: 0.9375rem; margin: 0; }
 .lv-sessions { list-style: none; margin: 0; padding: 0; max-width: 640px; }
 .lv-sessions li { padding: 14px 2px; border-bottom: 1px solid var(--line); }
 .lv-sessions li:last-child { border-bottom: 0; }
@@ -1035,8 +1035,8 @@ html[data-theme="light"] body.living .lv-nav {
   gap: 16px;
   margin-bottom: 10px;
 }
-.lv-sess-label { color: var(--ink); font-size: 15.5px; font-weight: 600; }
-.lv-sess-meta { color: var(--ink3); font-size: 13px; white-space: nowrap; font-variant-numeric: tabular-nums; }
+.lv-sess-label { color: var(--ink); font-size: 0.9688rem; font-weight: 600; }
+.lv-sess-meta { color: var(--ink3); font-size: 0.8125rem; white-space: nowrap; font-variant-numeric: tabular-nums; }
 .lv-sess-bar {
   height: 6px;
   border-radius: 999px;
@@ -1078,7 +1078,7 @@ html[data-theme="light"] body.living .lv-nav {
 .lv-active { padding-top: 44px; }
 .lv-sess-title {
   margin: 0 0 6px;
-  font-size: 22px;
+  font-size: 1.375rem;
   font-weight: 650;
   letter-spacing: -.01em;
   color: var(--ink);
@@ -1147,7 +1147,7 @@ html[data-theme="light"] body.living .lv-nav {
   background: var(--glass);
   color: var(--ink);
   font-family: inherit;
-  font-size: 15px;
+  font-size: 0.9375rem;
   font-weight: 600;
   cursor: pointer;
   transition: transform .14s, background .2s, border-color .2s;
@@ -1178,13 +1178,13 @@ html[data-theme="light"] body.living .lv-nav {
   margin-top: 10px;
 }
 .lv-depth .fc-depth-meter-track > div { height: 100%; border-radius: 999px; }
-.lv-depth .note { color: var(--ink3); font-size: 13px; margin: 8px 0 0; }
+.lv-depth .note { color: var(--ink3); font-size: 0.8125rem; margin: 8px 0 0; }
 #fc-depth-pill {
   display: inline-block;
   padding: 8px 16px;
   border: 1px solid var(--line);
   border-radius: 999px;
-  font-size: 13.5px;
+  font-size: 0.8438rem;
   font-weight: 600;
   /* text color comes from --depth-c (set inline per state); light theme
      overrides it to ink because the state colors are too light for paper */
@@ -1202,7 +1202,7 @@ html[data-theme="light"] body.living #fc-depth-pill {
 .lv-subnote {
   margin: 18px 0 0;
   color: var(--ink3);
-  font-size: 14px;
+  font-size: 0.875rem;
   max-width: 440px;
 }
 
@@ -1246,18 +1246,18 @@ html[data-theme="light"] body.living #fc-depth-pill {
 
   /* the orb shrinks as one unit; keep the viewBox, just render smaller */
   .lv-orb, .lv-orb-live { width: 240px; height: 240px; }
-  .lv-orb-time { font-size: 56px; letter-spacing: -1px; }
-  .lv-orb-state { font-size: 14px; }
-  .lv-orb-shield { font-size: 13px; }
+  .lv-orb-time { font-size: 3.5rem; letter-spacing: -1px; }
+  .lv-orb-state { font-size: 0.875rem; }
+  .lv-orb-shield { font-size: 0.8125rem; }
 
   /* ready: chips stay thumb-reachable, begin already full-width */
   .lv-chips { gap: 8px; }
-  .lv-chip { font-size: 13px; padding: 9px 14px; }
+  .lv-chip { font-size: 0.8125rem; padding: 9px 14px; }
 
   /* active: end/abort stack full-width, 48px+ targets */
   .lv-act-row { flex-direction: column; align-items: stretch; }
   .lv-act-row form { flex: 1 1 100%; display: flex; }
-  .lv-act-btn { flex: 1 1 auto; min-height: 52px; font-size: 16px; }
+  .lv-act-btn { flex: 1 1 auto; min-height: 52px; font-size: 1rem; }
 
   /* steppers keep their horizontal row; buttons stay thumb-sized */
   .lv-stepper { flex-wrap: nowrap; }

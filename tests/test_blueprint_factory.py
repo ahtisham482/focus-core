@@ -93,6 +93,7 @@ GOLDEN_ROUTE_MAP = [
     ('/report', ('GET',)),
     ('/settings/calendar', ('POST',)),
     ('/settings/retention', ('POST',)),
+    ('/settings/text-size', ('POST',)),
     ('/settings/theme', ('POST',)),
     ('/setup/activitywatch', ('GET',)),
     ('/shield', ('GET',)),

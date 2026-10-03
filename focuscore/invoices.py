@@ -899,7 +899,7 @@ _INVOICE_TEMPLATE = """\
 <title>Invoice {{ inv.number }}</title>
 <style>
   body { font-family: Georgia, serif; color: #111; margin: 40px; }
-  h1 { font-size: 28px; margin-bottom: 4px; }
+  h1 { font-size: 1.75rem; margin-bottom: 4px; }
   .meta { color: #555; margin-bottom: 24px; }
   table { width: 100%; border-collapse: collapse; margin: 16px 0; }
   th, td { border: 1px solid #999; padding: 8px; text-align: left; }
@@ -908,7 +908,7 @@ _INVOICE_TEMPLATE = """\
   .totals td { border: none; }
   .totals tr.total td { font-weight: bold; border-top: 2px solid #111; }
   .void { color: #a00; font-weight: bold; }
-  .fine { color: #666; font-size: 12px; }
+  .fine { color: #666; font-size: 0.75rem; }
   @media print { body { margin: 0; } }
 </style>
 </head>

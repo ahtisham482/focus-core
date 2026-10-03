@@ -125,6 +125,8 @@ ARTICLES = {
             "reminders); breaks end by themselves after 30 minutes at "
             "most. You can always end or skip a break early.",
             "End the session to see your summary.",
+            "Press Z any time to toggle zen mode; Escape leaves it. "
+            + "All shortcuts are listed under Help, Keyboard shortcuts.",
         ],
         "trouble": [
             "Blocking didn't trigger? Keep Focus Core running during the "
@@ -370,6 +372,35 @@ ARTICLES = {
             "Overpaid? The balance shows 0 and the extra is flagged as an "
             "informational warning — the full payment amount is still "
             "recorded.",
+        ],
+    },
+    "shortcuts": {
+        "title": "Keyboard shortcuts",
+        "href": "/help/shortcuts",
+        # Explicit + joins: implicit multi-line concatenation inside a
+        # collection trips the ruff ratchet (ISC004).
+        "what": ("The few keyboard shortcuts Focus Core has. "
+                 + "Everything else is buttons and links, so a mouse or "
+                 + "touch works everywhere."),
+        "do": [
+            "Press Z to switch zen mode on or off. "
+            + "Zen hides everything except the work in front of you. "
+            + "It does nothing while you are typing in a text field.",
+            "Press Escape to leave zen mode, or to close any open "
+            + "collapsible section and jump back to its heading.",
+            "On option chips (for example the focus-mode picker), use "
+            + "the Left and Right arrow keys to move between choices. "
+            + "Up and Down work too.",
+            "Charts with more than one data point have a View as table "
+            + "button that opens the same numbers as a plain table. "
+            + "Single-number indicators don't need one - their numbers "
+            + "are already shown as text.",
+            "Text size (Small, Default, Large) is in the top bar next "
+            + "to the light and dark mode buttons.",
+        ],
+        "trouble": [
+            "Pressed Z and nothing happened? Click outside any text "
+            + "field first — shortcuts stay quiet while you type.",
         ],
     },
 }

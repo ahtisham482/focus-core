@@ -19,6 +19,7 @@ from dashboard.app import (
     _parse_day,
     _pulse_cell_color,
     _rule_schedule_text,
+    chart_table,
     layout,
 )
 
@@ -51,6 +52,29 @@ def settings_theme():
     if theme not in ("light", "dark", "system"):
         theme = "system"
     store.set_setting("ui_theme", theme)
+    referrer = request.referrer or "/"
+    return redirect(referrer)
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Text-size setting (roadmap 3.1, server-side like the theme toggle)
+# ─────────────────────────────────────────────────────────────────────────────
+
+TEXT_SIZES = ("small", "default", "large")
+
+
+@bp.route("/settings/text-size", methods=["POST"])
+def settings_text_size():
+    """Save the Small / Default / Large text-size preference.
+
+    Stored in the settings table; read by layout() on every page render,
+    which emits data-text-size on <html>. Invalid values are ignored
+    (the current setting stands).
+    """
+    size = request.form.get("text_size", "default")
+    if size not in TEXT_SIZES:
+        size = store.get_setting("ui_text_size", "default") or "default"
+    store.set_setting("ui_text_size", size)
     referrer = request.referrer or "/"
     return redirect(referrer)
 
@@ -1103,9 +1127,14 @@ def report_page():
             % (escape(top_name), top_hours, top_share))
     else:
         cats_caption = ""
+    cats_table = chart_table(
+        ("Category", "Hours"),
+        [(name, f"{hours:.2f} h") for name, hours in rep["top_categories"]]
+    ) if rep["top_categories"] else ""
     cats_chart = (
-        "<div class='card'><h3>Top categories</h3>%s%s</div>"
-        % (cats_caption, cat_bars or "<p class='note'>No data.</p>"))
+        "<div class='card'><h3>Top categories</h3>%s%s%s</div>"
+        % (cats_caption, cat_bars or "<p class='note'>No data.</p>",
+           cats_table))
 
     day_bars = "".join(
         "<div class='hbar'><span class='lbl'>%s</span>"
@@ -1129,10 +1158,15 @@ def report_page():
             % (best_name, best["pulse"]))
     else:
         pulse_caption = ""
+    pulse_table = chart_table(
+        ("Day", "Pulse"),
+        [(d["date"][5:],
+          f"{d['pulse']:.0f}" if d["pulse"] is not None else "--")
+         for d in rep["days"]])
     pulse_chart = (
         "<div class='card'><h3>Pulse through the week</h3>"
-        "<p class='note'>Daily Pulse, 0-100.</p>%s%s</div>"
-        % (pulse_caption, day_bars))
+        "<p class='note'>Daily Pulse, 0-100.</p>%s%s%s</div>"
+        % (pulse_caption, day_bars, pulse_table))
 
     goal_rows = []
     for goal in rep["goals"]:
@@ -2186,8 +2220,8 @@ def _phase12_cards(sel_day):
     else:
         flow_card = (
             "<div class='card in-flow'><h3>Flow Index · %s</h3>"
-            "<p style='font-size:42px;font-weight:bold;margin:4px 0'>%d"
-            "<span style='font-size:16px;color:var(--ink-muted)'>/100</span></p>"
+            "<p style='font-size:2.625rem;font-weight:bold;margin:4px 0'>%d"
+            "<span style='font-size:1rem;color:var(--ink-muted)'>/100</span></p>"
             "<p><b>%s</b></p>%s"
             "<p class='in-caption'>One number for the whole day: deep-work "
             "share, how fast you reach focus, and how little you switch."
@@ -2326,7 +2360,7 @@ def intelligence_report():
         flow_big = ("<p><b>Insufficient Data</b></p><p>%s</p>"
                     % escape(flow["note"] or ""))
     else:
-        flow_big = ("<p style='font-size:36px;font-weight:bold'>%d/100 · "
+        flow_big = ("<p style='font-size:2.25rem;font-weight:bold'>%d/100 · "
                     "%s</p>" % (flow["score"], escape(flow["label"])))
     buckets = intel_mod.day_ratio_buckets(sel_day)
     hours = intel_mod.day_hourly_depth(sel_day)
@@ -2418,12 +2452,12 @@ def intelligence_report():
         "margin:8px 0}"
         ".hero{border:1px solid #d0d7de;border-radius:8px;padding:20px;"
         "margin:16px 0;background:#f6f8fa;break-inside:avoid}"
-        ".caption{color:#57606a;font-style:italic;font-size:13px}"
+        ".caption{color:#57606a;font-style:italic;font-size:0.8125rem}"
         ".empty{border:1px dashed #d0d7de;border-radius:8px;padding:24px;"
         "margin:16px 0;text-align:center}"
-        ".footnote{color:#57606a;font-size:13px;margin-top:24px}"
-        "h1{font-size:26px}h3{margin-top:0}"
-        ".note{color:#57606a;font-size:13px}"
+        ".footnote{color:#57606a;font-size:0.8125rem;margin-top:24px}"
+        "h1{font-size:1.625rem}h3{margin-top:0}"
+        ".note{color:#57606a;font-size:0.8125rem}"
         "@media print{.noprint{display:none}"
         "body{margin:0;max-width:none;-webkit-print-color-adjust:exact;"
         "print-color-adjust:exact}.card{box-shadow:none}.hero{box-shadow:none}}"

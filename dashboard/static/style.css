@@ -20,6 +20,12 @@
 }
 
 /* ════════════════════════════ TOKEN MAP ═════════════════════════════ */
+/* Roadmap 3.1: the text-size setting scales the rem root.
+   Default (no data-text-size) = 100% = the browser's size. */
+html { font-size: 100%; }
+html[data-text-size='small'] { font-size: 87.5%; }
+html[data-text-size='large'] { font-size: 112.5%; }
+
 :root {
   /* ── Palette primitives ── */
   --p-ink-950: #0a0b0d;
@@ -130,13 +136,13 @@
   /* ── Typography scale ── */
   --font-sans: 'Geist', 'Segoe UI Variable', 'Segoe UI', system-ui, sans-serif;
   --font-mono: 'GeistMono', 'Cascadia Code', 'Consolas', ui-monospace, monospace;
-  --text-xs:   11px;
-  --text-sm:   13px;
-  --text-base: 15px;
-  --text-md:   18px;
-  --text-lg:   24px;
-  --text-xl:   32px;
-  --text-2xl:  48px;
+  --text-xs:   0.6875rem;
+  --text-sm:   0.8125rem;
+  --text-base: 0.9375rem;
+  --text-md:   1.125rem;
+  --text-lg:   1.5rem;
+  --text-xl:   2rem;
+  --text-2xl:  3rem;
 }
 
 /* ── DARK MODE: swap surface tokens ── */
@@ -334,7 +340,7 @@ body {
   border: none;
   padding: 5px 7px;
   border-radius: var(--r-md);
-  font-size: 14px;
+  font-size: 0.875rem;
   cursor: pointer;
   line-height: 1;
   transition: background var(--dur-fast);
@@ -343,6 +349,54 @@ body {
 .theme-toggle button:hover {
   background: var(--bg-sunken);
   color: var(--ink);
+}
+
+/* Roadmap 3.1: text-size setting, next to the theme toggle. */
+.text-size-form {
+  display: flex;
+  align-items: center;
+  gap: 2px;
+  flex-shrink: 0;
+  padding-left: 6px;
+}
+.text-size-form select {
+  background: none;
+  border: 1px solid var(--border);
+  border-radius: var(--r-md);
+  font-size: 0.8125rem;
+  color: var(--ink-muted);
+  padding: 4px 2px;
+  cursor: pointer;
+  max-width: 7.5rem;
+}
+.text-size-form button {
+  background: none;
+  border: none;
+  padding: 5px 7px;
+  border-radius: var(--r-md);
+  font-size: 0.875rem;
+  cursor: pointer;
+  line-height: 1;
+  color: var(--ink-muted);
+}
+.text-size-form button:hover {
+  background: var(--bg-sunken);
+  color: var(--ink);
+}
+
+/* Roadmap 3.1: "View as table" disclosure under charts. */
+.chart-table {
+  margin-top: 0.75rem;
+}
+.chart-table summary {
+  cursor: pointer;
+  font-size: 0.8125rem;
+  color: var(--ink-muted);
+  width: fit-content;
+}
+.chart-table summary:hover {
+  color: var(--ink);
+  text-decoration: underline;
 }
 
 /* ══════════════════════════ PAGE HERO ══════════════════════════════ */
@@ -451,7 +505,7 @@ h4 { font-size: var(--text-base);font-weight: 600; letter-spacing: -0.01em; marg
   display: block;
 }
 
-.pulse { font-size: 64px; font-weight: 800; margin: 4px 0; line-height: 1;
+.pulse { font-size: 4rem; font-weight: 800; margin: 4px 0; line-height: 1;
          letter-spacing: -0.04em; }
 .pulse.good { color: var(--success); }
 .pulse.ok   { color: var(--warn); }
@@ -690,7 +744,7 @@ tr:target td { background: var(--warn-soft); }
   font-weight: 500;
 }
 .steps .step.now { background: var(--accent); color: var(--ink-on-accent); font-weight: 700; }
-.big-emoji { font-size: 52px; margin: 8px 0; display: block; }
+.big-emoji { font-size: 3.25rem; margin: 8px 0; display: block; }
 
 /* ═══════════════════════ GOAL ROWS ══════════════════════════════════ */
 .goal-row { margin-bottom: 16px; padding-bottom: 16px;
@@ -724,7 +778,7 @@ tr:target td { background: var(--warn-soft); }
   gap: 4px; pointer-events: none;
 }
 .fc-ring-time {
-  font-size: 36px; font-weight: 800; line-height: 1;
+  font-size: 2.25rem; font-weight: 800; line-height: 1;
   letter-spacing: -0.04em; color: var(--ink);
   font-variant-numeric: tabular-nums;
 }
@@ -821,7 +875,7 @@ body.zen-mode .zen-only { display: initial; }
 .fc-ring-wrap { display: flex; align-items: center; gap: 24px; flex-wrap: wrap; }
 .fc-daily-ring { display: flex; align-items: center; gap: 16px; }
 .fc-daily-ring .fc-ring { width: 96px; height: 96px; }
-.fc-daily-ring .fc-ring-time { font-size: 16px; }
+.fc-daily-ring .fc-ring-time { font-size: 1rem; }
 
 .badge-toast {
   border: 1.5px solid var(--warn); border-radius: var(--r-lg);
@@ -833,7 +887,7 @@ body.zen-mode .zen-only { display: initial; }
   0%   { transform: scale(0.75); opacity: 0; }
   100% { transform: scale(1);    opacity: 1; }
 }
-.badge-toast .badge-name { font-size: 22px; font-weight: 800; margin-bottom: 4px; }
+.badge-toast .badge-name { font-size: 1.375rem; font-weight: 800; margin-bottom: 4px; }
 .badge-list  { display: flex; gap: 8px; flex-wrap: wrap; }
 .badge-chip  {
   border: 1px solid var(--warn); border-radius: var(--r-pill);
@@ -841,9 +895,9 @@ body.zen-mode .zen-only { display: initial; }
   background: var(--warn-soft); color: var(--ink);
 }
 
-.countdown { font-size: 72px; font-weight: 800; margin: 4px 0; line-height: 1;
+.countdown { font-size: 4.5rem; font-weight: 800; margin: 4px 0; line-height: 1;
              letter-spacing: -0.05em; font-variant-numeric: tabular-nums; }
-.focus-label { font-size: 22px; font-weight: 700; letter-spacing: -0.02em; }
+.focus-label { font-size: 1.375rem; font-weight: 700; letter-spacing: -0.02em; }
 .xp-line { font-size: var(--text-base); margin: 6px 0; }
 .peak-card { border: 2px solid var(--accent); background: var(--accent-soft); }
 
@@ -871,14 +925,14 @@ footer a { color: var(--accent-strong, var(--accent)); }
   .topnav a { padding: 7px 9px; font-size: var(--text-xs); gap: 4px; }
   .topnav a svg { width: 13px; height: 13px; }
   h1 { font-size: var(--text-lg); }
-  .pulse { font-size: 52px; }
-  .countdown { font-size: 56px; }
+  .pulse { font-size: 3.25rem; }
+  .countdown { font-size: 3.5rem; }
   .card { padding: 14px; }
   .hbar .lbl { width: 110px; font-size: var(--text-sm); }
   .hbar .val  { width: 64px; }
   th, td { padding: 8px 8px; }
   .fc-ring { width: 160px; height: 160px; }
-  .fc-ring-time { font-size: 28px; }
+  .fc-ring-time { font-size: 1.75rem; }
   .session-hero { gap: 20px; }
   .page-title { font-size: var(--text-lg); }
 }
@@ -1156,7 +1210,7 @@ button.chip:hover {
   margin: 32px 0 8px;
 }
 .hm-h1 {
-  font-size: clamp(32px, 5vw, 48px);
+  font-size: clamp(2rem, 5vw, 3rem);
   letter-spacing: -0.02em;
   line-height: 1.1;
   margin: 0 0 8px;
@@ -1305,7 +1359,7 @@ button.chip:hover {
   margin: 8px 0 8px;
 }
 .hm-pulse-num {
-  font-size: 64px;
+  font-size: 4rem;
   font-weight: 700;
   letter-spacing: -0.03em;
   line-height: 1;
@@ -1389,7 +1443,7 @@ button.chip:hover {
   margin: 4px 0 16px;
 }
 .hm-stat-num {
-  font-size: 40px;
+  font-size: 2.5rem;
   font-weight: 700;
   letter-spacing: -0.02em;
   font-variant-numeric: tabular-nums;
@@ -1430,7 +1484,7 @@ button.chip:hover {
 .hm-dot.on { background: var(--accent); width: 48px; }
 .hm-wicon { color: var(--accent); margin-bottom: 20px; }
 .hm-wtitle {
-  font-size: clamp(24px, 4vw, 32px);
+  font-size: clamp(1.5rem, 4vw, 2rem);
   letter-spacing: -0.02em;
   margin: 0 0 12px;
 }
@@ -1448,7 +1502,7 @@ button.chip:hover {
 @media (max-width: 640px) {
   .hm-wrap { padding: 0 20px; }
   .hm-pulse { grid-template-columns: 1fr; gap: 20px; padding: 24px; }
-  .hm-pulse-num { font-size: 52px; }
+  .hm-pulse-num { font-size: 3.25rem; }
   .hm-stats { grid-template-columns: 1fr 1fr; }
   .hm-welcome { padding: 28px 24px; }
   .hm-cal-form { flex-direction: column; }
@@ -1829,7 +1883,7 @@ body.zen-mode .fc-live { border: none; background: transparent; box-shadow: none
   margin: 0 0 8px;
 }
 .in-big {
-  font-size: clamp(28px, 4vw, 44px);
+  font-size: clamp(1.75rem, 4vw, 2.75rem);
   font-weight: 700;
   letter-spacing: -0.02em;
   line-height: 1.15;

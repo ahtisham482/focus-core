@@ -87,6 +87,39 @@ def _parse_day(value):
         return None
 
 
+def _current_text_size():
+    """The user's text-size setting (roadmap 3.1); 'default' if unset."""
+    try:
+        from focuscore import store as _store
+        size = _store.get_setting("ui_text_size", "default") or "default"
+    except Exception:  # noqa: BLE001 -- never break page render on a setting
+        size = "default"
+    return size if size in ("small", "default", "large") else "default"
+
+
+def _text_size_form(suffix=""):
+    """Text-size setting control (roadmap 3.1): a server-side POST form,
+    no JavaScript required. Used by both the classic topnav and the
+    living nav so the setting is reachable from every page. ``suffix``
+    keeps the select id unique when both navs render on one page."""
+    size = _current_text_size()
+    size_labels = {"small": "Small", "default": "Default", "large": "Large"}
+    options = []
+    for v in ("small", "default", "large"):
+        selected = " selected" if v == size else ""
+        options.append(
+            f"<option value='{v}'{selected}>{size_labels[v]}</option>")
+    sel_id = f"text-size-select{suffix}"
+    return (
+        "<form class='text-size-form' method='post' "
+        "action='/settings/text-size'>"
+        f"<label class='sr-only' for='{sel_id}'>Text size</label>"
+        f"<select id='{sel_id}' name='text_size'>{''.join(options)}</select>"
+        "<button type='submit' aria-label='Apply text size'>"
+        "&#10003;</button>"
+        "</form>")
+
+
 def layout(title, body, day=None, refresh=300, active="home",
            help_key=None, hero=None, body_class="", extra_css="", extra_js=""):
     """Page shell: nav bar, design-system stylesheet, footer.
@@ -102,6 +135,11 @@ def layout(title, body, day=None, refresh=300, active="home",
     except Exception:
         theme = "system"
     theme_attr = "" if theme == "system" else " data-theme='%s'" % theme
+
+    # ── Resolve text-size setting (roadmap 3.1) ──────────────────────
+    text_size = _current_text_size()
+    if text_size != "default":
+        theme_attr += f" data-text-size='{text_size}'"
 
     # ── Build nav with icon + label ────────────────────────────────
     links = []
@@ -132,6 +170,7 @@ def layout(title, body, day=None, refresh=300, active="home",
     nav = ("<nav class='topnav' id='topnav'>"
            + "".join(links)
            + theme_toggle
+           + _text_size_form()
            + "</nav>")
 
     # ── Help / footer ──────────────────────────────────────────────
@@ -234,6 +273,26 @@ def pinned_goals_html(day):
             % rows)
 
 
+def chart_table(headers, rows):
+    """Data-table alternative for a chart (roadmap 3.1).
+
+    A native <details> disclosure with a real <table>: screen-reader
+    users get structured data, and sighted users who can't read the
+    bars (low vision, color blindness) can open it too. No JavaScript;
+    the app's nav.js already closes open <details> on Escape.
+    ``headers``: column titles; ``rows``: list of cell-value lists.
+    Values are escaped here, so callers pass plain text.
+    """
+    head = "".join(f"<th>{escape(h)}</th>" for h in headers)
+    body = "".join(
+        f"<tr>{''.join(f'<td>{escape(c)}</td>' for c in row)}</tr>"
+        for row in rows)
+    return (
+        "<details class='chart-table'><summary>View as table</summary>"
+        f"<div class='in-grid-scroll'><table><tr>{head}</tr>{body}</table>"
+        "</div></details>")
+
+
 def bucket_bar(seconds_by_level, total):
     parts = []
     for level in (2, 1, 0, -1, -2):
@@ -257,6 +316,14 @@ def legend(seconds_by_level):
                _hours(seconds_by_level.get(level, 0)))
         )
     return '<div class="legend">' + "".join(items) + "</div>"
+
+
+def mix_table(seconds_by_level):
+    """Data-table alternative for the activity-mix stacked bar (3.1)."""
+    rows = [(f"{level:+d} {UI_LABELS[level]}",
+             f"{_hours(seconds_by_level.get(level, 0)):.2f}h")
+            for level in (2, 1, 0, -1, -2)]
+    return chart_table(("Score level", "Hours"), rows)
 
 
 
@@ -372,11 +439,12 @@ def day_page(day):
         "<p class='hm-quiet'>Weighted 0&ndash;100 score of everything you "
         "did. Green 60+, amber 40&ndash;59, red below 40. %.2fh tracked.</p>"
         "</div>"
-        "<div class='hm-pulse-right'>%s%s</div>"
+        "<div class='hm-pulse-right'>%s%s%s</div>"
         "</div></section>"
         % (_pulse_band(pulse), pulse, _hours(total),
            bucket_bar(summary["seconds_by_level"], total),
-           legend(summary["seconds_by_level"])))
+           legend(summary["seconds_by_level"]),
+           mix_table(summary["seconds_by_level"])))
 
     strips = hm_target_strips(day)
     targets_html = (
@@ -638,8 +706,9 @@ def _living_nav(active, shield_cls, shield_label):
         "<div class='lv-links'>%s</div>"
         "<a class='lv-shield %s' href='/shield'>"
         "<span class='dot' aria-hidden='true'></span>%s</a>"
+        "%s"
         "</div></nav>" % (_TARGET_SVG, "".join(links), shield_cls,
-                          shield_label))
+                          shield_label, _text_size_form('-lv')))
 
 
 def _living_tabs(active):
@@ -958,7 +1027,9 @@ def home_page():
             "</div></section>")
 
     if total > 0:
-        mix_html = bucket_bar(seconds_by_level, total) + legend(seconds_by_level)
+        mix_html = (bucket_bar(seconds_by_level, total)
+                      + legend(seconds_by_level)
+                      + mix_table(seconds_by_level))
     else:
         mix_html = ("<p class='hm-quiet'>No tracked time yet today &mdash; your "
                     "productivity mix will appear here.</p>")
@@ -1243,12 +1314,14 @@ def _category_options(selected=None):
 
 # ------------------------------------------------ Phase 9: budgets ---
 
+_BUDGET_BAND_LABELS = {"on_track": "On track", "watch": "Watch",
+                        "warning": "Warning", "over": "Over budget"}
+
+
 def _budget_hbar(label, consumed_text, cap_text, pct, band):
     """One horizontal budget bar; pct is 0..1+ (clamped for display)."""
     width = max(0, min(100, int(round(pct * 100))))
-    band_label = {"on_track": "On track", "watch": "Watch",
-                  "warning": "Warning", "over": "Over budget"}.get(
-                      band, band)
+    band_label = _BUDGET_BAND_LABELS.get(band, band)
     return (
         "<div class='hbar'><span class='lbl'>%s</span>"
         "<span class='track'><span class='fill %s' style='width:%d%%'>"
@@ -1270,25 +1343,37 @@ def _project_cards_html(day):
         week = budgets_mod.budget_status(pid, "week", path=None)
         month = budgets_mod.budget_status(pid, "month", path=None)
         bars = []
+        table_rows = []
         for status, label in ((week, "This week"), (month, "This month")):
+            kinds = []
             if status["hours"]:
                 h = status["hours"]
-                bars.append(_budget_hbar(
-                    label + " (time)",
-                    money_mod.format_duration(h["consumed_seconds"]),
-                    money_mod.format_duration(h["cap_seconds"]),
-                    h["pct"], h["band"]))
+                kinds.append(("time",
+                              money_mod.format_duration(h["consumed_seconds"]),
+                              money_mod.format_duration(h["cap_seconds"]),
+                              h["pct"], h["band"]))
             if status["amount"]:
                 a = status["amount"]
-                bars.append(_budget_hbar(
-                    label + " (billed)",
-                    money_mod.format_minor(a["consumed_minor"],
-                                           a["currency"]),
-                    money_mod.format_minor(a["cap_minor"], a["currency"]),
-                    a["pct"], a["band"]))
+                kinds.append(("billed",
+                              money_mod.format_minor(a["consumed_minor"],
+                                                     a["currency"]),
+                              money_mod.format_minor(a["cap_minor"],
+                                                     a["currency"]),
+                              a["pct"], a["band"]))
+            for kind, consumed_text, cap_text, pct, band in kinds:
+                row_label = f"{label} ({kind})"
+                bars.append(_budget_hbar(row_label, consumed_text, cap_text,
+                                        pct, band))
+                table_rows.append(
+                    (row_label, consumed_text, cap_text,
+                     _BUDGET_BAND_LABELS.get(band, band)))
         bars_html = "".join(bars) or (
             "<p class='fine'>No budget set. Budgets are advisory only -- "
             "they never block your work.</p>")
+        if table_rows:
+            # Data-table alternative for the budget bars (roadmap 3.1).
+            bars_html += chart_table(("Period", "Used", "Budget", "Status"),
+                                     table_rows)
         # Pacing note (working-day aware, suppressed on rest days).
         pace_notes = []
         for status in (week, month):

@@ -305,9 +305,9 @@ _STATEMENT_CSS = """
 @page { margin: 18mm; }
 body { font-family: Arial, Helvetica, sans-serif; color: #1a1a1a;
        margin: 0; padding: 24px; }
-h1 { font-size: 22px; margin: 0 0 4px; }
-.meta { color: #555; font-size: 13px; margin-bottom: 20px; }
-table { width: 100%; border-collapse: collapse; font-size: 13px; }
+h1 { font-size: 1.375rem; margin: 0 0 4px; }
+.meta { color: #555; font-size: 0.8125rem; margin-bottom: 20px; }
+table { width: 100%; border-collapse: collapse; font-size: 0.8125rem; }
 @media print {
   .no-print { display: none; }
   table { page-break-inside: auto; }
@@ -320,11 +320,11 @@ td.num, th.num { text-align: right; }
 .day-row td { background: #fafafa; font-weight: bold; }
 .totals { margin-top: 20px; max-width: 420px; }
 .totals table td:last-child { text-align: right; }
-.note { font-size: 12px; color: #555; margin-top: 12px; }
-.redact { font-size: 12px; color: #555; margin-top: 16px;
+.note { font-size: 0.75rem; color: #555; margin-top: 12px; }
+.redact { font-size: 0.75rem; color: #555; margin-top: 16px;
           border-top: 1px solid #ddd; padding-top: 8px; }
-.footer { font-size: 11px; color: #888; margin-top: 24px; }
-button.print { font-size: 15px; padding: 10px 18px; margin-bottom: 20px; }
+.footer { font-size: 0.6875rem; color: #888; margin-top: 24px; }
+button.print { font-size: 0.9375rem; padding: 10px 18px; margin-bottom: 20px; }
 """
 
 
