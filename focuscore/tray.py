@@ -497,6 +497,10 @@ class TrayApp:
             self._apply_pending_update(pending)
             return
 
+        # Roadmap 2.9: prune old detail before the dashboard serves
+        # (and before the backup below, so the backup holds the pruned
+        # database).
+        launcher.maybe_prune()
         self.ensure_server()
         launcher.maybe_backup()
         # Phase 7: one shield daemon covers sessions and always-on rules.

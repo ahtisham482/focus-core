@@ -322,6 +322,25 @@ def maybe_backup():
         print("Focus Core: backup skipped (%s)" % exc)
 
 
+def maybe_prune():
+    """Quiet retention pruning on startup. Never raises.
+
+    Roadmap 2.9: deletes activity detail older than the retention
+    setting (default 12 months) before the dashboard serves. Runs
+    before maybe_backup so the backup holds the pruned database.
+    Never on the shield path (Invariant I-1).
+    """
+    try:
+        from . import retention
+        counts = retention.maybe_prune()
+        total = sum(counts.values())
+        if total:
+            print(f"Focus Core: pruned {total} old detail rows "
+                  "(retention policy)")
+    except Exception as exc:  # noqa: BLE001 -- pruning must never break launch
+        print(f"Focus Core: retention prune skipped ({exc})")
+
+
 def open_app_window(url=None):
     """Open the dashboard in app mode (own window, no address bar).
 
@@ -418,6 +437,10 @@ def main():
     try:
         # No tray: the spawned dashboard is NOT flagged as a child, so
         # it owns the Roadmap 2.5 crash-report session marker itself.
+        # Roadmap 2.9: prune old detail before the dashboard serves
+        # (and before the backup below, so the backup holds the pruned
+        # database).
+        maybe_prune()
         ensure_server(_tray_spawned=False)
     except RuntimeError as exc:
         _tell_user(str(exc))

@@ -73,6 +73,150 @@ def settings_calendar():
     return redirect("/")
 
 
+# ─────────────────────────────────────────────────────────────────────────────
+# Data retention (Roadmap 2.9)
+# ─────────────────────────────────────────────────────────────────────────────
+
+@bp.route("/settings/retention", methods=["POST"])
+def settings_retention():
+    """Save the activity-detail retention window.
+
+    Options: 3/6/12/24 months or "forever". Invalid values are ignored
+    (the current setting stands). Old detail is pruned at the next app
+    startup; daily totals and money records are never auto-deleted.
+    """
+    from focuscore import retention as retention_mod
+    raw = request.form.get("retention_months", "")
+    if raw == retention_mod.FOREVER_VALUE:
+        months = None
+    else:
+        try:
+            months = int(raw)
+        except (TypeError, ValueError):
+            months = -1  # sentinel: not a valid option, rejected below
+    if not retention_mod.set_retention_months(months):
+        # Unknown value: leave the setting exactly as it was.
+        return redirect("/backup?retention_error=1")
+    return redirect("/backup?retention_saved=1")
+
+
+@bp.route("/backup/erase", methods=["POST"])
+def backup_erase():
+    """Erase ALL user data (Roadmap 2.9: the "I'm leaving" button).
+
+    Two-step by design: the Backup page makes the user type ERASE, and
+    this route refuses anything but the exact word. Wipes every user
+    table except the schema itself -- activity, daily totals, money
+    records, gamification, settings (back to defaults). Not reversible.
+    """
+    from focuscore import retention as retention_mod
+    if request.form.get("confirmation", "") != "ERASE":
+        return redirect("/backup?erase_error=1")
+    retention_mod.erase_all_data()
+    return redirect("/backup?erased=1")
+
+
+def _retention_card_html():
+    """Data-retention setting card (Roadmap 2.9).
+
+    Plain form POST like /settings/theme. Shows which window is active
+    and states the two guarantees in plain English: daily totals are
+    kept forever, money records are never auto-deleted.
+    """
+    from focuscore import retention as retention_mod
+    months = retention_mod.get_retention_months()
+    current = "forever" if months is None else str(months)
+    options = []
+    for value, label in (("3", "3 months"), ("6", "6 months"),
+                         ("12", "12 months"), ("24", "24 months"),
+                         ("forever", "Keep forever")):
+        selected = " selected" if value == current else ""
+        options.append(f"<option value='{value}'{selected}>{label}</option>")
+    note = ""
+    if request.args.get("retention_saved"):
+        note = ("<p class='note' role='status'>Saved. Old detail will "
+                "be removed the next time Focus Core starts.</p>")
+    elif request.args.get("retention_error"):
+        note = ("<p class='note' role='alert'>That value isn't allowed "
+                "&mdash; nothing changed.</p>")
+    window_label = "Keep forever" if months is None else f"{months} months"
+    return (
+        "<section class='wk-section' aria-label='Data retention'>"
+        "<h2>Data retention</h2>"
+        "<p>Focus Core keeps detailed activity for "
+        f"<b>{window_label}</b>. Anything older is deleted when the app "
+        "starts.</p>"
+        "<form method='post' action='/settings/retention'>"
+        "<label for='retention-months'>Delete activity detail older than"
+        "</label> "
+        f"<select name='retention_months' id='retention-months'>"
+        f"{''.join(options)}</select> "
+        f"<button type='submit'>Save</button></form>{note}"
+        "<p class='note'>Your daily totals are kept forever, and invoices, "
+        "timesheets and other money records are never auto-deleted "
+        "&mdash; only the day-to-day detail goes. Totals like lifetime XP "
+        "on the Focus page cover your kept history: pruning old detail "
+        "also trims the XP tied to those days.</p></section>"
+    )
+
+
+def _erase_all_card_html():
+    """The "erase all my data" two-step (Roadmap 2.9).
+
+    Step 1 (button) reveals the confirmation; step 2 (form) requires
+    typing ERASE. The server refuses anything but the exact word.
+    """
+    error = ""
+    if request.args.get("erase_error"):
+        error = ("<p class='note' role='alert'>Type <b>ERASE</b> exactly "
+                 "as shown &mdash; nothing was deleted.</p>")
+    done = ""
+    if request.args.get("erased"):
+        done = ("<p class='note' role='status'><b>Done.</b> All your "
+                "Focus Core data has been erased. The app is starting "
+                "fresh.</p>")
+    # The delete list is rendered from retention.ERASE_BULLETS, whose
+    # table sets must union to exactly ERASE_TABLES (pinned by test) --
+    # the list can never silently omit a wiped table.
+    from focuscore import retention as retention_mod
+    bullets = "".join(
+        f"<li>{label}</li>" for label, _tables in retention_mod.ERASE_BULLETS
+    )
+    return (
+        "<section class='wk-section' aria-label='Erase all my data'>"
+        "<h2>Erase all my data</h2>"
+        "<p>Delete <b>everything</b> Focus Core knows about you, right "
+        "here in the app &mdash; no need to uninstall.</p>"
+        "<button type='button' class='danger' id='erase-show-btn'>"
+        "Erase all my data</button>"
+        "<div id='erase-confirm' hidden>"
+        "<p><b>This will permanently delete:</b></p>"
+        f"<ul>{bullets}</ul>"
+        "<p class='note'>Also deleted: any emergency pass records "
+        "(written only when the database was unreachable) and crash "
+        "reports.</p>"
+        "<p>There is no undo. If you might want this data later, "
+        "<a href='/backup'>back it up</a> first.</p>"
+        "<form method='post' action='/backup/erase'>"
+        "<label for='erase-confirm-input'>Type <b>ERASE</b> to confirm"
+        "</label> "
+        "<input name='confirmation' id='erase-confirm-input' "
+        "autocomplete='off' placeholder='ERASE'> "
+        "<button type='submit' class='danger'>"
+        "Yes, erase everything</button>"
+        f"</form>{error}</div>{done}"
+        "<script>"
+        "document.getElementById('erase-show-btn').addEventListener("
+        "'click', function () {"
+        "var c = document.getElementById('erase-confirm');"
+        "c.hidden = !c.hidden;"
+        "if (!c.hidden) {"
+        "document.getElementById('erase-confirm-input').focus();"
+        "}});"
+        "</script></section>"
+    )
+
+
 @bp.route("/backup")
 def backup_page():
     from focuscore import backup as backup_mod
@@ -130,6 +274,8 @@ def backup_page():
            or "<tr><td colspan='4' class='note'>No backups yet.</td></tr>"))
 
     encryption_html = _backup_encryption_card_html(backup_mod)
+    retention_html = _retention_card_html()
+    erase_html = _erase_all_card_html()
 
     # Craft pass (work batch): the backup action is the hero; restore
     # second; everything else folds away. Same POST contracts.
@@ -143,6 +289,8 @@ def backup_page():
         "<p class='note'>Restoring first copies your current data to a "
         "safety file, so nothing is lost. If a backup is marked "
         "Encrypted, type the passphrase it was made with.</p></section>"
+        "%s"
+        "%s"
         "%s"
         "<section class='wk-section'><h2>Where your backups go</h2>%s</section>"
         "<p class='how-it-works'>Focus Core also backs up by itself every "
@@ -172,7 +320,8 @@ def backup_page():
         "newest backup from the list. If it is marked Encrypted, type "
         "the passphrase it was made with. Done &mdash; all your history "
         "is back.</p></details>"
-        % (last_html, table, encryption_html, where_html)
+        % (last_html, table, encryption_html, retention_html, erase_html,
+           where_html)
     )
     return layout("Backup", body, active="backup")
 
