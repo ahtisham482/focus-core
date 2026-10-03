@@ -15,6 +15,8 @@ Ship **`FocusCore-Setup-<version>-machine.exe`** (built with the
 
 - Installs to `C:\Program Files\Focus Core` (`{autopf}`) with
   `PrivilegesRequired=admin` — the installer asks for elevation.
+  64-bit install mode (`ArchitecturesInstallIn64BitMode`): requires
+  64-bit Windows 10/11, matching the amd64 embedded Python runtime.
 - Carries its own application identity (distinct AppId), so it never
   fights a per-user install over "already installed" state. The two
   flavors can even coexist on one machine.

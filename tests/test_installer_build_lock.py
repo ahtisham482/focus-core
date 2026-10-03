@@ -603,6 +603,19 @@ def test_permachine_flavor_is_admin_autopf():
     assert r"{localappdata}\Programs\Focus Core" in iss
 
 
+def test_permachine_flavor_is_64bit_install_mode():
+    # CI failure (2026-10-02): without ArchitecturesInstallIn64BitMode,
+    # the 32-bit Setup resolved {autopf} to "C:\Program Files (x86)" and
+    # wrote HKLM keys to the WOW6432Node view -- but the staged runtime
+    # is amd64 embedded Python, so the machine flavor must install as
+    # 64-bit: real "C:\Program Files" and the native 64-bit registry.
+    iss = _iss()
+    per_machine_setup = iss.split("[Setup]")[1].split("[Languages]")[0]
+    assert "ArchitecturesInstallIn64BitMode=x64" in per_machine_setup
+    # Scoped to the PerMachine branch only; the user flavor is untouched.
+    assert iss.count("ArchitecturesInstallIn64BitMode") == 1
+
+
 def test_permachine_appid_is_distinct():
     iss = _iss()
     guids = re.findall(r"AppId=\{\{([^}]+)\}", iss)

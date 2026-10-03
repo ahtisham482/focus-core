@@ -50,6 +50,11 @@ UninstallDisplayIcon={app}\icon.ico
 LicenseFile={#SourcePath}\..\LICENSE
 #ifdef PerMachine
 DefaultDirName={autopf}\Focus Core
+; 64-bit install mode: the staged runtime is amd64 embedded Python, so
+; the machine flavor is 64-bit only. Without this, a 32-bit Setup would
+; resolve {autopf} to "C:\Program Files (x86)" and registry writes to
+; the WOW6432Node view -- wrong home for a 64-bit fleet install.
+ArchitecturesInstallIn64BitMode=x64
 #else
 DefaultDirName={localappdata}\Programs\Focus Core
 #endif
