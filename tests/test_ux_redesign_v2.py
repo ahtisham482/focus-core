@@ -190,3 +190,34 @@ def test_home_uses_stat_cards_and_ring(tmp_path, monkeypatch):
     assert "stat-card" in html and "stat-num" in html
     # Deep Focus card renders a real SVG progress ring
     assert "progress-ring" in html and "<svg" in html
+
+
+def test_day_view_timeline_uses_category_tokens(tmp_path, monkeypatch):
+    import dashboard.app as dash_app
+    from focuscore import store
+    db = str(tmp_path / "day.db")
+    monkeypatch.setattr(store, "DEFAULT_DB_PATH", db)
+    store.init_db(db)
+    # Seed categorized activity + day stats: an empty DB takes the
+    # empty-state branch, which renders no rows at all.
+    store.save_events("2026-10-13", [
+        {"app": "Code", "title": "main.py", "duration": 3600,
+         "score": 2, "category": "Software Development"},
+        {"app": "Tube", "title": "vid", "duration": 1800,
+         "score": -2, "category": "Entertainment"},
+    ], path=db)
+    store.save_day_stats("2026-10-13", 0.0, 5400.0, path=db)
+    # Prevent live ActivityWatch collection.
+    monkeypatch.setattr(dash_app, "run_day", lambda *a, **kw: None)
+    # Onboarded: some routes redirect to /welcome without the flag file.
+    flag = tmp_path / ".onboarded"
+    flag.write_text("2026-09-29")
+    monkeypatch.setattr(dash_app, "ONBOARDED_FLAG", flag)
+    dash_app.app.config["TESTING"] = True
+    client = dash_app.app.test_client()
+    res = client.get("/day/2026-10-13")
+    html = res.get_data(as_text=True)
+    assert res.status_code == 200
+    assert "timeline-row" in html
+    assert "data-category='software-development'" in html
+    assert "data-category='entertainment'" in html

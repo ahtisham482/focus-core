@@ -2442,3 +2442,22 @@ input.input-v2::placeholder, textarea.input-v2::placeholder {
 .progress-ring .ring-bg { fill: none; stroke: var(--line); stroke-width: 3; }
 .progress-ring .ring-fg { fill: none; stroke: var(--gold); stroke-width: 3;
   stroke-linecap: round; transform: rotate(-90deg); transform-origin: center; }
+
+/* UX v2: day timeline */
+/* NOTE: these rows are <tr>s in the "By category" table, so the section is
+   border-only — display:flex on a <tr> would break the table layout (each
+   row's cells would stop aligning with the header). The category color
+   system comes through the left border. (Row dividers already come from the
+   existing .hm-table td borders, which win the border-collapse conflict, so
+   no border-bottom is set here.) */
+.timeline-row { border-left: 4px solid var(--cat-uncategorized); }
+.timeline-row[data-category='business'] { border-left-color: var(--cat-business); }
+.timeline-row[data-category='communication-scheduling'] { border-left-color: var(--cat-communication-scheduling); }
+.timeline-row[data-category='social-networking'] { border-left-color: var(--cat-social-networking); }
+.timeline-row[data-category='design-composition'] { border-left-color: var(--cat-design-composition); }
+.timeline-row[data-category='entertainment'] { border-left-color: var(--cat-entertainment); }
+.timeline-row[data-category='news'] { border-left-color: var(--cat-news); }
+.timeline-row[data-category='software-development'] { border-left-color: var(--cat-software-development); }
+.timeline-row[data-category='reference-learning'] { border-left-color: var(--cat-reference-learning); }
+.timeline-row[data-category='shopping'] { border-left-color: var(--cat-shopping); }
+.timeline-row[data-category='utilities'] { border-left-color: var(--cat-utilities); }

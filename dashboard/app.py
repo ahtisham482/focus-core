@@ -384,6 +384,28 @@ def hm_target_strips(day):
     return "".join(rows)
 
 
+def _category_slug(name, custom=None):
+    """Slug for the --cat-* token of a category name.
+
+    Custom sub-categories resolve to their parent's slug (spec rule).
+    Output is lowercase [a-z0-9-], matching the token slugs in tokens.css
+    (e.g. 'Communication & Scheduling' -> 'communication-scheduling').
+    Unknown names fall back to 'uncategorized'.
+    """
+    seen = set()
+    while custom and name in custom:
+        parent = custom[name].get("parent")
+        if not parent or parent in seen:
+            break
+        seen.add(name)
+        name = parent
+    slug = "-".join(name.lower().replace("&", " ").split())
+    # Strip anything outside [a-z0-9-] so the slug is always safe to
+    # interpolate unescaped into the data-category attribute.
+    slug = "".join(c for c in slug if c.isascii() and (c.isalnum() or c == "-"))
+    return slug or "uncategorized"
+
+
 def day_page(day):
     """Today's story first (Pulse + pinned targets), details second."""
     today = date.today().isoformat()
@@ -438,9 +460,12 @@ def day_page(day):
         return layout("Day " + day, aw_note + head + empty, day,
                       help_key="day", hero="")
 
+    _custom_cats = store.get_categories()
     cat_rows = "".join(
-        "<tr><td>%s</td><td>%s (%+d)</td><td>%.2fh</td><td>%.1f%%</td></tr>"
-        % (escape(name), UI_LABELS.get(score, "?"), score,
+        "<tr class='timeline-row' data-category='%s'>"
+        "<td>%s</td><td>%s (%+d)</td><td>%.2fh</td><td>%.1f%%</td></tr>"
+        % (_category_slug(name, _custom_cats), escape(name),
+           UI_LABELS.get(score, "?"), score,
            _hours(seconds), seconds / total * 100 if total else 0)
         for name, seconds, score in sorted(
             ((n, s, _category_score(n, s)) for n, s in
