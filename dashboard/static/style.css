@@ -2429,3 +2429,18 @@ input.input-v2::placeholder, textarea.input-v2::placeholder {
   letter-spacing: -0.01em; color: var(--ink); margin: 0 0 var(--sp-1); }
 .prose-v2 { font-size: var(--fs-body); line-height: 1.6; color: var(--ink); }
 .prose-v2 small, .caption-v2 { font-size: var(--fs-small); color: var(--muted); }
+
+/* UX v2: home */
+/* stat-num/stat-label replicate the old .hm-stat-num/.hm-stat-lbl look in
+   the new token language, so the class migration causes no visual change. */
+.stat-num { font-size: 2.5rem; font-weight: 700; letter-spacing: -0.02em;
+  font-variant-numeric: tabular-nums; }
+.stat-label { color: var(--muted); font-size: var(--fs-small);
+  letter-spacing: .1em; text-transform: uppercase; }
+/* Scoped to (0,2,1) to beat living.css's .lv-ring svg (0,1,1): living.css
+   loads later via extra_css and would otherwise size the ring at 96px and
+   double-rotate it (its svg-level rotate(-90deg) plus the circle's). */
+.lv-ring svg.progress-ring { width: 120px; height: 120px; transform: none; }
+.progress-ring .ring-bg { fill: none; stroke: var(--line); stroke-width: 3; }
+.progress-ring .ring-fg { fill: none; stroke: var(--gold); stroke-width: 3;
+  stroke-linecap: round; transform: rotate(-90deg); transform-origin: center; }

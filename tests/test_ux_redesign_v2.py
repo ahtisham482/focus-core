@@ -167,3 +167,26 @@ def test_type_styles_use_tokens():
     assert ".page-title-v2" in section and "var(--fs-display)" in section
     assert ".section-title-v2" in section and "var(--fs-h2)" in section
     assert ".prose-v2" in section and "line-height: 1.6" in section
+
+
+def test_home_uses_stat_cards_and_ring(tmp_path, monkeypatch):
+    import dashboard.app as dash_app
+    from focuscore import store
+    db = str(tmp_path / "home.db")
+    monkeypatch.setattr(store, "DEFAULT_DB_PATH", db)
+    store.init_db(db)
+    # Prevent live ActivityWatch collection
+    monkeypatch.setattr(dash_app, "run_day", lambda *a, **kw: None)
+    # Onboarded: / redirects to /welcome without the flag file.
+    flag = tmp_path / ".onboarded"
+    flag.write_text("2026-09-29")
+    monkeypatch.setattr(dash_app, "ONBOARDED_FLAG", flag)
+    dash_app.app.config["TESTING"] = True
+    client = dash_app.app.test_client()
+    res = client.get("/")
+    html = res.get_data(as_text=True)
+    assert res.status_code == 200
+    # stat cards use the shared component class
+    assert "stat-card" in html and "stat-num" in html
+    # Deep Focus card renders a real SVG progress ring
+    assert "progress-ring" in html and "<svg" in html

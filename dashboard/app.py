@@ -874,19 +874,21 @@ def home_page():
     def _num(v):
         return "%.0f" % (v or 0)
     _frac = min(max(_ring["fraction"] or 0.0, 0.0), 1.0)
+    _pct = max(0, min(100, int(round(_frac * 100))))
     rings_html = (
         "<div class='lv-ring'>"
-        "<svg viewBox='0 0 120 120' role='img' aria-label='%s'>"
-        "<circle class='track' cx='60' cy='60' r='52'></circle>"
-        "<circle class='fill' cx='60' cy='60' r='52' "
-        "style='stroke-dasharray:326.7;stroke-dashoffset:%.1f;--d:560ms'></circle>"
+        "<svg class='progress-ring' viewBox='0 0 36 36' role='img' "
+        "aria-label='%s'>"
+        "<circle cx='18' cy='18' r='15.9' class='ring-bg'/>"
+        "<circle cx='18' cy='18' r='15.9' class='ring-fg' "
+        "stroke-dasharray='%d 100'/>"
         "</svg>"
         "<p class='lv-ring-name'>Focus</p>"
         "<p class='lv-ring-val'>%s / %s min</p>"
         "</div>"
         % (escape("Focus: %s of %s min" % (_num(_ring["minutes"]),
                                           _num(_ring["target"]))),
-           326.7 * (1 - _frac),
+           _pct,
            _num(_ring["minutes"]), _num(_ring["target"]))
     )
 
@@ -1062,12 +1064,12 @@ def home_page():
         "<section class='hm-wrap'><div class='hm-today'>"
         "<h2 class='hm-sec'>Today</h2>"
         "<div class='hm-stats'>"
-        "<div class='hm-stat'><div class='hm-stat-num' data-live "
+        "<div class='stat-card'><div class='stat-num' data-live "
         "data-tabular>%.1f</div>"
-        "<div class='hm-stat-lbl'>tracked hours</div></div>"
-        "<div class='hm-stat'><div class='hm-stat-num' data-live "
+        "<div class='stat-label'>tracked hours</div></div>"
+        "<div class='stat-card'><div class='stat-num' data-live "
         "data-tabular>%.1f</div>"
-        "<div class='hm-stat-lbl'>focused hours</div></div>"
+        "<div class='stat-label'>focused hours</div></div>"
         "</div>%s"
         "<p class='hm-links'><a href='/day/%s'>See today's full details</a> "
         "&middot; <a href='/timesheet?day=%s'>Today's timesheet</a></p>"
