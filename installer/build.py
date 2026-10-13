@@ -102,12 +102,12 @@ WEBVIEW2_STANDALONE_URL = "https://go.microsoft.com/fwlink/?linkid=2124701"
 # SHA-256 of the standalone installer served by WEBVIEW2_STANDALONE_URL
 # when this pin was made. Same fail-closed rule as the bootstrapper:
 # when Microsoft republishes it, the build fails until the new file is
-# reviewed and this hash refreshed. (Pinned 2026-10-02: 212,272,848
+# reviewed and this hash refreshed. (Pinned 2026-10-13: 214,090,448
 # bytes, PE32 executable, Authenticode-signed, Microsoft Corporation
 # strings present, downloaded from the official fwlink -- Microsoft
-# republished the Evergreen standalone on 2026-10-01.)
+# republished the Evergreen standalone after 2026-10-02.)
 WEBVIEW2_STANDALONE_SHA256 = (
-    "f6df8e4bc857786ff641cd01da1449169eaf8236c936ced485ea61685ba4da40")
+    "2a6add76c37bfa872eb8c2b22d45b3216b8e2a1f193e0774006340ff62ac5fa0")
 
 
 def download(url, dest):

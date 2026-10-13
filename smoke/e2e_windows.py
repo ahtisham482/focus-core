@@ -97,8 +97,12 @@ def main():
         def timesheet():
             page.goto(args.base_url + "/timesheet",
                       wait_until="networkidle")
-            expect(page.get_by_text("Timesheet").first).to_be_visible(
-                timeout=15000)
+            # Target the page heading: the nav also contains a
+            # "Timesheet" link inside a collapsed dropdown (hidden until
+            # opened), so a bare get_by_text().first() can land on the
+            # invisible nav item instead of the visible page title.
+            expect(page.locator("h1.page-title")).to_contain_text(
+                "Timesheet", timeout=15000)
             shot("05-timesheet.png")
 
         def help_article():
