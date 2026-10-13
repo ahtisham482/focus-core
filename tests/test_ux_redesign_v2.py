@@ -1,6 +1,6 @@
 """Tests for UX redesign v2 (warm premium)."""
 import pathlib
-from dashboard.app import layout
+from dashboard.app import layout, NAV_GROUPS, NAV_LINKS
 from focuscore.taxonomy import DEFAULT_CATEGORIES
 
 TOKENS = pathlib.Path(__file__).resolve().parent.parent / "dashboard" / "static" / "tokens.css"
@@ -32,3 +32,18 @@ def test_tokens_define_all_category_colors():
     for cat in DEFAULT_CATEGORIES:
         slug = _slug(cat["name"])
         assert f"--cat-{slug}:" in css, f"tokens.css missing --cat-{slug}"
+
+
+def test_nav_groups_cover_all_links():
+    # 4 groups, every one of the 12 NAV_LINKS appears exactly once
+    assert len(NAV_GROUPS) == 4
+    members = [m for _, _, _, ms in NAV_GROUPS for m in ms]
+    assert sorted(members) == sorted(k for k, _, _, _ in NAV_LINKS)
+
+
+def test_nav_group_labels_link_to_primary_page():
+    groups = {gkey: (glabel, ghref) for gkey, glabel, ghref, _ in NAV_GROUPS}
+    assert groups["track"][1] == "/"
+    assert groups["focus"][1] == "/focus"   # Focus stays one click away
+    assert groups["work"][1] == "/invoices"
+    assert groups["system"][1] == "/shield"

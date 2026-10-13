@@ -59,6 +59,17 @@ NAV_LINKS = [
     ("review",       "Review",     "/activities",   "timesheet"),
 ]
 
+# Grouped navigation (UX redesign v2): (group_key, group_label, primary_href,
+# [member keys]). Derived from NAV_LINKS — NAV_LINKS stays the flat source.
+NAV_GROUPS = [
+    ("track",  "Track",  "/",         ["home", "timesheet"]),
+    ("focus",  "Focus",  "/focus",    ["focus", "goals"]),
+    ("work",   "Work",   "/invoices", ["invoices", "report", "coaching", "intelligence"]),
+    ("system", "System", "/shield",   ["shield", "alerts", "backup", "review"]),
+]
+
+_NAV_BY_KEY = {key: (label, href, icon) for key, label, href, icon in NAV_LINKS}
+
 
 
 def is_onboarded():
