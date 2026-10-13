@@ -47,3 +47,10 @@ def test_nav_group_labels_link_to_primary_page():
     assert groups["focus"][1] == "/focus"   # Focus stays one click away
     assert groups["work"][1] == "/invoices"
     assert groups["system"][1] == "/shield"
+
+
+def test_nav_group_primary_href_matches_first_member():
+    # guards against silent drift between a group label's href and its members
+    by_key = {k: href for k, _, href, _ in NAV_LINKS}
+    for gkey, _, ghref, members in NAV_GROUPS:
+        assert ghref == by_key[members[0]], f"group {gkey} label href drifted"
