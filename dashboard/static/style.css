@@ -2505,3 +2505,8 @@ input.input-v2::placeholder, textarea.input-v2::placeholder {
    markup; dead CSS stays out, per the Task 22 .toggle-row precedent.) */
 .welcome-hero .hm-wtitle { font-size: var(--fs-display);
   line-height: var(--lh-display); letter-spacing: -0.02em; }
+/* text-align centers inline content, not the hero's block-level flex rows —
+   without this the step dots and action buttons sit left while everything
+   else is centered. */
+.welcome-hero .hm-dots { justify-content: center; }
+.welcome-hero .hm-welcome-actions { justify-content: center; }
