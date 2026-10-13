@@ -392,6 +392,8 @@ def _category_slug(name, custom=None):
     (e.g. 'Communication & Scheduling' -> 'communication-scheduling').
     Unknown names fall back to 'uncategorized'.
     """
+    if not name:
+        return "uncategorized"
     seen = set()
     while custom and name in custom:
         parent = custom[name].get("parent")

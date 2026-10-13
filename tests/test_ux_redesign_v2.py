@@ -221,3 +221,15 @@ def test_day_view_timeline_uses_category_tokens(tmp_path, monkeypatch):
     assert "timeline-row" in html
     assert "data-category='software-development'" in html
     assert "data-category='entertainment'" in html
+
+
+def test_category_slug_handles_none_and_unknown():
+    # Regression: a NULL category must not 500 the day page (old code rendered
+    # it); unknown names fall back to the uncategorized token slug.
+    from dashboard.app import _category_slug
+    assert _category_slug(None) == "uncategorized"
+    assert _category_slug("") == "uncategorized"
+    # unknown names produce a safe slug (row falls back to the base
+    # uncategorized border color via the default border-left rule)
+    assert _category_slug("Mystery Zone 9") == "mystery-zone-9"
+    assert _category_slug("Communication & Scheduling") == "communication-scheduling"
