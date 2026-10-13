@@ -1,5 +1,6 @@
 """Tests for UX redesign v2 (warm premium)."""
 import pathlib
+import re
 from dashboard.app import layout, NAV_GROUPS, NAV_LINKS
 from focuscore.taxonomy import DEFAULT_CATEGORIES
 
@@ -57,7 +58,6 @@ def test_nav_group_primary_href_matches_first_member():
 
 
 def test_layout_renders_grouped_nav():
-    import re
     html = layout("Dashboard", "<p>Hello</p>", active="focus")
     # exactly 4 group divs (label links use class='nav-group-label' — excluded by the <div prefix)
     assert len(re.findall(r"<div class='nav-group(?: |')", html)) == 4
@@ -68,8 +68,17 @@ def test_layout_renders_grouped_nav():
     assert "href='/timesheet'" in html and "href='/activities'" in html
     # the active page's group is highlighted
     assert "nav-group active-group" in html
-    # old flat links must be gone (no bare top-level /report link outside dropdown)
-    assert html.count("<nav class='topnav'") == 1
+    # every member href lives inside a dropdown; group labels are the only
+    # other links (each primary href appears twice: label + its member link)
+    expected_counts = {}
+    for _, _, ghref, members in NAV_GROUPS:
+        expected_counts[ghref] = expected_counts.get(ghref, 0) + 1
+    by_key = {k: href for k, _, href, _ in NAV_LINKS}
+    for mkey in [m for _, _, _, ms in NAV_GROUPS for m in ms]:
+        href = by_key[mkey]
+        expected_counts[href] = expected_counts.get(href, 0) + 1
+    for href, n in expected_counts.items():
+        assert html.count("href='%s'" % href) == n, f"{href}: expected {n}"
 
 
 def test_review_link_keeps_day_param():

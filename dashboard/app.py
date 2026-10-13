@@ -166,7 +166,7 @@ def layout(title, body, day=None, refresh=300, active="home",
                    "<use href='/static/icons.svg#icon-%s'/></svg>" % micon)
             drop_links.append(
                 "<a href='%s'%s>%s%s</a>" % (url, acls, svg, mlabel))
-        gcls = " nav-group active-group" if active in members else " nav-group"
+        gcls = "nav-group active-group" if active in members else "nav-group"
         groups.append(
             "<div class='%s'>"
             "<a class='nav-group-label' href='%s'>%s</a>"
@@ -174,7 +174,7 @@ def layout(title, body, day=None, refresh=300, active="home",
             "<svg width='10' height='10' aria-hidden='true'>"
             "<use href='/static/icons.svg#icon-chevron-down'/></svg></button>"
             "<div class='nav-dropdown'>%s</div>"
-            "</div>" % (gcls.strip(), ghref, glabel, glabel, "".join(drop_links)))
+            "</div>" % (gcls, ghref, glabel, glabel, "".join(drop_links)))
 
     # Theme toggle buttons (server-side POST, no JS required)
     theme_toggle = (
