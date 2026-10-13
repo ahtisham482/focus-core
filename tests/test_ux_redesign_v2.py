@@ -1,8 +1,13 @@
 """Tests for UX redesign v2 (warm premium)."""
 import pathlib
 from dashboard.app import layout
+from focuscore.taxonomy import DEFAULT_CATEGORIES
 
 TOKENS = pathlib.Path(__file__).resolve().parent.parent / "dashboard" / "static" / "tokens.css"
+
+
+def _slug(name):
+    return name.lower().replace(" & ", "-").replace(" ", "-")
 
 
 def test_tokens_css_linked():
@@ -23,9 +28,7 @@ def test_tokens_define_core_variables():
 
 def test_tokens_define_all_category_colors():
     css = TOKENS.read_text()
-    expected = ["business", "communication-scheduling", "social-networking",
-                "design-composition", "entertainment", "news",
-                "software-development", "reference-learning", "shopping",
-                "utilities", "uncategorized"]
-    for slug in expected:
+    assert len(DEFAULT_CATEGORIES) == 11
+    for cat in DEFAULT_CATEGORIES:
+        slug = _slug(cat["name"])
         assert f"--cat-{slug}:" in css, f"tokens.css missing --cat-{slug}"
