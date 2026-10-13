@@ -2,14 +2,15 @@
 
 ActivityWatch must be installed and running on this machine (it is the
 capture layer; this project only reads from it, never writes).
-API docs: the server listens at http://localhost:5600/api/0/
+API docs: the server listens at http://127.0.0.1:5600/api/0/
+(explicit IPv4 -- see the localhost/IPv6 note in activitywatch.py).
 """
 
 from datetime import datetime, time, timedelta
 
 import requests
 
-DEFAULT_BASE_URL = "http://localhost:5600/api/0/"
+DEFAULT_BASE_URL = "http://127.0.0.1:5600/api/0/"
 
 # Window events from these apps are dropped when a web-watcher event covers
 # the same time span -- otherwise browser time would be counted twice

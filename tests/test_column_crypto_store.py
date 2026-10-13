@@ -287,3 +287,21 @@ def test_save_events_memoizes_sealing_per_unique_value(tmp_path, monkeypatch):
     assert len(rows) == 200
     assert rows[0]["title"] == "main.py"
     assert rows[1]["title"] == "inbox"
+
+
+def test_aw_client_defaults_to_ipv4_loopback():
+    """Regression (v1.17.0 release gate): the ActivityWatch client
+    defaulted to http://localhost:5600. On Windows localhost resolves
+    to IPv6 ::1 first; ActivityWatch listens on IPv4 only, so every
+    request burned ~2s on the IPv6 connection timeout before falling
+    back -- 8+s per home-page sync, hanging the cold-start test.
+    The default must be the explicit IPv4 loopback.
+    """
+    from focuscore.ingest import ActivityWatchClient, DEFAULT_BASE_URL
+    from focuscore import activitywatch as aw_mod
+    assert DEFAULT_BASE_URL.startswith("http://127.0.0.1:5600/"), \
+        DEFAULT_BASE_URL
+    assert aw_mod.API_BASE.startswith("http://127.0.0.1:5600/"), \
+        aw_mod.API_BASE
+    assert ActivityWatchClient().base_url.startswith(
+        "http://127.0.0.1:5600/"), ActivityWatchClient().base_url

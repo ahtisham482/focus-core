@@ -1,7 +1,9 @@
 """ActivityWatch detection: is it running, installed, or missing?
 
 Focus Core reads tracked activity from ActivityWatch's local REST API
-(http://localhost:5600/api/0/). A stranger's first question is always
+(http://127.0.0.1:5600/api/0/ -- explicit IPv4: on Windows "localhost"
+resolves to IPv6 ::1 first, costing ~2s per request against AW's
+IPv4-only listener). A stranger's first question is always
 "why is nothing showing up?" -- these helpers answer it in plain states:
 
 - ``"running"``               -- the server answers; tracking works.
@@ -16,7 +18,7 @@ import sys
 
 import requests
 
-API_BASE = "http://localhost:5600/api/0/"
+API_BASE = "http://127.0.0.1:5600/api/0/"
 PROBE_TIMEOUT = 2.0
 
 # Official releases page: always points at the newest release, whose
