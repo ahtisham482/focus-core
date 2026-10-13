@@ -17,6 +17,7 @@ import dashboard.app as _app_mod  # for monkeypatch-compatible access
 from dashboard.app import (
     WELCOME_STEPS,
     _alert_target_text,
+    _category_slug,
     _goal_manage_buttons,
     _goal_progress_html,
     _living_tabs,
@@ -172,6 +173,7 @@ def day_view(day):
 def activities():
     day = _parse_day(request.args.get("day")) or date.today().isoformat()
     rows = store.get_day_activities(day)
+    _custom_cats = store.get_categories()
     body_rows = []
     for row_idx, row in enumerate(rows):
         options = "".join(
@@ -182,7 +184,7 @@ def activities():
         )
         host = host_of(row["url"]) if row["url"] else ""
         body_rows.append(
-            "<tr><td>%s</td>"
+            "<tr class='timeline-row' data-category='%s'><td>%s</td>"
             "<td class='title-cell' title='%s'>%s</td>"
             "<td>%s</td><td>%s</td><td>%s</td><td>%.1fm</td>"
             "<td><form method='post' action='/override' style='margin:0'>"
@@ -191,7 +193,8 @@ def activities():
             "<label class='sr-only' for='score-%d'>Score for %s</label>"
             "<select name='score' id='score-%d'>%s</select> "
             "<button type='submit'>Set</button></form></td></tr>"
-            % (escape((row["ts"] or "")[11:16]),
+            % (_category_slug(row["category"], _custom_cats),
+               escape((row["ts"] or "")[11:16]),
                escape(row["title"] or ""), escape((row["title"] or "")[:60]),
                escape(row["app"] or ""), escape(host or "-"),
                escape(row["category"] or ""),
@@ -236,11 +239,11 @@ def activities():
         "<form class='wk-daybar' method='get' action='/activities'>"
         "<label>Day <input type='date' name='day' value='%s'></label> "
         "<button type='submit' class='secondary'>Show</button></form>"
-        "<section class='wk-section'><h2>What you did</h2>"
+        "<div class='card'><section class='wk-section'><h2>What you did</h2>"
         "<div class='wk-strip'><table>"
         "<tr><th>Time</th><th>Title</th><th>App</th><th>Site</th>"
         "<th>Category</th><th>Min</th><th>Score override</th></tr>%s</table>"
-        "</div></section>"
+        "</div></section></div>"
         "<p class='how-it-works'>Setting a score here overrides the "
         "category default for this activity, today and on future days. "
         "Teach Focus Core once and it remembers.</p>"

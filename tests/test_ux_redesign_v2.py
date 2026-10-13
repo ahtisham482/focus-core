@@ -389,3 +389,33 @@ def test_goal_rows_use_token_colors():
     html = _goal_progress_html(ev)
     assert "goal-row" in html
     assert "var(--ok)" in html or "var(--gold" in html
+
+
+def test_review_page_uses_cards(tmp_path, monkeypatch):
+    import dashboard.app as dash_app
+    from focuscore import store
+    db = str(tmp_path / "rev.db")
+    monkeypatch.setattr(store, "DEFAULT_DB_PATH", db)
+    store.init_db(db)
+    # Seed one activity so the review table has a real row to style.
+    today = date.today().isoformat()
+    store.save_events(today, [
+        {"app": "Code", "title": "main.py", "duration": 1800,
+         "score": 2, "category": "Software Development",
+         "ts": today + "T09:00:00", "url": "", "match_key": "code-main"},
+    ], path=db)
+    # Onboarded: some routes redirect to /welcome without the flag file.
+    flag = tmp_path / ".onboarded"
+    flag.write_text("2026-09-29")
+    monkeypatch.setattr(dash_app, "ONBOARDED_FLAG", flag)
+    dash_app.app.config["TESTING"] = True
+    client = dash_app.app.test_client()
+    res = client.get("/activities")
+    html = res.get_data(as_text=True)
+    assert res.status_code == 200
+    # The review summary section is wrapped in the shared card class.
+    assert "class='card'" in html
+    # Activity rows share the Day page's visual language: the timeline-row
+    # class plus a data-category slug for the --cat-* token colors.
+    assert "class='timeline-row'" in html
+    assert "data-category='software-development'" in html
