@@ -2365,3 +2365,20 @@ button.wk-big {
   .page-main .lv-tabs a.on { color: var(--accent-strong, var(--accent)); }
   .page-main .lv-tabs a svg { width: 22px; height: 22px; }
 }
+
+/* UX v2: buttons */
+.btn { display: inline-flex; align-items: center; justify-content: center;
+  gap: var(--sp-1); min-height: 44px; padding: 0 var(--sp-3);
+  border-radius: var(--radius-pill); font-weight: 600; font-size: var(--fs-body);
+  cursor: pointer; text-decoration: none; border: 1px solid transparent; }
+.btn-primary { background: var(--gold); color: var(--ink);
+  box-shadow: var(--shadow-card); }
+.btn-primary:hover { background: var(--gold-deep); color: var(--ink);
+  box-shadow: var(--shadow-lift); }
+/* Note: dark ink text on gold (not white) — white-on-gold fails WCAG AA contrast. */
+.btn-secondary { background: transparent; color: var(--ink);
+  border-color: var(--line); }
+.btn-secondary:hover { border-color: var(--gold); color: var(--gold-deep); }
+.btn-danger { background: transparent; color: var(--danger);
+  border-color: var(--danger); }
+.btn-danger:hover { background: var(--danger); color: #fff; }

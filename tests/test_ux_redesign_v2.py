@@ -110,3 +110,12 @@ def test_nav_js_has_dropdown_behavior():
     js = (pathlib.Path(__file__).resolve().parent.parent
           / "dashboard" / "static" / "nav.js").read_text()
     assert "nav-caret" in js and "Escape" in js
+
+
+def test_button_styles_use_tokens():
+    css = (pathlib.Path(__file__).resolve().parent.parent
+           / "dashboard" / "static" / "style.css").read_text()
+    section = css.split("UX v2: buttons")[1]
+    assert ".btn-primary" in section and "var(--gold)" in section
+    assert ".btn-secondary" in section and ".btn-danger" in section
+    assert "var(--radius-pill)" in section and "min-height: 44px" in section
