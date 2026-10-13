@@ -150,3 +150,11 @@ def test_input_styles_use_tokens():
     assert ":focus" in section and "var(--gold)" in section
     assert "min-height: 44px" in section
     assert "box-shadow: none" in section
+
+
+def test_empty_state_styles_use_tokens():
+    css = (pathlib.Path(__file__).resolve().parent.parent
+           / "dashboard" / "static" / "style.css").read_text()
+    section = css.split("UX v2: empty")[1]
+    assert ".empty-v2" in section and "var(--muted)" in section
+    assert ".empty-v2-icon" in section

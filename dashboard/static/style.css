@@ -2412,3 +2412,12 @@ input.input-v2:focus, select.input-v2:focus, textarea.input-v2:focus {
   border-color: var(--gold); box-shadow: none; }
 input.input-v2::placeholder, textarea.input-v2::placeholder {
   color: var(--muted); }
+
+/* UX v2: empty */
+.empty-v2 { text-align: center; padding: var(--sp-4) var(--sp-3);
+  color: var(--muted); }
+.empty-v2-icon { width: 48px; height: 48px; margin: 0 auto var(--sp-2);
+  color: var(--gold); opacity: 0.6; }
+.empty-v2-title { font-size: var(--fs-h3); font-weight: 600; color: var(--ink);
+  margin: 0 0 var(--sp-1); }
+.empty-v2 p { margin: 0 0 var(--sp-2); font-size: var(--fs-small); }
