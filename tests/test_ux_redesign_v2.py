@@ -311,3 +311,12 @@ def test_invoice_status_pills(tmp_path, monkeypatch):
     assert "status-sent" in html
     # the status word itself is unchanged — only the wrapper is new
     assert ">SENT<" in html
+
+
+def test_dark_mode_has_category_overrides():
+    css = (pathlib.Path(__file__).resolve().parent.parent
+           / "dashboard" / "static" / "tokens.css").read_text()
+    dark = css.split("[data-theme='dark']")[1]
+    for slug in ["business", "entertainment", "software-development",
+                 "utilities", "uncategorized"]:
+        assert f"--cat-{slug}:" in dark, f"dark block missing --cat-{slug}"
