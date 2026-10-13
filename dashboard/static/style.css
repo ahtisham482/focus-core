@@ -2421,3 +2421,11 @@ input.input-v2::placeholder, textarea.input-v2::placeholder {
 .empty-v2-title { font-size: var(--fs-h3); font-weight: 600; color: var(--ink);
   margin: 0 0 var(--sp-1); }
 .empty-v2 p { margin: 0 0 var(--sp-2); font-size: var(--fs-small); }
+
+/* UX v2: type */
+.page-title-v2 { font-size: var(--fs-display); font-weight: 800;
+  letter-spacing: -0.02em; color: var(--ink); margin: 0 0 var(--sp-2); }
+.section-title-v2 { font-size: var(--fs-h2); font-weight: 700;
+  letter-spacing: -0.01em; color: var(--ink); margin: 0 0 var(--sp-1); }
+.prose-v2 { font-size: var(--fs-body); line-height: 1.6; color: var(--ink); }
+.prose-v2 small, .caption-v2 { font-size: var(--fs-small); color: var(--muted); }

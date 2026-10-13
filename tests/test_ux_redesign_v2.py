@@ -158,3 +158,12 @@ def test_empty_state_styles_use_tokens():
     section = css.split("UX v2: empty")[1]
     assert ".empty-v2" in section and "var(--muted)" in section
     assert ".empty-v2-icon" in section
+
+
+def test_type_styles_use_tokens():
+    css = (pathlib.Path(__file__).resolve().parent.parent
+           / "dashboard" / "static" / "style.css").read_text()
+    section = css.split("UX v2: type")[1]
+    assert ".page-title-v2" in section and "var(--fs-display)" in section
+    assert ".section-title-v2" in section and "var(--fs-h2)" in section
+    assert ".prose-v2" in section and "line-height: 1.6" in section
