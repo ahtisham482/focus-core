@@ -508,14 +508,8 @@ button.secondary:hover, .btn.secondary:hover, .btn--ghost:hover {
   background: var(--bg-sunken);
   box-shadow: none;
 }
-button.danger, .btn.danger, .btn--danger {
-  background: var(--danger);
-  color: white;
-}
-button.danger:hover, .btn.danger:hover, .btn--danger:hover {
-  background: var(--p-red-700);
-  box-shadow: 0 2px 8px rgba(220,38,38,0.30);
-}
+/* UX v2 (Task 24): the old .danger button rule is retired — destructive buttons
+   now use the .btn-danger component (Task 7). Zero usages of the old class remain. */
 .btn--success {
   background: var(--success);
   color: white;
@@ -2499,3 +2493,7 @@ input.input-v2::placeholder, textarea.input-v2::placeholder {
   background: var(--surface); border: 1px solid var(--line);
   border-radius: var(--radius-card); padding: var(--sp-2) var(--sp-3);
   margin-bottom: var(--sp-2); }
+
+/* UX v2 (Task 24): .wk-section keeps its 36px bottom margin when wrapped in a
+   .card; without this the card is bottom-heavy (36px inside 20px padding). */
+.card > .wk-section:last-child { margin-bottom: 0; }
