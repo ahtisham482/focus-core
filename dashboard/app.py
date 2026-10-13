@@ -152,17 +152,29 @@ def layout(title, body, day=None, refresh=300, active="home",
     if text_size != "default":
         theme_attr += f" data-text-size='{text_size}'"
 
-    # ── Build nav with icon + label ────────────────────────────────
-    links = []
-    for nav_item in NAV_LINKS:
-        key, label, href, icon = nav_item
-        url = href
-        if key == "review" and day:
-            url = href + "?day=" + day
-        cls = " class='active'" if key == active else ""
-        svg = ("<svg width='15' height='15' aria-hidden='true'>"
-               "<use href='/static/icons.svg#icon-%s'/></svg>" % icon)
-        links.append("<a href='%s'%s>%s%s</a>" % (url, cls, svg, label))
+    # ── Build grouped nav with dropdowns (UX redesign v2) ─────────
+    groups = []
+    for gkey, glabel, ghref, members in NAV_GROUPS:
+        drop_links = []
+        for mkey in members:
+            mlabel, mhref, micon = _NAV_BY_KEY[mkey]
+            url = mhref
+            if mkey == "review" and day:
+                url = mhref + "?day=" + day
+            acls = " class='active'" if mkey == active else ""
+            svg = ("<svg width='15' height='15' aria-hidden='true'>"
+                   "<use href='/static/icons.svg#icon-%s'/></svg>" % micon)
+            drop_links.append(
+                "<a href='%s'%s>%s%s</a>" % (url, acls, svg, mlabel))
+        gcls = " nav-group active-group" if active in members else " nav-group"
+        groups.append(
+            '<div class="%s">'
+            "<a class='nav-group-label' href='%s'>%s</a>"
+            "<button class='nav-caret' aria-label='Open %s menu' aria-expanded='false'>"
+            "<svg width='10' height='10' aria-hidden='true'>"
+            "<use href='/static/icons.svg#icon-chevron-down'/></svg></button>"
+            "<div class='nav-dropdown'>%s</div>"
+            "</div>" % (gcls.strip(), ghref, glabel, glabel, "".join(drop_links)))
 
     # Theme toggle buttons (server-side POST, no JS required)
     theme_toggle = (
@@ -179,7 +191,7 @@ def layout(title, body, day=None, refresh=300, active="home",
     )
 
     nav = ("<nav class='topnav' id='topnav'>"
-           + "".join(links)
+           + "".join(groups)
            + theme_toggle
            + _text_size_form()
            + "</nav>")

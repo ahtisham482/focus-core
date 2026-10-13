@@ -54,3 +54,22 @@ def test_nav_group_primary_href_matches_first_member():
     by_key = {k: href for k, _, href, _ in NAV_LINKS}
     for gkey, _, ghref, members in NAV_GROUPS:
         assert ghref == by_key[members[0]], f"group {gkey} label href drifted"
+
+
+def test_layout_renders_grouped_nav():
+    html = layout("Dashboard", "<p>Hello</p>", active="focus")
+    # 4 group labels, each a link to its primary page
+    assert html.count("class='nav-group") == 4
+    assert "<a class='nav-group-label' href='/focus'>Focus</a>" in html
+    # dropdown holds every member; icons preserved
+    assert "class='nav-dropdown'" in html
+    assert "href='/timesheet'" in html and "href='/activities'" in html
+    # the active page's group is highlighted
+    assert "nav-group active-group" in html
+    # old flat links must be gone (no bare top-level /report link outside dropdown)
+    assert html.count("<nav class='topnav'") == 1
+
+
+def test_review_link_keeps_day_param():
+    html = layout("Dashboard", "<p>Hello</p>", day="2026-10-13", active="review")
+    assert "href='/activities?day=2026-10-13'" in html

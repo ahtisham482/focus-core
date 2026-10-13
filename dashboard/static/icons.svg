@@ -66,4 +66,8 @@
   <symbol id="icon-download" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round">
     <path d="M8 2v8M5 7l3 3 3-3M2.5 13.5h11"/>
   </symbol>
+  <!-- chevron down (nav dropdown caret) -->
+  <symbol id="icon-chevron-down" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round">
+    <path d="M3.5 6.5 8 11l4.5-4.5"/>
+  </symbol>
 </svg>
