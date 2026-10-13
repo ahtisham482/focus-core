@@ -1,6 +1,7 @@
 """Tests for UX redesign v2 (warm premium)."""
 import pathlib
 import re
+import sqlite3
 from dashboard.app import layout, NAV_GROUPS, NAV_LINKS
 from focuscore.taxonomy import DEFAULT_CATEGORIES
 
@@ -270,3 +271,43 @@ def test_timesheet_no_raw_datetime_values(tmp_path, monkeypatch):
     assert not re.search(r"\d{4}-\d{2}-\d{2}T\d{2}:\d{2}", html), \
         "timesheet still renders raw ISO datetimes"
     assert "timesheet-form" in html
+
+
+def test_invoice_status_pills(tmp_path, monkeypatch):
+    import dashboard.app as dash_app
+    from focuscore import invoices as inv_mod
+    from focuscore import store
+    db = str(tmp_path / "inv.db")
+    monkeypatch.setattr(store, "DEFAULT_DB_PATH", db)
+    store.init_db(db)
+    # Seed a sent invoice: project + rated entry -> draft -> send.
+    pid = store.add_project("Acme", client="Acme Corp", path=db)
+    eid = store.create_entry("2026-10-10", "2026-10-10T09:00",
+                             "2026-10-10T10:00", 60.0, "Work",
+                             project_id=pid, task="Dev",
+                             status="accepted", path=db)
+    conn = sqlite3.connect(db)
+    try:
+        conn.execute(
+            "UPDATE timesheet_entries SET hourly_rate_minor = 10000, "
+            "rate_currency = 'USD', rate_status = 'confirmed' "
+            "WHERE id = ?", (eid,))
+        conn.commit()
+    finally:
+        conn.close()
+    inv_id = inv_mod.create_invoice(
+        pid, "2026-10-10", "2026-10-10", entry_ids=[eid], path=db)
+    inv_mod.send_invoice(inv_id, path=db)
+    # Onboarded: some routes redirect to /welcome without the flag file.
+    flag = tmp_path / ".onboarded"
+    flag.write_text("2026-09-29")
+    monkeypatch.setattr(dash_app, "ONBOARDED_FLAG", flag)
+    dash_app.app.config["TESTING"] = True
+    client = dash_app.app.test_client()
+    res = client.get("/invoices")
+    html = res.get_data(as_text=True)
+    assert res.status_code == 200
+    assert "status-pill" in html
+    assert "status-sent" in html
+    # the status word itself is unchanged — only the wrapper is new
+    assert ">SENT<" in html

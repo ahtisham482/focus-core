@@ -45,6 +45,7 @@ from focuscore import store
 
 ROOT = Path(__file__).resolve().parent.parent
 STYLE_CSS = (ROOT / "dashboard/static/style.css").read_text(encoding="utf-8")
+TOKENS_CSS = (ROOT / "dashboard/static/tokens.css").read_text(encoding="utf-8")
 LIVING_CSS = (ROOT / "dashboard/static/living.css").read_text(encoding="utf-8")
 NAV_JS = (ROOT / "dashboard/static/nav.js").read_text(encoding="utf-8")
 FOCUS_JS = (ROOT / "dashboard/static/focus.js").read_text(encoding="utf-8")
@@ -493,6 +494,22 @@ def _style_theme(dark):
     return merged
 
 
+def _v2_tokens(dark):
+    """UX v2 design tokens (tokens.css), base merged under the dark theme."""
+    toks = _tokens(_block(TOKENS_CSS, ":root {"))
+    if dark:
+        toks.update(_tokens(_block(TOKENS_CSS, "[data-theme='dark'] {")))
+    return toks
+
+
+def _mix_hex(a_hex, b_hex, pct_a):
+    """color-mix(in srgb, A pct_a, B) for opaque hex colors -> hex."""
+    a = _rgb(a_hex)
+    b = _rgb(b_hex)
+    m = tuple(pct_a * ca + (1 - pct_a) * cb for ca, cb in zip(a, b))
+    return "#%02x%02x%02x" % tuple(int(round(c * 255)) for c in m)
+
+
 def _living_theme(light):
     base = _tokens(_block(LIVING_CSS, "body.living {"))
     if not light:
@@ -565,18 +582,22 @@ def test_contrast_status_and_pill_pairs_style_css():
         for surf in surfaces:
             ratio = _pair(tokens, "--warn-strong", surf, surf)
             assert ratio >= 4.5, (dark, "tired", surf, ratio)
-        # Invoice pills (foreground/background pairs from
-        # _invoice_status_badge) + the neutral default pill.
-        for fg, bg in (("--ink-muted", "--bg-sunken"),
-                       ("--ink-on-accent", "--accent"),
-                       ("#ffffff", "--success"),
-                       ("#ffffff", "--danger")):
-            lit = dict(tokens)
-            lit["#ffffff"] = "#ffffff"
-            fg_v = lit[fg] if fg.startswith("#") else _val(tokens, fg)
-            ratio = _ratio_on(fg_v, _val(tokens, bg),
-                              _val(tokens, "--bg"))
-            assert ratio >= 4.5, (dark, fg, bg, ratio)
+        # Invoice pills (UX v2: tinted .status-pill classes emitted by
+        # _invoice_status_badge; text mixes 55% toward --ink for AA).
+        # Mirrors the color-mix() in the "UX v2: invoices" CSS section:
+        # bg = 15% tint color over --surface, text = 55% color + 45% --ink.
+        v2 = _v2_tokens(dark)
+        for text_key, tint_key in (("--ok", "--ok"),
+                                   ("--gold-deep", "--gold"),
+                                   ("--danger", "--danger"),
+                                   ("--muted", None)):
+            text = _mix_hex(_val(v2, text_key), _val(v2, "--ink"), 0.55)
+            if tint_key is None:
+                bg = _val(v2, "--bg")  # draft/void: plain page background
+            else:
+                bg = _mix_hex(_val(v2, tint_key), _val(v2, "--surface"), 0.15)
+            r = _ratio(text, bg)
+            assert r >= 4.5, (dark, text_key, round(r, 2))
     # Wiring: the shipped rules actually use the fixed pairings.
     for marker, needle in (
             (".badge--success", "var(--success-strong"),
@@ -598,10 +619,25 @@ def test_contrast_status_and_pill_pairs_style_css():
     assert "background: var(--bg-sunken)" in pill
     i = APP_PY.index("_invoice_status_badge")
     badge_fn = APP_PY[i:APP_PY.index("\ndef ", i + 1)]
-    for needle in ("var(--bg-sunken)", "var(--ink-muted)",
-                   "var(--accent)", "var(--ink-on-accent)",
-                   "var(--success)", "var(--danger)"):
+    for needle in ("status-pill", "status-%s"):
         assert needle in badge_fn, needle
+    # Wiring: the shipped .status-* rules use the tinted AA pairings.
+    # (tint_key None = plain --bg background, no color-mix.)
+    for cls, tint_key, text_key in ((".status-paid", "--ok", "--ok"),
+                                    (".status-sent", "--gold", "--gold-deep"),
+                                    (".status-overdue", "--danger",
+                                     "--danger"),
+                                    (".status-draft", None, "--muted"),
+                                    (".status-void", None, "--muted")):
+        j = STYLE_CSS.index("/* UX v2: invoices */")
+        k = STYLE_CSS.index(cls + " {", j)
+        rule = STYLE_CSS[k:k + 260]
+        if tint_key is None:
+            assert "background: var(--bg)" in rule, cls
+        else:
+            assert ("color-mix(in srgb, var(%s) 15%%" % tint_key) in rule, cls
+        assert ("color-mix(in srgb, var(%s) 55%%, var(--ink))" % text_key
+                ) in rule, cls
 
 
 def test_contrast_named_pairs_living_css():

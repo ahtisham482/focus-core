@@ -2463,3 +2463,25 @@ input.input-v2::placeholder, textarea.input-v2::placeholder {
 /* UX v2: timesheet */
 .timesheet-form .form-row { display: flex; flex-wrap: wrap;
   gap: var(--sp-2); align-items: center; margin-bottom: var(--sp-2); }
+
+/* UX v2: invoices */
+/* NOTE: classes map to the real invoice statuses
+   (focuscore.invoices.STATUSES = draft/sent/paid/void); "sent" takes the
+   plan's gold "pending" styling since a sent invoice awaits payment.
+   Text colors mix 55% toward --ink so every pill clears WCAG AA 4.5:1
+   in both themes (verified in test_accessibility_115.py) — the plan's
+   bare --ok/--gold-deep/--danger text did not. */
+.status-pill { display: inline-block; padding: 2px 10px;
+  border-radius: var(--radius-pill); font-size: var(--fs-small);
+  font-weight: 600; }
+.status-paid { background: color-mix(in srgb, var(--ok) 15%, transparent);
+  color: color-mix(in srgb, var(--ok) 55%, var(--ink)); }
+.status-sent { background: color-mix(in srgb, var(--gold) 15%, transparent);
+  color: color-mix(in srgb, var(--gold-deep) 55%, var(--ink)); }
+.status-overdue { background: color-mix(in srgb, var(--danger) 15%, transparent);
+  color: color-mix(in srgb, var(--danger) 55%, var(--ink)); }
+.status-draft { background: var(--bg);
+  color: color-mix(in srgb, var(--muted) 55%, var(--ink)); }
+.status-void { background: var(--bg);
+  color: color-mix(in srgb, var(--muted) 55%, var(--ink));
+  text-decoration: line-through; }

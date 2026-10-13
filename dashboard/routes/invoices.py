@@ -66,7 +66,8 @@ def invoices_page():
                    money_mod.format_minor(draft_total, currency),
                    inv["id"], inv["id"]))
             continue
-        overdue = " <strong>OVERDUE</strong>" if inv["overdue"] else ""
+        overdue = (" <span class='status-pill status-overdue'>OVERDUE</span>"
+                   if inv["overdue"] else "")
         history_rows.append(
             "<tr><td><a href='/invoices/%d'>%s</a></td>"
             "<td>%s</td><td>%s</td><td>%s</td>"
