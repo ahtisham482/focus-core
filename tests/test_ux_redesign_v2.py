@@ -1,6 +1,5 @@
 """Tests for UX redesign v2 (warm premium)."""
 import pathlib
-import dashboard.app as dash_app
 from dashboard.app import layout
 
 TOKENS = pathlib.Path(__file__).resolve().parent.parent / "dashboard" / "static" / "tokens.css"
