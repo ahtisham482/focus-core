@@ -2497,3 +2497,11 @@ input.input-v2::placeholder, textarea.input-v2::placeholder {
 /* UX v2 (Task 24): .wk-section keeps its 36px bottom margin when wrapped in a
    .card; without this the card is bottom-heavy (36px inside 20px padding). */
 .card > .wk-section:last-child { margin-bottom: 0; }
+
+/* UX v2: welcome */
+.welcome-hero { text-align: center; padding: var(--sp-8) var(--sp-3); }
+/* The hero title is an h2.hm-wtitle, not an h1 — the type-scale rule targets
+   the actual element. (No .welcome-steps rule: the page has no steps-list
+   markup; dead CSS stays out, per the Task 22 .toggle-row precedent.) */
+.welcome-hero .hm-wtitle { font-size: var(--fs-display);
+  line-height: var(--lh-display); letter-spacing: -0.02em; }

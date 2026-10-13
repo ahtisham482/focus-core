@@ -481,3 +481,17 @@ def test_backup_page_uses_cards(tmp_path, monkeypatch):
     html = res.get_data(as_text=True)
     assert res.status_code == 200
     assert "class='card'" in html
+
+
+def test_welcome_uses_type_scale(tmp_path, monkeypatch):
+    import dashboard.app as dash_app
+    from focuscore import store
+    db = str(tmp_path / "wel.db")
+    monkeypatch.setattr(store, "DEFAULT_DB_PATH", db)
+    store.init_db(db)
+    dash_app.app.config["TESTING"] = True
+    client = dash_app.app.test_client()
+    res = client.get("/welcome")
+    html = res.get_data(as_text=True)
+    assert res.status_code == 200
+    assert "welcome-hero" in html

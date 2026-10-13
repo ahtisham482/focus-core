@@ -97,7 +97,7 @@ def welcome():
         "<svg class='hm-wicon' width='44' height='44' aria-hidden='true'>"
         "<use href='/static/icons.svg#icon-%s'/></svg>" % info["icon"])
     body = (
-        "<div class='hm-wrap'><div class='hm-welcome'>"
+        "<div class='hm-wrap'><div class='hm-welcome welcome-hero'>"
         "<div class='hm-dots' aria-label='Step %d of %d'>%s</div>"
         "%s<h2 class='hm-wtitle'>%s</h2><p class='hm-wtext'>%s</p>"
         "%s%s%s%s"
