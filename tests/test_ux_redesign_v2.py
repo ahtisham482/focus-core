@@ -2,6 +2,7 @@
 import pathlib
 import re
 import sqlite3
+from datetime import date
 from dashboard.app import layout, NAV_GROUPS, NAV_LINKS
 from focuscore.taxonomy import DEFAULT_CATEGORIES
 
@@ -330,7 +331,6 @@ def test_report_uses_cards(tmp_path, monkeypatch):
     store.init_db(db)
     # Seed a day of tracked time: an empty DB takes the empty-state branch,
     # which renders no cards and no chart tables.
-    from datetime import date
     today = date.today().isoformat()
     store.save_events(today, [
         {"app": "Code", "title": "main.py", "duration": 3600,
