@@ -57,6 +57,7 @@ def _retention_card_html():
                 "&mdash; nothing changed.</p>")
     window_label = "Keep forever" if months is None else f"{months} months"
     return (
+        "<div class='card'>"
         "<section class='wk-section' aria-label='Data retention'>"
         "<h2>Data retention</h2>"
         "<p>Focus Core keeps detailed activity for "
@@ -72,7 +73,7 @@ def _retention_card_html():
         "timesheets and other money records are never auto-deleted "
         "&mdash; only the day-to-day detail goes. Totals like lifetime XP "
         "on the Focus page cover your kept history: pruning old detail "
-        "also trims the XP tied to those days.</p></section>"
+        "also trims the XP tied to those days.</p></section></div>"
     )
 
 
@@ -99,11 +100,12 @@ def _erase_all_card_html():
         f"<li>{label}</li>" for label, _tables in retention_mod.ERASE_BULLETS
     )
     return (
+        "<div class='card'>"
         "<section class='wk-section' aria-label='Erase all my data'>"
         "<h2>Erase all my data</h2>"
         "<p>Delete <b>everything</b> Focus Core knows about you, right "
         "here in the app &mdash; no need to uninstall.</p>"
-        "<button type='button' class='danger' id='erase-show-btn'>"
+        "<button type='button' class='btn btn-danger' id='erase-show-btn'>"
         "Erase all my data</button>"
         "<div id='erase-confirm' hidden>"
         "<p><b>This will permanently delete:</b></p>"
@@ -118,7 +120,7 @@ def _erase_all_card_html():
         "</label> "
         "<input name='confirmation' id='erase-confirm-input' "
         "autocomplete='off' placeholder='ERASE'> "
-        "<button type='submit' class='danger'>"
+        "<button type='submit' class='btn btn-danger'>"
         "Yes, erase everything</button>"
         f"</form>{error}</div>{done}"
         "<script>"
@@ -129,7 +131,7 @@ def _erase_all_card_html():
         "if (!c.hidden) {"
         "document.getElementById('erase-confirm-input').focus();"
         "}});"
-        "</script></section>"
+        "</script></section></div>"
     )
 
 
@@ -247,7 +249,7 @@ def _backup_encryption_card_html(backup_mod):
     enabled = backup_mod.is_encryption_enabled()
     if not enabled:
         return (
-            "<section class='wk-section'><h2>Backup encryption</h2>"
+            "<div class='card'><section class='wk-section'><h2>Backup encryption</h2>"
             "<p>Encryption is <b>off</b>. You can protect backups that "
             "leave this PC (for example the Google Drive copy) with a "
             "passphrase. Without your passphrase, nobody can open an "
@@ -269,11 +271,11 @@ def _backup_encryption_card_html(backup_mod):
             "it somewhere safe.</p>"
             "<p class='note'>Changing your passphrase later does not "
             "change old backups: each backup keeps the passphrase it "
-            "was made with.</p></section>")
+            "was made with.</p></section></div>")
     locked = backup_mod.is_locked()
     if locked:
         return (
-            "<section class='wk-section'><h2>Backup encryption</h2>"
+            "<div class='card'><section class='wk-section'><h2>Backup encryption</h2>"
             "<p>Encryption is <b>on</b>, but this PC is locked: "
             "automatic backups cannot run until you unlock.</p>"
             "<form method='post' action='/backup/encryption/unlock'>"
@@ -295,9 +297,9 @@ def _backup_encryption_card_html(backup_mod):
             "<p class='note'>Turning encryption off does not decrypt "
             "old backups: they stay encrypted with the passphrase "
             "they were made with. Changing your passphrase later "
-            "does not change old backups either.</p></section>")
+            "does not change old backups either.</p></section></div>")
     return (
-        "<section class='wk-section'><h2>Backup encryption</h2>"
+        "<div class='card'><section class='wk-section'><h2>Backup encryption</h2>"
         "<p>Encryption is <b>on</b>. New backups are protected with "
         "your passphrase, and automatic backups on this PC can run.</p>"
         "<form method='post' action='/backup/encryption/disable'>"
@@ -314,7 +316,7 @@ def _backup_encryption_card_html(backup_mod):
         "<p class='note'>To use a different passphrase, turn "
         "encryption off and turn it on again with the new one. "
         "Changing your passphrase does not change old backups: each "
-        "backup keeps the passphrase it was made with.</p></section>")
+        "backup keeps the passphrase it was made with.</p></section></div>")
 
 
 @bp.route("/backup/diagnostics")

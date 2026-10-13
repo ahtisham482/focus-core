@@ -463,3 +463,21 @@ def test_alerts_page_uses_cards(tmp_path, monkeypatch):
     html = res.get_data(as_text=True)
     assert res.status_code == 200
     assert "alert-row" in html
+
+
+def test_backup_page_uses_cards(tmp_path, monkeypatch):
+    import dashboard.app as dash_app
+    from focuscore import store
+    db = str(tmp_path / "bak.db")
+    monkeypatch.setattr(store, "DEFAULT_DB_PATH", db)
+    store.init_db(db)
+    # Onboarded: some routes redirect to /welcome without the flag file.
+    flag = tmp_path / ".onboarded"
+    flag.write_text("2026-10-13")
+    monkeypatch.setattr(dash_app, "ONBOARDED_FLAG", flag)
+    dash_app.app.config["TESTING"] = True
+    client = dash_app.app.test_client()
+    res = client.get("/backup")
+    html = res.get_data(as_text=True)
+    assert res.status_code == 200
+    assert "class='card'" in html
