@@ -510,6 +510,13 @@ cd ~/workspace/focus-core-v1.15 && git add dashboard/static/nav.js tests/test_ux
 
 Each task appends a marked `/* UX v2: <component> */` section to `dashboard/static/style.css`, using only `var(--token)` values. Existing selectors keep working; these are additive restyles.
 
+**SPECIFICITY RULE (learned Tasks 7 & 9):** old rules use element+attribute selectors
+(`input[type=text]` = 0,1,1; `.topnav a` = 0,1,1) that BEAT plain new classes (0,1,0).
+"Appended later wins" only applies on ties. Every new component selector must be scoped
+to tie-or-beat the old rule it replaces (e.g. `input.input-v2`, `.btn.btn-sm`,
+`.topnav .nav-group-label`), and the test should assert the FULL selector string,
+not just a substring. The quality reviewer must check this on every component task.
+
 ### Task 7: Buttons
 
 **Files:**
