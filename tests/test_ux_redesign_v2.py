@@ -91,9 +91,16 @@ def test_review_link_keeps_day_param():
 def test_nav_dropdown_styles_use_tokens():
     css = (pathlib.Path(__file__).resolve().parent.parent
            / "dashboard" / "static" / "style.css").read_text()
+    # slice the new nav section so token assertions are tied to it, not the whole file
+    section = css.split("UX v2: grouped")[1]
     for sel in [".nav-group", ".nav-group-label", ".nav-dropdown",
                 ".nav-group.open .nav-dropdown",
                 ".nav-group:hover .nav-dropdown",
-                ".nav-group:focus-within .nav-dropdown"]:
-        assert sel in css, f"style.css missing {sel}"
-    assert "var(--surface)" in css and "var(--shadow-lift)" in css
+                ".nav-group:focus-within .nav-dropdown",
+                ".nav-caret:hover",
+                ".nav-group:last-child .nav-dropdown"]:
+        assert sel in section, f"grouped nav section missing {sel}"
+    for token in ["var(--surface)", "var(--shadow-lift)", "var(--gold-deep)",
+                  "var(--radius-card)"]:
+        assert token in section, f"grouped nav section missing {token}"
+    assert "overflow: visible" in section

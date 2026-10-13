@@ -260,70 +260,31 @@ body {
   padding: 0 16px 80px;
 }
 
-/* ═══════════════════════════ NAVIGATION ═════════════════════════════ */
-.topnav {
-  display: flex;
-  align-items: center;
-  gap: 2px;
-  background: var(--bg-frosted);
-  border: 1px solid var(--border);
-  border-radius: var(--r-lg);
-  padding: 4px 6px;
-  margin: 12px 16px 20px;
-  position: sticky;
-  top: 8px;
-  z-index: 100;
-  backdrop-filter: blur(14px) saturate(1.6);
-  -webkit-backdrop-filter: blur(14px) saturate(1.6);
-  box-shadow: var(--shadow-2);
-  overflow-x: auto;
-  scrollbar-width: none;
-}
-.topnav::-webkit-scrollbar { display: none; }
-
-.topnav a {
-  display: flex;
-  align-items: center;
-  gap: 6px;
-  font-size: var(--text-sm);
-  font-weight: 500;
-  padding: 7px 11px;
-  border-radius: var(--r-md);
-  color: var(--ink-muted);
-  text-decoration: none;
-  white-space: nowrap;
-  position: relative;
-  transition: color var(--dur-fast) var(--ease-out),
-              background var(--dur-fast) var(--ease-out);
-  letter-spacing: -0.01em;
-}
-.topnav a svg {
-  width: 15px; height: 15px;
-  flex-shrink: 0;
-  transition: color var(--dur-fast);
-}
-.topnav a:hover {
-  color: var(--ink);
-  background: var(--bg-sunken);
-}
-.topnav a.active {
-  color: var(--accent-strong, var(--accent));
-  font-weight: 600;
-  background: var(--accent-soft);
-}
-
-/* Sliding indicator pill */
-.nav-indicator {
-  position: absolute;
-  height: calc(100% - 8px);
-  top: 4px;
-  border-radius: var(--r-md);
-  background: var(--accent-soft);
-  pointer-events: none;
-  transition: left var(--dur-base) var(--ease-out),
-              width var(--dur-base) var(--ease-out);
-  opacity: 0;
-}
+/* ═══════════════════════════ NAVIGATION (UX v2: grouped) ═════════════════════════════ */
+.topnav { display: flex; align-items: center; gap: var(--sp-1);
+  background: var(--surface); border-bottom: 1px solid var(--line);
+  padding: 0 var(--sp-3); position: sticky; top: 0; z-index: 100;
+  overflow: visible; }
+.nav-group { position: relative; }
+.topnav .nav-group-label { display: inline-block; padding: var(--sp-2) var(--sp-1);
+  color: var(--ink); text-decoration: none; font-weight: 600; }
+.nav-group.active-group .nav-group-label { color: var(--gold-deep); }
+.nav-caret { background: none; border: none; cursor: pointer;
+  color: var(--muted); padding: var(--sp-1); }
+.nav-caret:hover { background: none; box-shadow: none; color: var(--ink); }
+.nav-dropdown { display: none; position: absolute; top: 100%; left: 0;
+  min-width: 220px; background: var(--surface);
+  border: 1px solid var(--line); border-radius: var(--radius-card);
+  box-shadow: var(--shadow-lift); padding: var(--sp-1); z-index: 50; }
+.nav-group:last-child .nav-dropdown { left: auto; right: 0; }
+.nav-dropdown a { display: flex; align-items: center; gap: var(--sp-1);
+  padding: var(--sp-1) var(--sp-2); border-radius: var(--radius-input);
+  color: var(--ink); text-decoration: none; }
+.nav-dropdown a:hover { background: var(--bg); }
+.nav-dropdown a.active { color: var(--gold-deep); font-weight: 700; }
+.nav-group:hover .nav-dropdown,
+.nav-group:focus-within .nav-dropdown,
+.nav-group.open .nav-dropdown { display: block; }
 
 /* Theme toggle inside nav */
 .theme-toggle {
@@ -2413,26 +2374,3 @@ button.wk-big {
   .page-main .lv-tabs a.on { color: var(--accent-strong, var(--accent)); }
   .page-main .lv-tabs a svg { width: 22px; height: 22px; }
 }
-
-/* UX v2: grouped nav */
-.topnav { display: flex; align-items: center; gap: var(--sp-1);
-  background: var(--surface); border-bottom: 1px solid var(--line);
-  padding: 0 var(--sp-3); }
-.nav-group { position: relative; }
-.nav-group-label { display: inline-block; padding: var(--sp-2) var(--sp-1);
-  color: var(--ink); text-decoration: none; font-weight: 600; }
-.nav-group.active-group .nav-group-label { color: var(--gold-deep); }
-.nav-caret { background: none; border: none; cursor: pointer;
-  color: var(--muted); padding: var(--sp-1); }
-.nav-dropdown { display: none; position: absolute; top: 100%; left: 0;
-  min-width: 220px; background: var(--surface);
-  border: 1px solid var(--line); border-radius: var(--radius-card);
-  box-shadow: var(--shadow-lift); padding: var(--sp-1); z-index: 50; }
-.nav-dropdown a { display: flex; align-items: center; gap: var(--sp-1);
-  padding: var(--sp-1) var(--sp-2); border-radius: var(--radius-input);
-  color: var(--ink); text-decoration: none; }
-.nav-dropdown a:hover { background: var(--bg); }
-.nav-dropdown a.active { color: var(--gold-deep); font-weight: 700; }
-.nav-group:hover .nav-dropdown,
-.nav-group:focus-within .nav-dropdown,
-.nav-group.open .nav-dropdown { display: block; }

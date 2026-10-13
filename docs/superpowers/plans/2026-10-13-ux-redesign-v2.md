@@ -344,11 +344,20 @@ Expected: all pass (the old `test_nav_links_have_icons` still passes because `NA
 cd ~/workspace/focus-core-v1.15 && git add dashboard/app.py dashboard/static/icons.svg tests/test_ux_redesign_v2.py && git commit -m "ux-v2: grouped top navigation with dropdowns"
 ```
 
-### Task 5: Dropdown styles
+### Task 5: Dropdown styles (replaces old nav CSS)
 
 **Files:**
-- Modify: `dashboard/static/style.css` (append a clearly-marked `/* UX v2: grouped nav */` section)
+- Modify: `dashboard/static/style.css` (REPLACE the old `/* NAVIGATION */` block — do not append)
+- Modify: `dashboard/static/nav.js` (guard the old sliding-indicator `initNav`)
 - Test: `tests/test_ux_redesign_v2.py`
+
+Why replace instead of append: the old `.topnav` rules survive on any property the new
+block doesn't reset — notably `overflow-x: auto`, which clips absolutely-positioned
+dropdowns entirely, and `.topnav a` (0,1,1) which beats `.nav-group-label` (0,1,0).
+Appending cannot fix this; the old flat-nav rules must go. Keep `.theme-toggle`
+and `.text-size-form` (still used). Also guard `initNav()` in `nav.js`: return early
+when `.nav-group` exists, so the old sliding indicator never positions itself on
+hidden dropdown links.
 
 - [ ] **Step 1: Write the failing test**
 
@@ -356,12 +365,20 @@ cd ~/workspace/focus-core-v1.15 && git add dashboard/app.py dashboard/static/ico
 def test_nav_dropdown_styles_use_tokens():
     css = (pathlib.Path(__file__).resolve().parent.parent
            / "dashboard" / "static" / "style.css").read_text()
+    # slice the new nav section so token assertions are tied to it, not the whole file
+    section = css.split("UX v2: grouped")[1]
     for sel in [".nav-group", ".nav-group-label", ".nav-dropdown",
                 ".nav-group.open .nav-dropdown",
                 ".nav-group:hover .nav-dropdown",
-                ".nav-group:focus-within .nav-dropdown"]:
-        assert sel in css, f"style.css missing {sel}"
-    assert "var(--surface)" in css and "var(--shadow-lift)" in css
+                ".nav-group:focus-within .nav-dropdown",
+                ".nav-caret:hover",
+                ".nav-group:last-child .nav-dropdown"]:
+        assert sel in section, f"grouped nav section missing {sel}"
+    for token in ["var(--surface)", "var(--shadow-lift)", "var(--gold-deep)",
+                  "var(--radius-card)"]:
+        assert token in section, f"grouped nav section missing {token}"
+    assert "overflow: visible" in section
+```
 ```
 
 - [ ] **Step 2: Run test to verify it fails**
@@ -369,23 +386,31 @@ def test_nav_dropdown_styles_use_tokens():
 Run: `cd ~/workspace/focus-core-v1.15 && TZ=Asia/Karachi ~/workspace/venvs/fc-venv/bin/pytest tests/test_ux_redesign_v2.py -q -k "dropdown_styles"`
 Expected: FAIL.
 
-- [ ] **Step 3: Append the nav section to `style.css`**
+- [ ] **Step 3: Replace the old nav block in `style.css`**
+
+Delete the old `/* NAVIGATION */` block (`.topnav`, `.topnav::-webkit-scrollbar`,
+`.topnav a`, `.topnav a svg`, `.topnav a:hover`, `.topnav a.active`, and the
+`.nav-indicator` block) and put this in its place. Keep `.theme-toggle` and
+`.text-size-form` untouched.
 
 ```css
-/* UX v2: grouped nav */
+/* ═══════════════════════════ NAVIGATION (UX v2: grouped) ═════════════════════════════ */
 .topnav { display: flex; align-items: center; gap: var(--sp-1);
   background: var(--surface); border-bottom: 1px solid var(--line);
-  padding: 0 var(--sp-3); }
+  padding: 0 var(--sp-3); position: sticky; top: 0; z-index: 100;
+  overflow: visible; }
 .nav-group { position: relative; }
-.nav-group-label { display: inline-block; padding: var(--sp-2) var(--sp-1);
+.topnav .nav-group-label { display: inline-block; padding: var(--sp-2) var(--sp-1);
   color: var(--ink); text-decoration: none; font-weight: 600; }
 .nav-group.active-group .nav-group-label { color: var(--gold-deep); }
 .nav-caret { background: none; border: none; cursor: pointer;
   color: var(--muted); padding: var(--sp-1); }
+.nav-caret:hover { background: none; box-shadow: none; color: var(--ink); }
 .nav-dropdown { display: none; position: absolute; top: 100%; left: 0;
   min-width: 220px; background: var(--surface);
   border: 1px solid var(--line); border-radius: var(--radius-card);
   box-shadow: var(--shadow-lift); padding: var(--sp-1); z-index: 50; }
+.nav-group:last-child .nav-dropdown { left: auto; right: 0; }
 .nav-dropdown a { display: flex; align-items: center; gap: var(--sp-1);
   padding: var(--sp-1) var(--sp-2); border-radius: var(--radius-input);
   color: var(--ink); text-decoration: none; }
@@ -396,6 +421,12 @@ Expected: FAIL.
 .nav-group.open .nav-dropdown { display: block; }
 ```
 
+Also in `dashboard/static/nav.js`, guard the old sliding indicator at the top of
+`initNav()` so it never runs on the grouped nav:
+```js
+if (nav.querySelector('.nav-group')) return; // UX v2 grouped nav: no sliding indicator
+```
+
 - [ ] **Step 4: Run test to verify it passes**
 
 Run: `cd ~/workspace/focus-core-v1.15 && TZ=Asia/Karachi ~/workspace/venvs/fc-venv/bin/pytest tests/test_ux_redesign_v2.py -q -k "dropdown_styles"`
@@ -404,7 +435,7 @@ Expected: pass.
 - [ ] **Step 5: Commit**
 
 ```bash
-cd ~/workspace/focus-core-v1.15 && git add dashboard/static/style.css tests/test_ux_redesign_v2.py && git commit -m "ux-v2: grouped nav dropdown styles"
+cd ~/workspace/focus-core-v1.15 && git add dashboard/static/style.css dashboard/static/nav.js tests/test_ux_redesign_v2.py && git commit -m "ux-v2: grouped nav dropdown styles"
 ```
 
 ### Task 6: Dropdown toggle behavior in `nav.js`

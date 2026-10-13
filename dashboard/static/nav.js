@@ -182,6 +182,7 @@
   function initNav() {
     var nav = document.getElementById('topnav');
     if (!nav) return;
+    if (nav.querySelector('.nav-group')) return; // UX v2 grouped nav: no sliding indicator
     var active = nav.querySelector('a.active');
     if (!active) return;
 
