@@ -1046,20 +1046,22 @@ cd ~/workspace/focus-core-v1.15 && git add dashboard/routes/invoices.py dashboar
 ### Task 17: Shared chart palette (category colors in SVGs)
 
 **Files:**
-- Modify: `dashboard/routes/system_intelligence.py` (`_svg_donut()` ~line 368, `_svg_heatmap()` ~line 409, `_svg_sparkline()` ~line 450)
+- Modify: `dashboard/static/tokens.css` (dark-mode category overrides)
 - Test: `tests/test_ux_redesign_v2.py`
 
-The SVG helpers currently hardcode fill colors. They must use the `--cat-*` token slugs so charts match the timeline.
+**CORRECTION (found during implementation, 2026-10-13):** the plan originally asked to
+convert `_svg_donut()`/`_svg_heatmap()`/`_svg_sparkline()` in
+`dashboard/routes/system_intelligence.py` to `--cat-*` tokens. That premise was false:
+those helpers render **score buckets** (`deep`/`shallow`/`neutral`/`distraction`),
+**switch-count intensity gradients**, and **score trends** — zero occurrences of
+"category" in the file (verified). Painting non-category data with category colors
+would violate the spec's own "each category always uses the same color" rule.
+The SVG conversion is DROPPED. The real deliverable — brightened `--cat-*` overrides
+for dark mode (deferred from Task 2; Task 13's timeline needed them) — is done below.
 
 - [ ] **Step 1: Write the failing test**
 
 ```python
-def test_svg_helpers_use_category_tokens():
-    import dashboard.routes.system_intelligence as intel
-    src = pathlib.Path(intel.__file__).read_text()
-    assert "var(--cat-" in src, "SVG helpers still hardcode colors"
-
-
 def test_dark_mode_has_category_overrides():
     css = (pathlib.Path(__file__).resolve().parent.parent
            / "dashboard" / "static" / "tokens.css").read_text()
@@ -1069,15 +1071,17 @@ def test_dark_mode_has_category_overrides():
         assert f"--cat-{slug}:" in dark, f"dark block missing --cat-{slug}"
 ```
 
+(The plan's `test_svg_helpers_use_category_tokens` is intentionally NOT written —
+see the CORRECTION above. Committing a test for a conversion that must not happen
+would be dishonest.)
+
 - [ ] **Step 2: Run test to verify it fails**
 
 Run: `cd ~/workspace/focus-core-v1.15 && TZ=Asia/Karachi ~/workspace/venvs/fc-venv/bin/pytest tests/test_ux_redesign_v2.py -q -k "category_tokens"`
 Expected: FAIL.
 
 - [ ] **Step 3: Implement**
-  In `_svg_donut()`, `_svg_heatmap()`, `_svg_sparkline()`: replace hardcoded hex fills for categories with `var(--cat-<slug>)` using the same slug rule as Task 13 (lowercase, spaces/`&` → `-`; custom sub-categories inherit the parent slug). SVG presentation attributes accept CSS `var()` in `fill` — e.g. `fill='var(--cat-business)'`.
-
-  Also append brightened category variants to the `[data-theme='dark']` block in `dashboard/static/tokens.css` (dark backgrounds need brighter colors):
+  Append brightened category variants to the `[data-theme='dark']` block in `dashboard/static/tokens.css` (dark backgrounds need brighter colors):
 ```css
   --cat-business: #66bb6a;
   --cat-communication-scheduling: #64b5f6;
