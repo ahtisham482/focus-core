@@ -243,3 +243,47 @@ def test_migration_10_protect_failure_keeps_plaintext(tmp_path, monkeypatch):
     # Rows keep displaying normally (legacy plaintext passes through).
     assert store.get_day_activities("2026-10-01",
                                     path=db)[0]["title"] == "Old plaintext title"
+
+
+def test_save_events_memoizes_sealing_per_unique_value(tmp_path, monkeypatch):
+    """Regression (v1.17.0 release gate): save_events sealed every
+    event's title/URL with its own protector call. On Windows the
+    protector is DPAPI (CryptProtectData, ~1ms per call), so a day
+    with thousands of repeated titles made the home page -- which
+    syncs on every load -- hang past the 30s cold-start ceiling.
+    Identical plaintext must be sealed once per bulk insert.
+    """
+    calls = []
+
+    class _CountingProtector:
+        name = "counting-test"
+
+        def protect(self, data: bytes) -> bytes:
+            calls.append(data)
+            return b"sealed:" + data
+
+        def unprotect(self, data: bytes) -> bytes:
+            assert data.startswith(b"sealed:")
+            return data[len(b"sealed:"):]
+
+    monkeypatch.setattr(columncrypto, "_protector", _CountingProtector())
+    db = str(tmp_path / "memo.db")
+    titles = ["main.py", "inbox", "main.py", "review"]
+    events = [
+        {"ts": f"2026-10-13T09:{i:02d}:00", "duration": 60.0,
+         "app": "Code", "title": titles[i % len(titles)], "url": None,
+         "category": "Software Development", "score": 2,
+         "override_score": None, "match_key": "code-"}
+        for i in range(200)
+    ]
+    store.save_events("2026-10-13", events, path=db)
+    # 200 events but only 3 unique titles; None/"" pass through
+    # without touching the protector.
+    assert sorted(set(calls)) == [b"inbox", b"main.py", b"review"]
+    assert len(calls) == 3, \
+        f"protector called {len(calls)} times for 3 unique titles"
+    # Stored rows still round-trip to the original plaintext.
+    rows = store.get_day_activities("2026-10-13", path=db)
+    assert len(rows) == 200
+    assert rows[0]["title"] == "main.py"
+    assert rows[1]["title"] == "inbox"

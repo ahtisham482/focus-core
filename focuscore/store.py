@@ -268,6 +268,18 @@ def save_events(
     """Store one day's categorized events (idempotent: replaces the day)."""
     init_db(path)
     conn = get_db(path)
+    # v1.17.0 repair: on Windows protect_text() is a DPAPI
+    # (CryptProtectData) call per value (~1ms). A day's events repeat
+    # the same titles/URLs thousands of times, so seal each unique
+    # plaintext once per bulk insert -- identical input always seals
+    # to a value that unprotects back to the same plaintext.
+    _sealed: dict[Any, Any] = {}
+
+    def _seal(value):
+        if value not in _sealed:
+            _sealed[value] = columncrypto.protect_text(value)
+        return _sealed[value]
+
     try:
         conn.execute("DELETE FROM activities WHERE day = ?", (day,))
         conn.executemany(
@@ -278,8 +290,8 @@ def save_events(
             [
                 (
                     e.get("ts"), e.get("duration", 0), e.get("app", ""),
-                    columncrypto.protect_text(e.get("title", "")),
-                    columncrypto.protect_text(e.get("url")),
+                    _seal(e.get("title", "")),
+                    _seal(e.get("url")),
                     e.get("category", "Uncategorized"),
                     e.get("score", 0), e.get("override_score"), e.get("match_key", ""),
                     day,
