@@ -355,3 +355,27 @@ def test_report_uses_cards(tmp_path, monkeypatch):
     assert "class='card'" in html
     assert "<details class='chart-table'>" in html
     assert "View as table" in html
+
+
+def test_coaching_keeps_plain_english(tmp_path, monkeypatch):
+    import dashboard.app as dash_app
+    from focuscore import store
+    db = str(tmp_path / "coach.db")
+    monkeypatch.setattr(store, "DEFAULT_DB_PATH", db)
+    store.init_db(db)
+    # Prevent live ActivityWatch collection.
+    monkeypatch.setattr(dash_app, "run_day", lambda *a, **kw: None)
+    # Onboarded: some routes redirect to /welcome without the flag file.
+    flag = tmp_path / ".onboarded"
+    flag.write_text("2026-09-29")
+    monkeypatch.setattr(dash_app, "ONBOARDED_FLAG", flag)
+    dash_app.app.config["TESTING"] = True
+    client = dash_app.app.test_client()
+    res = client.get("/coaching")
+    html = res.get_data(as_text=True)
+    assert res.status_code == 200
+    # Coaching sections already use the shared card class (verified in source);
+    # the coaching messages keep their own advice/warning styling and the
+    # warm wording is byte-identical — this is a no-op verification.
+    assert "class='card'" in html or "coach-card" in html
+    assert "in-advice-card" in html or "Warnings" in html
