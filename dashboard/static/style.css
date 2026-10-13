@@ -2459,3 +2459,7 @@ input.input-v2::placeholder, textarea.input-v2::placeholder {
 .focus-sentence select, .focus-sentence input { font-size: inherit; }
 .btn-begin { min-height: 56px; padding: 0 var(--sp-8); font-size: var(--fs-h3);
   margin-top: var(--sp-4); }
+
+/* UX v2: timesheet */
+.timesheet-form .form-row { display: flex; flex-wrap: wrap;
+  gap: var(--sp-2); align-items: center; margin-bottom: var(--sp-2); }

@@ -248,3 +248,25 @@ def test_focus_sentence_builder_classes(tmp_path, monkeypatch):
     assert res.status_code == 200
     assert "focus-sentence" in html
     assert "btn btn-primary btn-begin" in html
+
+
+def test_timesheet_no_raw_datetime_values(tmp_path, monkeypatch):
+    import dashboard.app as dash_app
+    from focuscore import store
+    db = str(tmp_path / "ts.db")
+    monkeypatch.setattr(store, "DEFAULT_DB_PATH", db)
+    store.init_db(db)
+    # Onboarded: some routes redirect to /welcome without the flag file.
+    flag = tmp_path / ".onboarded"
+    flag.write_text("2026-09-29")
+    monkeypatch.setattr(dash_app, "ONBOARDED_FLAG", flag)
+    dash_app.app.config["TESTING"] = True
+    client = dash_app.app.test_client()
+    res = client.get("/timesheet")
+    html = res.get_data(as_text=True)
+    assert res.status_code == 200
+    # no raw ISO datetimes rendered anywhere, e.g. 2026-09-25T09:00 —
+    # datetime-local inputs let the browser render them human-friendly
+    assert not re.search(r"\d{4}-\d{2}-\d{2}T\d{2}:\d{2}", html), \
+        "timesheet still renders raw ISO datetimes"
+    assert "timesheet-form" in html
