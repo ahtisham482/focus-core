@@ -64,7 +64,8 @@ NAV_LINKS = [
 NAV_GROUPS = [
     ("track",  "Track",  "/",         ["home", "timesheet"]),
     ("focus",  "Focus",  "/focus",    ["focus", "goals"]),
-    ("work",   "Work",   "/invoices", ["invoices", "report", "coaching", "intelligence"]),
+    ("work",   "Work",   "/invoices",
+     ["invoices", "report", "coaching", "intelligence"]),
     ("system", "System", "/shield",   ["shield", "alerts", "backup", "review"]),
 ]
 

@@ -4,7 +4,8 @@ import re
 from dashboard.app import layout, NAV_GROUPS, NAV_LINKS
 from focuscore.taxonomy import DEFAULT_CATEGORIES
 
-TOKENS = pathlib.Path(__file__).resolve().parent.parent / "dashboard" / "static" / "tokens.css"
+TOKENS = (pathlib.Path(__file__).resolve().parent.parent
+          / "dashboard" / "static" / "tokens.css")
 
 
 def _slug(name):
@@ -59,7 +60,8 @@ def test_nav_group_primary_href_matches_first_member():
 
 def test_layout_renders_grouped_nav():
     html = layout("Dashboard", "<p>Hello</p>", active="focus")
-    # exactly 4 group divs (label links use class='nav-group-label' — excluded by the <div prefix)
+    # exactly 4 group divs
+    # (label links use class='nav-group-label' — excluded by the <div prefix)
     assert len(re.findall(r"<div class='nav-group(?: |')", html)) == 4
     assert html.count("class='nav-group-label'") == 4
     assert "<a class='nav-group-label' href='/focus'>Focus</a>" in html
