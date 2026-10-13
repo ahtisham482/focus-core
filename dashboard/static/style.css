@@ -2398,3 +2398,12 @@ button.wk-big {
   margin: 0 0 var(--sp-1); }
 .card-v2-body { color: var(--ink); }
 .card-v2 .muted, .card-v2-sub { color: var(--muted); font-size: var(--fs-small); }
+
+/* UX v2: inputs */
+.input-v2 { min-height: 44px; padding: 0 var(--sp-2);
+  border: 1px solid var(--line); border-radius: var(--radius-input);
+  background: var(--bg); color: var(--ink); font-size: var(--fs-body);
+  width: 100%; }
+.input-v2:focus { outline: 2px solid var(--gold); outline-offset: 1px;
+  border-color: var(--gold); }
+.input-v2::placeholder { color: var(--muted); }

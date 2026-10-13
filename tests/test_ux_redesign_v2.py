@@ -138,3 +138,12 @@ def test_card_styles_use_tokens():
     assert ".card-v2" in section and "var(--surface)" in section
     assert "var(--radius-card)" in section and "var(--shadow-card)" in section
     assert ".card-v2-title" in section and ".card-v2-body" in section
+
+
+def test_input_styles_use_tokens():
+    css = (pathlib.Path(__file__).resolve().parent.parent
+           / "dashboard" / "static" / "style.css").read_text()
+    section = css.split("UX v2: inputs")[1]
+    assert ".input-v2" in section and "var(--radius-input)" in section
+    assert ":focus" in section and "var(--gold)" in section
+    assert "min-height: 44px" in section
