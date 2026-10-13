@@ -442,3 +442,24 @@ def test_shield_uses_cards(tmp_path, monkeypatch):
     # The shield's toggles are the page's primary actions: the hero
     # on/off toggle and the rule Pause/Resume toggles must render.
     assert "action='/shield/toggle'" in html
+
+
+def test_alerts_page_uses_cards(tmp_path, monkeypatch):
+    import dashboard.app as dash_app
+    from focuscore import store
+    db = str(tmp_path / "al.db")
+    monkeypatch.setattr(store, "DEFAULT_DB_PATH", db)
+    store.init_db(db)
+    # An empty DB shows the empty state; seed an alert so rows render.
+    store.add_alert("Too much social", "category", "Social Networking", 60,
+                    cooldown_minutes=60)
+    # Onboarded: some routes redirect to /welcome without the flag file.
+    flag = tmp_path / ".onboarded"
+    flag.write_text("2026-10-13")
+    monkeypatch.setattr(dash_app, "ONBOARDED_FLAG", flag)
+    dash_app.app.config["TESTING"] = True
+    client = dash_app.app.test_client()
+    res = client.get("/alerts")
+    html = res.get_data(as_text=True)
+    assert res.status_code == 200
+    assert "alert-row" in html

@@ -426,7 +426,7 @@ def alerts_page():
     alert_rows = []
     for alert in store.list_alerts():
         alert_rows.append(
-            "<div class='gd-strip'>"
+            "<div class='gd-strip alert-row'>"
             "<div class='gd-strip-main'><b>%s</b>"
             "<span class='gd-strip-sub'>%s &middot; past %.0f min "
             "&middot; repeats every %.0f min</span></div>"
