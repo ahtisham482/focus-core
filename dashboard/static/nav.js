@@ -357,6 +357,7 @@
 // UX v2: grouped nav dropdowns — caret toggles .open (touch), Escape and
 // outside clicks close. Hover/keyboard are handled by CSS :hover/:focus-within.
 (function () {
+  'use strict';
   var groups = document.querySelectorAll('.nav-group');
   function closeAll() {
     groups.forEach(function (g) {
