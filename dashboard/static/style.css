@@ -882,9 +882,10 @@ footer a { color: var(--accent-strong, var(--accent)); }
 /* ══════════════════════════ RESPONSIVE ══════════════════════════════ */
 @media (max-width: 700px) {
   .page-main { padding: 0 10px 60px; }
-  .topnav { margin: 8px 10px 16px; padding: 4px; }
-  .topnav a { padding: 7px 9px; font-size: var(--text-xs); gap: 4px; }
-  .topnav a svg { width: 13px; height: 13px; }
+  .topnav { padding: 0 var(--sp-2); }
+  .topnav .nav-group-label { padding: var(--sp-1); font-size: var(--fs-small); }
+  .nav-dropdown a { padding: var(--sp-1); font-size: var(--fs-small); }
+  .nav-dropdown a svg { width: 13px; height: 13px; }
   h1 { font-size: var(--text-lg); }
   .pulse { font-size: 3.25rem; }
   .countdown { font-size: 3.5rem; }
@@ -911,7 +912,6 @@ footer a { color: var(--accent-strong, var(--accent)); }
   html { scroll-behavior: auto; }
   body, .card, .topnav { transition: none !important; }
   .card { animation: none !important; }
-  .nav-indicator { transition: none !important; }
   .badge-toast { animation: none !important; }
   .fc-ring-time[data-pulse] { animation: none !important; }
   .fc-ring { transition: none !important; }
@@ -919,15 +919,7 @@ footer a { color: var(--accent-strong, var(--accent)); }
 }
 
 /* ══════════════════════ REDUCED TRANSPARENCY (UI-8) ═══════════════════ */
-/* On Windows 11 with "Transparency effects" off, fall back to solid nav */
-@media (prefers-reduced-transparency: reduce) {
-  .topnav {
-    backdrop-filter: none !important;
-    -webkit-backdrop-filter: none !important;
-    background: var(--bg-raised) !important;
-    border-color: var(--border) !important;
-  }
-}
+/* The UX v2 nav is already solid (no backdrop-filter), so nothing to fall back. */
 
 /* ═══════════════════════ FORCED-COLORS / WINDOWS HC (UI-14) ══════════ */
 /* When Windows High Contrast mode is active, SVG custom-property strokes
@@ -943,7 +935,6 @@ footer a { color: var(--accent-strong, var(--accent)); }
   #fc-depth-meter { background: Highlight !important; }
   /* Nav active state */
   .topnav a.active { forced-color-adjust: none; background: Highlight; color: HighlightText; }
-  .nav-indicator { background: Highlight; opacity: 0.3; }
   /* Progress bars & horizontal charts */
   .progress > div { background: Highlight !important; }
   .hbar .fill { background: Highlight !important; }
