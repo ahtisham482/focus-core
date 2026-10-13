@@ -129,3 +129,12 @@ def test_button_size_modifiers_survive_new_base():
     section = css.split("UX v2: buttons")[1]
     assert ".btn.btn-sm" in section and ".btn.btn-xl" in section
     assert "min-height: 32px" in section and "min-height: 56px" in section
+
+
+def test_card_styles_use_tokens():
+    css = (pathlib.Path(__file__).resolve().parent.parent
+           / "dashboard" / "static" / "style.css").read_text()
+    section = css.split("UX v2: cards")[1]
+    assert ".card-v2" in section and "var(--surface)" in section
+    assert "var(--radius-card)" in section and "var(--shadow-card)" in section
+    assert ".card-v2-title" in section and ".card-v2-body" in section

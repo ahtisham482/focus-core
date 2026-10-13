@@ -2389,3 +2389,12 @@ button.wk-big {
   font-size: var(--fs-small); }
 .btn.btn-xl { min-height: 56px; padding: 0 var(--sp-4);
   font-size: var(--fs-h3); }
+
+/* UX v2: cards */
+.card-v2 { background: var(--surface); border: 1px solid var(--line);
+  border-radius: var(--radius-card); box-shadow: var(--shadow-card);
+  padding: var(--sp-3); }
+.card-v2-title { font-size: var(--fs-h3); font-weight: 700; color: var(--ink);
+  margin: 0 0 var(--sp-1); }
+.card-v2-body { color: var(--ink); }
+.card-v2 .muted, .card-v2-sub { color: var(--muted); font-size: var(--fs-small); }
