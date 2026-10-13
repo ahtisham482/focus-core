@@ -2400,10 +2400,15 @@ button.wk-big {
 .card-v2 .muted, .card-v2-sub { color: var(--muted); font-size: var(--fs-small); }
 
 /* UX v2: inputs */
-.input-v2 { min-height: 44px; padding: 0 var(--sp-2);
-  border: 1px solid var(--line); border-radius: var(--radius-input);
-  background: var(--bg); color: var(--ink); font-size: var(--fs-body);
-  width: 100%; }
-.input-v2:focus { outline: 2px solid var(--gold); outline-offset: 1px;
-  border-color: var(--gold); }
-.input-v2::placeholder { color: var(--muted); }
+/* NOTE: scoped to input/select/textarea elements (0,1,1) so the class ties —
+   and beats by source order — the old input[type=...] base rule (0,1,1),
+   which would otherwise defeat a plain .input-v2 (0,1,0). */
+input.input-v2, select.input-v2, textarea.input-v2 { min-height: 44px;
+  padding: 0 var(--sp-2); border: 1px solid var(--line);
+  border-radius: var(--radius-input); background: var(--bg); color: var(--ink);
+  font-size: var(--fs-body); width: 100%; }
+input.input-v2:focus, select.input-v2:focus, textarea.input-v2:focus {
+  outline: 2px solid var(--gold); outline-offset: 1px;
+  border-color: var(--gold); box-shadow: none; }
+input.input-v2::placeholder, textarea.input-v2::placeholder {
+  color: var(--muted); }

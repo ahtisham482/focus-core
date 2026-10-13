@@ -144,6 +144,9 @@ def test_input_styles_use_tokens():
     css = (pathlib.Path(__file__).resolve().parent.parent
            / "dashboard" / "static" / "style.css").read_text()
     section = css.split("UX v2: inputs")[1]
-    assert ".input-v2" in section and "var(--radius-input)" in section
+    # full element-scoped selector: plain .input-v2 (0,1,0) would lose to the
+    # old input[type=...] rule (0,1,1); input.input-v2 ties and wins by order
+    assert "input.input-v2" in section and "var(--radius-input)" in section
     assert ":focus" in section and "var(--gold)" in section
     assert "min-height: 44px" in section
+    assert "box-shadow: none" in section
