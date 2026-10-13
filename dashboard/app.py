@@ -171,7 +171,8 @@ def layout(title, body, day=None, refresh=300, active="home",
         groups.append(
             f"<div class='{gcls}'>"
             f"<a class='nav-group-label' href='{ghref}'>{glabel}</a>"
-            f"<button class='nav-caret' aria-label='Open {glabel} menu' aria-expanded='false'>"
+            f"<button class='nav-caret' aria-label='Open {glabel} menu' "
+            "aria-expanded='false'>"
             "<svg width='10' height='10' aria-hidden='true'>"
             "<use href='/static/icons.svg#icon-chevron-down'/></svg></button>"
             f"<div class='nav-dropdown'>{''.join(drop_links)}</div>"
@@ -465,7 +466,8 @@ def day_page(day):
 
     _custom_cats = store.get_categories()
     cat_rows = "".join(
-        f"<tr class='timeline-row' data-category='{_category_slug(name, _custom_cats)}'>"
+        f"<tr class='timeline-row' "
+        f"data-category='{_category_slug(name, _custom_cats)}'>"
         f"<td>{escape(name)}</td><td>{UI_LABELS.get(score, '?')} ({score:+d})</td>"
         f"<td>{_hours(seconds):.2f}h</td>"
         f"<td>{(seconds / total * 100 if total else 0):.1f}%</td></tr>"
