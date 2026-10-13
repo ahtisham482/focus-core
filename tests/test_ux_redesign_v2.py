@@ -419,3 +419,26 @@ def test_review_page_uses_cards(tmp_path, monkeypatch):
     # class plus a data-category slug for the --cat-* token colors.
     assert "class='timeline-row'" in html
     assert "data-category='software-development'" in html
+
+
+def test_shield_uses_cards(tmp_path, monkeypatch):
+    import dashboard.app as dash_app
+    from focuscore import store
+    db = str(tmp_path / "shield.db")
+    monkeypatch.setattr(store, "DEFAULT_DB_PATH", db)
+    store.init_db(db)
+    # Onboarded: some routes redirect to /welcome without the flag file.
+    flag = tmp_path / ".onboarded"
+    flag.write_text("2026-09-29")
+    monkeypatch.setattr(dash_app, "ONBOARDED_FLAG", flag)
+    dash_app.app.config["TESTING"] = True
+    client = dash_app.app.test_client()
+    res = client.get("/shield")
+    html = res.get_data(as_text=True)
+    assert res.status_code == 200
+    # The rule form and emergency-pass form already use the shared card
+    # class (no-op verification: the page was built with cards).
+    assert "class='card'" in html
+    # The shield's toggles are the page's primary actions: the hero
+    # on/off toggle and the rule Pause/Resume toggles must render.
+    assert "action='/shield/toggle'" in html
