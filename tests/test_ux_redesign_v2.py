@@ -233,3 +233,18 @@ def test_category_slug_handles_none_and_unknown():
     # uncategorized border color via the default border-left rule)
     assert _category_slug("Mystery Zone 9") == "mystery-zone-9"
     assert _category_slug("Communication & Scheduling") == "communication-scheduling"
+
+
+def test_focus_sentence_builder_classes(tmp_path, monkeypatch):
+    import dashboard.app as dash_app
+    from focuscore import store
+    db = str(tmp_path / "focus.db")
+    monkeypatch.setattr(store, "DEFAULT_DB_PATH", db)
+    store.init_db(db)
+    dash_app.app.config["TESTING"] = True
+    client = dash_app.app.test_client()
+    res = client.get("/focus")
+    html = res.get_data(as_text=True)
+    assert res.status_code == 200
+    assert "focus-sentence" in html
+    assert "btn btn-primary btn-begin" in html

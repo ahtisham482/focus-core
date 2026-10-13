@@ -1007,7 +1007,10 @@ def test_focus_mobile_css_rules():
                     if scratch.exists() else "")
     assert "@media (max-width: 640px)" in css
     for needle in (".fc-live-time { font-size: 2.4rem;",
-                   ".fc-begin { width: 100%;",
+                   # UX v2 renamed .fc-begin -> .btn.btn-primary.btn-begin;
+                   # the rule still verifies the Begin button goes full-width
+                   # on phones.
+                   ".btn-begin { width: 100%;",
                    ".fc-sessions li { flex-wrap: wrap;"):
         assert needle in css, needle
 

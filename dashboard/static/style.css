@@ -1482,21 +1482,8 @@ button.chip:hover {
   margin: 0 0 24px;
 }
 
-/* Sentence form (extends the Goals .sentence-form rhythm) */
-.fc-hero .sentence-form .sentence {
-  font-size: var(--text-lg);
-  font-weight: 600;
-  line-height: 2.4;
-  letter-spacing: -0.01em;
-  margin: 0 0 16px;
-}
-.fc-hero .sentence-form .sentence input[type=text] {
-  font-size: var(--text-base);
-  font-weight: 600;
-  padding: 8px 10px;
-  margin: 0 2px;
-  max-width: 100%;
-}
+/* UX v2: the old .fc-hero sentence-form rhythm was replaced by the
+   "UX v2: focus" section (.focus-sentence) — old rules removed. */
 
 /* Minutes stepper, inline in the sentence */
 .fc-stepper {
@@ -1587,13 +1574,8 @@ details.fc-shield summary { cursor: pointer; font-weight: 600; font-size: var(--
 .fc-shield-row label { display: inline-flex; align-items: center; gap: 6px; }
 details.fc-shield .note { margin: 4px 0 8px; }
 
-/* The one hero action */
-.fc-begin {
-  font-size: var(--text-lg);
-  font-weight: 700;
-  padding: 14px 40px;
-  border-radius: var(--r-pill);
-}
+/* UX v2: .fc-begin was replaced by .btn.btn-primary.btn-begin
+   (see the v2 buttons and focus sections) — old rule removed. */
 
 /* ── Recent sessions strip ──────────────────────────────────── */
 .fc-recent { margin: 4px 0 32px; }
@@ -1800,8 +1782,9 @@ body.zen-mode .fc-live { border: none; background: transparent; box-shadow: none
 /* ── Responsive ─────────────────────────────────────────────── */
 @media (max-width: 640px) {
   .fc-live-time { font-size: 2.4rem; }
-  .fc-begin { width: 100%; padding: 14px 20px; }
-  .fc-hero .sentence-form .sentence,
+  .btn-begin { width: 100%; }
+  /* UX v2: the .fc-hero sentence now uses .focus-sentence (see "UX v2: focus"
+     section) with its own --lh-h2; only .fc-prefs keeps the old mobile tweak. */
   .fc-prefs .sentence-form .sentence { line-height: 2.2; }
   .fc-sessions li { flex-wrap: wrap; gap: 8px; }
   .fc-sess-bar { flex: 1 1 100%; }
@@ -2461,3 +2444,18 @@ input.input-v2::placeholder, textarea.input-v2::placeholder {
 .timeline-row[data-category='reference-learning'] { border-left-color: var(--cat-reference-learning); }
 .timeline-row[data-category='shopping'] { border-left-color: var(--cat-shopping); }
 .timeline-row[data-category='utilities'] { border-left-color: var(--cat-utilities); }
+
+/* UX v2: focus */
+.focus-sentence { font-size: var(--fs-h2); line-height: var(--lh-h2);
+  text-align: center; padding: var(--sp-6) var(--sp-3); color: var(--ink); }
+/* The sentence <p> still carries the old .sentence-form .sentence rules
+   (0,2,0); without this (0,2,0) tie-breaker the wrapper's font-size and
+   line-height would lose to inheritance and the ceremony type would never
+   apply. The old .fc-hero hero-specific block was removed (replaced by this). */
+.focus-sentence .sentence { font-size: var(--fs-h2); font-weight: 600;
+  line-height: var(--lh-h2); letter-spacing: -0.01em; margin: 0 0 var(--sp-2); }
+.focus-sentence .sentence input[type=text] { font-size: inherit; font-weight: 600;
+  padding: var(--sp-1) var(--sp-2); margin: 0 var(--sp-1); max-width: 100%; }
+.focus-sentence select, .focus-sentence input { font-size: inherit; }
+.btn-begin { min-height: 56px; padding: 0 var(--sp-8); font-size: var(--fs-h3);
+  margin-top: var(--sp-4); }
