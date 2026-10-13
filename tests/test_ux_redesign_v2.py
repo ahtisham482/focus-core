@@ -119,3 +119,13 @@ def test_button_styles_use_tokens():
     assert ".btn-primary" in section and "var(--gold)" in section
     assert ".btn-secondary" in section and ".btn-danger" in section
     assert "var(--radius-pill)" in section and "min-height: 44px" in section
+
+
+def test_button_size_modifiers_survive_new_base():
+    # Regression: the new .btn (0,1,0) ties the old .btn-sm/.btn-xl (0,1,0);
+    # without a stronger rule the modifiers are silently defeated by source order.
+    css = (pathlib.Path(__file__).resolve().parent.parent
+           / "dashboard" / "static" / "style.css").read_text()
+    section = css.split("UX v2: buttons")[1]
+    assert ".btn.btn-sm" in section and ".btn.btn-xl" in section
+    assert "min-height: 32px" in section and "min-height: 56px" in section

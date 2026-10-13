@@ -2382,3 +2382,10 @@ button.wk-big {
 .btn-danger { background: transparent; color: var(--danger);
   border-color: var(--danger); }
 .btn-danger:hover { background: var(--danger); color: #fff; }
+/* Size modifiers — keep old .btn-sm/.btn-xl working with the new .btn base.
+   (0,2,0) beats both the new .btn and the old modifiers, so the new token
+   language wins regardless of source order. */
+.btn.btn-sm { min-height: 32px; padding: 0 var(--sp-2);
+  font-size: var(--fs-small); }
+.btn.btn-xl { min-height: 56px; padding: 0 var(--sp-4);
+  font-size: var(--fs-h3); }
