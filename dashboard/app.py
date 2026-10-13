@@ -168,7 +168,7 @@ def layout(title, body, day=None, refresh=300, active="home",
                 "<a href='%s'%s>%s%s</a>" % (url, acls, svg, mlabel))
         gcls = " nav-group active-group" if active in members else " nav-group"
         groups.append(
-            '<div class="%s">'
+            "<div class='%s'>"
             "<a class='nav-group-label' href='%s'>%s</a>"
             "<button class='nav-caret' aria-label='Open %s menu' aria-expanded='false'>"
             "<svg width='10' height='10' aria-hidden='true'>"
