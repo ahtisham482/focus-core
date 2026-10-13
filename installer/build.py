@@ -85,8 +85,14 @@ WEBVIEW2_BOOTSTRAPPER_URL = "https://go.microsoft.com/fwlink/p/?LinkId=2124703"
 # Evergreen Bootstrapper link). Microsoft republished it (old pin was
 # 2,002,128 bytes); the CI download's hash matches this file byte for
 # byte, confirming the republish is genuine.
+# Refreshed 2026-10-13: Microsoft republished again (old pin aa38a8cf...
+# failed closed on the v1.17.0 installer build). Reviewed: 1,856,216
+# bytes, PE32 GUI executable, PKCS#7 Authenticode certificate table
+# present (11,992 bytes, Microsoft Corporation / Microsoft Code Signing
+# in the chain), downloaded from the official Microsoft fwlink. The CI
+# download's hash (9b5ca0a2...) matches this file byte for byte.
 WEBVIEW2_BOOTSTRAPPER_SHA256 = (
-    "aa38a8cfce6179b87181609b1c730a29eaf26138fc833af5759e67576770f3a3")
+    "9b5ca0a259e6fc9b57230089258bb2ee1de74a9ed52f88d06b4ac354a8a68c70")
 # Evergreen Standalone x64 installer for the --webview2-offline flavor.
 # This is the FULL runtime (~200 MB): it installs WebView2 on machines
 # with no network at all, unlike the bootstrapper, which downloads the
