@@ -320,3 +320,38 @@ def test_dark_mode_has_category_overrides():
     for slug in ["business", "entertainment", "software-development",
                  "utilities", "uncategorized"]:
         assert f"--cat-{slug}:" in dark, f"dark block missing --cat-{slug}"
+
+
+def test_report_uses_cards(tmp_path, monkeypatch):
+    import dashboard.app as dash_app
+    from focuscore import store
+    db = str(tmp_path / "rep.db")
+    monkeypatch.setattr(store, "DEFAULT_DB_PATH", db)
+    store.init_db(db)
+    # Seed a day of tracked time: an empty DB takes the empty-state branch,
+    # which renders no cards and no chart tables.
+    from datetime import date
+    today = date.today().isoformat()
+    store.save_events(today, [
+        {"app": "Code", "title": "main.py", "duration": 3600,
+         "score": 2, "category": "Software Development"},
+    ], path=db)
+    # total_seconds comes from day_stats, not from the activities table.
+    store.save_day_stats(today, 0.0, 3600.0, path=db)
+    # Prevent live ActivityWatch collection.
+    monkeypatch.setattr(dash_app, "run_day", lambda *a, **kw: None)
+    # Onboarded: some routes redirect to /welcome without the flag file.
+    flag = tmp_path / ".onboarded"
+    flag.write_text("2026-09-29")
+    monkeypatch.setattr(dash_app, "ONBOARDED_FLAG", flag)
+    dash_app.app.config["TESTING"] = True
+    client = dash_app.app.test_client()
+    res = client.get("/report")
+    html = res.get_data(as_text=True)
+    assert res.status_code == 200
+    # Report sections already use the shared card class (verified in source);
+    # the meaningful assertion here is the accessible chart-table <details>
+    # from chart_table() — the "View as table" alternative must stay present.
+    assert "class='card'" in html
+    assert "<details class='chart-table'>" in html
+    assert "View as table" in html
