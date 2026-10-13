@@ -258,8 +258,9 @@ def layout(title, body, day=None, refresh=300, active="home",
 def _goal_progress_html(ev, wrap=True):
     """One goal row: name, progress bar, current/target, status badge."""
     width = min(ev["pct"], 100.0)
-    color = {"on_track": "#2e7d32", "achieved": "#2e7d32",
-             "behind": "#f9a825", "missed": "#e53935"}[ev["status"]]
+    color = {"on_track": "var(--ok)", "achieved": "var(--ok)",
+             "behind": "var(--gold)", "missed": "var(--danger)"
+             }[ev["status"]]
     if ev["target_type"] == "pulse":
         target_text = "Pulse %s %.0f pts" % (
             ">=" if ev["direction"] == "more_than" else "<=", ev["target"])

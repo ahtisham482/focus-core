@@ -379,3 +379,13 @@ def test_coaching_keeps_plain_english(tmp_path, monkeypatch):
     # warm wording is byte-identical — this is a no-op verification.
     assert "class='card'" in html or "coach-card" in html
     assert "in-advice-card" in html or "Warnings" in html
+
+
+def test_goal_rows_use_token_colors():
+    from dashboard.app import _goal_progress_html
+    ev = {"name": "Deep work", "pct": 50.0, "status": "on_track",
+          "target_type": "time", "target_name": "Deep work",
+          "direction": "more_than", "target": 120, "current": 60}
+    html = _goal_progress_html(ev)
+    assert "goal-row" in html
+    assert "var(--ok)" in html or "var(--gold" in html

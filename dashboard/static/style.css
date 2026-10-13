@@ -2485,3 +2485,11 @@ input.input-v2::placeholder, textarea.input-v2::placeholder {
 .status-void { background: var(--bg);
   color: color-mix(in srgb, var(--muted) 55%, var(--ink));
   text-decoration: line-through; }
+
+
+/* UX v2: goals */
+.goal-row { background: var(--surface); border: 1px solid var(--line);
+  border-radius: var(--radius-card); padding: var(--sp-2) var(--sp-3);
+  margin-bottom: var(--sp-2); box-shadow: var(--shadow-card); }
+.goal-row .progress { height: 10px; border-radius: var(--radius-pill);
+  background: var(--bg); overflow: hidden; }
