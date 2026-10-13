@@ -1,0 +1,64 @@
+/* Focus Core design tokens — UX redesign v2 (warm premium).
+   Source of truth for color, type, spacing, radius, shadow.
+   Spec: workspace/goals/focus-core-time-tracking-build/files/ux-redesign-v2-design-spec.md */
+
+:root {
+  /* ── Color ── */
+  --bg: #faf6ef;
+  --surface: #ffffff;
+  --ink: #2b2620;
+  --muted: #8a8175;
+  --gold: #c9a227;
+  --gold-deep: #a88420;
+  --line: #e8e0d0;
+  --danger: #b5443c;
+  --ok: #4d7c4d;
+
+  /* ── Type scale (size / line-height) ── */
+  --fs-display: 40px; --lh-display: 48px;
+  --fs-h1: 30px;      --lh-h1: 38px;
+  --fs-h2: 22px;      --lh-h2: 30px;
+  --fs-h3: 18px;      --lh-h3: 26px;
+  --fs-body: 16px;    --lh-body: 26px;
+  --fs-small: 13px;   --lh-small: 20px;
+
+  /* ── Spacing (8px base) ── */
+  --sp-1: 8px; --sp-2: 16px; --sp-3: 24px;
+  --sp-4: 32px; --sp-6: 48px; --sp-8: 64px;
+
+  /* ── Radius ── */
+  --radius-card: 14px;
+  --radius-input: 10px;
+  --radius-pill: 999px;
+
+  /* ── Shadow ── */
+  --shadow-card: 0 2px 12px rgba(60, 45, 20, 0.06);
+  --shadow-lift: 0 6px 24px rgba(60, 45, 20, 0.10);
+
+  /* ── Category colors (order matches focuscore/taxonomy.py DEFAULT_CATEGORIES) ── */
+  --cat-business: #2e7d32;
+  --cat-communication-scheduling: #1976d2;
+  --cat-social-networking: #7b1fa2;
+  --cat-design-composition: #ef6c00;
+  --cat-entertainment: #c2185b;
+  --cat-news: #0288d1;
+  --cat-software-development: #5d4037;
+  --cat-reference-learning: #0097a7;
+  --cat-shopping: #f9a825;
+  --cat-utilities: #616161;
+  --cat-uncategorized: #9e9e9e;
+}
+
+[data-theme='dark'] {
+  --bg: #1c1814;
+  --surface: #26211b;
+  --ink: #f0e9dc;
+  --muted: #a89c88;
+  --gold: #d4af37;
+  --gold-deep: #b8942a;
+  --line: #3a332a;
+  --danger: #d4695f;
+  --ok: #7cb87c;
+  --shadow-card: 0 2px 12px rgba(0, 0, 0, 0.35);
+  --shadow-lift: 0 6px 24px rgba(0, 0, 0, 0.45);
+}

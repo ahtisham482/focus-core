@@ -217,6 +217,7 @@ def layout(title, body, day=None, refresh=300, active="home",
         "<title>%s &middot; Focus Core</title>"
         "<link rel='preload' href='/static/fonts/GeistVF.woff2' "
         "as='font' type='font/woff2' crossorigin>"
+        "<link rel='stylesheet' href='/static/tokens.css'>"
         "<link rel='stylesheet' href='/static/style.css'>"
         "%s"
         "<link rel='icon' href='/static/icon.png'>"
