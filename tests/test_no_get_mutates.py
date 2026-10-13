@@ -132,6 +132,11 @@ def env(tmp_path, monkeypatch):
     import dashboard.app as dash_app
     flag = tmp_path / ".onboarded"
     monkeypatch.setattr(dash_app, "ONBOARDED_FLAG", flag)
+    # The home page syncs ActivityWatch on every load (intentional product
+    # behavior). Stub it so this sweep is deterministic whether or not
+    # ActivityWatch is running on the machine; the sweep's job is catching
+    # accidental mutations, not the known external sync.
+    monkeypatch.setattr(dash_app, "run_day", lambda *a, **kw: None)
     app = dash_app.create_app({"TESTING": False})
     with app.test_client() as client:
         yield client, db, flag

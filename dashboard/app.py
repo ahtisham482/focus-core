@@ -164,18 +164,18 @@ def layout(title, body, day=None, refresh=300, active="home",
                 url = mhref + "?day=" + day
             acls = " class='active'" if mkey == active else ""
             svg = ("<svg width='15' height='15' aria-hidden='true'>"
-                   "<use href='/static/icons.svg#icon-%s'/></svg>" % micon)
+                   f"<use href='/static/icons.svg#icon-{micon}'/></svg>")
             drop_links.append(
-                "<a href='%s'%s>%s%s</a>" % (url, acls, svg, mlabel))
+                f"<a href='{url}'{acls}>{svg}{mlabel}</a>")
         gcls = "nav-group active-group" if active in members else "nav-group"
         groups.append(
-            "<div class='%s'>"
-            "<a class='nav-group-label' href='%s'>%s</a>"
-            "<button class='nav-caret' aria-label='Open %s menu' aria-expanded='false'>"
+            f"<div class='{gcls}'>"
+            f"<a class='nav-group-label' href='{ghref}'>{glabel}</a>"
+            f"<button class='nav-caret' aria-label='Open {glabel} menu' aria-expanded='false'>"
             "<svg width='10' height='10' aria-hidden='true'>"
             "<use href='/static/icons.svg#icon-chevron-down'/></svg></button>"
-            "<div class='nav-dropdown'>%s</div>"
-            "</div>" % (gcls, ghref, glabel, glabel, "".join(drop_links)))
+            f"<div class='nav-dropdown'>{''.join(drop_links)}</div>"
+            "</div>")
 
     # Theme toggle buttons (server-side POST, no JS required)
     theme_toggle = (
@@ -465,16 +465,14 @@ def day_page(day):
 
     _custom_cats = store.get_categories()
     cat_rows = "".join(
-        "<tr class='timeline-row' data-category='%s'>"
-        "<td>%s</td><td>%s (%+d)</td><td>%.2fh</td><td>%.1f%%</td></tr>"
-        % (_category_slug(name, _custom_cats), escape(name),
-           UI_LABELS.get(score, "?"), score,
-           _hours(seconds), seconds / total * 100 if total else 0)
+        f"<tr class='timeline-row' data-category='{_category_slug(name, _custom_cats)}'>"
+        f"<td>{escape(name)}</td><td>{UI_LABELS.get(score, '?')} ({score:+d})</td>"
+        f"<td>{_hours(seconds):.2f}h</td>"
+        f"<td>{(seconds / total * 100 if total else 0):.1f}%</td></tr>"
         for name, seconds, score in sorted(
             ((n, s, _category_score(n, s)) for n, s in
              summary["seconds_by_category"].items()),
-            key=lambda r: r[1], reverse=True)
-    )
+            key=lambda r: r[1], reverse=True))
     uncat_rows = "".join(
         "<tr><td><code>%s</code></td><td>%s</td><td>%.2fh</td></tr>"
         % (escape(item["match_key"]), escape(item["app"] or "?"),
@@ -902,7 +900,7 @@ def home_page():
     def _num(v):
         return "%.0f" % (v or 0)
     _frac = min(max(_ring["fraction"] or 0.0, 0.0), 1.0)
-    _pct = max(0, min(100, int(round(_frac * 100))))
+    _pct = max(0, min(100, round(_frac * 100)))
     rings_html = (
         "<div class='lv-ring'>"
         "<svg class='progress-ring' viewBox='0 0 36 36' role='img' "
@@ -1657,8 +1655,8 @@ def _invoice_status_badge(status):
     # Real statuses are draft/sent/paid/void (focuscore.invoices.STATUSES).
     state = "".join(
         c for c in (status or "").lower() if c.isascii() and c.isalnum())
-    return ("<span class='status-pill status-%s'>%s</span>"
-            % (state or "draft", escape((status or "").upper())))
+    return (f"<span class='status-pill status-{state or 'draft'}'>"
+            f"{escape((status or '').upper())}</span>")
 
 
 def _invoice_detail_body(detail):

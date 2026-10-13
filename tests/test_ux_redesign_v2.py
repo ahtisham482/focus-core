@@ -2,8 +2,9 @@
 import pathlib
 import re
 import sqlite3
-from datetime import date
-from dashboard.app import layout, NAV_GROUPS, NAV_LINKS
+from datetime import UTC, datetime
+
+from dashboard.app import NAV_GROUPS, NAV_LINKS, layout
 from focuscore.taxonomy import DEFAULT_CATEGORIES
 
 TOKENS = (pathlib.Path(__file__).resolve().parent.parent
@@ -22,7 +23,7 @@ def test_tokens_css_linked():
 
 
 def test_tokens_define_core_variables():
-    css = TOKENS.read_text()
+    css = TOKENS.read_text(encoding="utf-8")
     for var in ["--bg:", "--surface:", "--ink:", "--muted:", "--gold:",
                 "--gold-deep:", "--line:", "--danger:", "--ok:",
                 "--radius-card:", "--shadow-card:", "--fs-body:"]:
@@ -31,7 +32,7 @@ def test_tokens_define_core_variables():
 
 
 def test_tokens_define_all_category_colors():
-    css = TOKENS.read_text()
+    css = TOKENS.read_text(encoding="utf-8")
     assert len(DEFAULT_CATEGORIES) == 11
     for cat in DEFAULT_CATEGORIES:
         slug = _slug(cat["name"])
@@ -82,7 +83,7 @@ def test_layout_renders_grouped_nav():
         href = by_key[mkey]
         expected_counts[href] = expected_counts.get(href, 0) + 1
     for href, n in expected_counts.items():
-        assert html.count("href='%s'" % href) == n, f"{href}: expected {n}"
+        assert html.count(f"href='{href}'") == n, f"{href}: expected {n}"
 
 
 def test_review_link_keeps_day_param():
@@ -92,7 +93,7 @@ def test_review_link_keeps_day_param():
 
 def test_nav_dropdown_styles_use_tokens():
     css = (pathlib.Path(__file__).resolve().parent.parent
-           / "dashboard" / "static" / "style.css").read_text()
+           / "dashboard" / "static" / "style.css").read_text(encoding="utf-8")
     # slice the new nav section so token assertions are tied to it, not the whole file
     section = css.split("UX v2: grouped")[1]
     for sel in [".nav-group", ".nav-group-label", ".nav-dropdown",
@@ -110,13 +111,13 @@ def test_nav_dropdown_styles_use_tokens():
 
 def test_nav_js_has_dropdown_behavior():
     js = (pathlib.Path(__file__).resolve().parent.parent
-          / "dashboard" / "static" / "nav.js").read_text()
+          / "dashboard" / "static" / "nav.js").read_text(encoding="utf-8")
     assert "nav-caret" in js and "Escape" in js
 
 
 def test_button_styles_use_tokens():
     css = (pathlib.Path(__file__).resolve().parent.parent
-           / "dashboard" / "static" / "style.css").read_text()
+           / "dashboard" / "static" / "style.css").read_text(encoding="utf-8")
     section = css.split("UX v2: buttons")[1]
     assert ".btn-primary" in section and "var(--gold)" in section
     assert ".btn-secondary" in section and ".btn-danger" in section
@@ -127,7 +128,7 @@ def test_button_size_modifiers_survive_new_base():
     # Regression: the new .btn (0,1,0) ties the old .btn-sm/.btn-xl (0,1,0);
     # without a stronger rule the modifiers are silently defeated by source order.
     css = (pathlib.Path(__file__).resolve().parent.parent
-           / "dashboard" / "static" / "style.css").read_text()
+           / "dashboard" / "static" / "style.css").read_text(encoding="utf-8")
     section = css.split("UX v2: buttons")[1]
     assert ".btn.btn-sm" in section and ".btn.btn-xl" in section
     assert "min-height: 32px" in section and "min-height: 56px" in section
@@ -135,7 +136,7 @@ def test_button_size_modifiers_survive_new_base():
 
 def test_card_styles_use_tokens():
     css = (pathlib.Path(__file__).resolve().parent.parent
-           / "dashboard" / "static" / "style.css").read_text()
+           / "dashboard" / "static" / "style.css").read_text(encoding="utf-8")
     section = css.split("UX v2: cards")[1]
     assert ".card-v2" in section and "var(--surface)" in section
     assert "var(--radius-card)" in section and "var(--shadow-card)" in section
@@ -144,7 +145,7 @@ def test_card_styles_use_tokens():
 
 def test_input_styles_use_tokens():
     css = (pathlib.Path(__file__).resolve().parent.parent
-           / "dashboard" / "static" / "style.css").read_text()
+           / "dashboard" / "static" / "style.css").read_text(encoding="utf-8")
     section = css.split("UX v2: inputs")[1]
     # full element-scoped selector: plain .input-v2 (0,1,0) would lose to the
     # old input[type=...] rule (0,1,1); input.input-v2 ties and wins by order
@@ -156,7 +157,7 @@ def test_input_styles_use_tokens():
 
 def test_empty_state_styles_use_tokens():
     css = (pathlib.Path(__file__).resolve().parent.parent
-           / "dashboard" / "static" / "style.css").read_text()
+           / "dashboard" / "static" / "style.css").read_text(encoding="utf-8")
     section = css.split("UX v2: empty")[1]
     assert ".empty-v2" in section and "var(--muted)" in section
     assert ".empty-v2-icon" in section
@@ -164,7 +165,7 @@ def test_empty_state_styles_use_tokens():
 
 def test_type_styles_use_tokens():
     css = (pathlib.Path(__file__).resolve().parent.parent
-           / "dashboard" / "static" / "style.css").read_text()
+           / "dashboard" / "static" / "style.css").read_text(encoding="utf-8")
     section = css.split("UX v2: type")[1]
     assert ".page-title-v2" in section and "var(--fs-display)" in section
     assert ".section-title-v2" in section and "var(--fs-h2)" in section
@@ -316,7 +317,7 @@ def test_invoice_status_pills(tmp_path, monkeypatch):
 
 def test_dark_mode_has_category_overrides():
     css = (pathlib.Path(__file__).resolve().parent.parent
-           / "dashboard" / "static" / "tokens.css").read_text()
+           / "dashboard" / "static" / "tokens.css").read_text(encoding="utf-8")
     dark = css.split("[data-theme='dark']")[1]
     for slug in ["business", "entertainment", "software-development",
                  "utilities", "uncategorized"]:
@@ -331,7 +332,7 @@ def test_report_uses_cards(tmp_path, monkeypatch):
     store.init_db(db)
     # Seed a day of tracked time: an empty DB takes the empty-state branch,
     # which renders no cards and no chart tables.
-    today = date.today().isoformat()
+    today = datetime.now(UTC).date().isoformat()
     store.save_events(today, [
         {"app": "Code", "title": "main.py", "duration": 3600,
          "score": 2, "category": "Software Development"},
@@ -398,7 +399,7 @@ def test_review_page_uses_cards(tmp_path, monkeypatch):
     monkeypatch.setattr(store, "DEFAULT_DB_PATH", db)
     store.init_db(db)
     # Seed one activity so the review table has a real row to style.
-    today = date.today().isoformat()
+    today = datetime.now(UTC).date().isoformat()
     store.save_events(today, [
         {"app": "Code", "title": "main.py", "duration": 1800,
          "score": 2, "category": "Software Development",

@@ -507,7 +507,8 @@ def _mix_hex(a_hex, b_hex, pct_a):
     a = _rgb(a_hex)
     b = _rgb(b_hex)
     m = tuple(pct_a * ca + (1 - pct_a) * cb for ca, cb in zip(a, b))
-    return "#%02x%02x%02x" % tuple(int(round(c * 255)) for c in m)
+    r, g, b = (round(c * 255) for c in m)
+    return f"#{r:02x}{g:02x}{b:02x}"
 
 
 def _living_theme(light):
@@ -619,7 +620,9 @@ def test_contrast_status_and_pill_pairs_style_css():
     assert "background: var(--bg-sunken)" in pill
     i = APP_PY.index("_invoice_status_badge")
     badge_fn = APP_PY[i:APP_PY.index("\ndef ", i + 1)]
-    for needle in ("status-pill", "status-%s"):
+    # The status class is built dynamically from the status value
+    # (f-string since the ruff-ratchet cleanup; was "%"-formatting).
+    for needle in ("status-pill", "status-{"):
         assert needle in badge_fn, needle
     # Wiring: the shipped .status-* rules use the tinted AA pairings.
     # (tint_key None = plain --bg background, no color-mix.)
@@ -635,9 +638,9 @@ def test_contrast_status_and_pill_pairs_style_css():
         if tint_key is None:
             assert "background: var(--bg)" in rule, cls
         else:
-            assert ("color-mix(in srgb, var(%s) 15%%" % tint_key) in rule, cls
-        assert ("color-mix(in srgb, var(%s) 55%%, var(--ink))" % text_key
-                ) in rule, cls
+            assert f"color-mix(in srgb, var({tint_key}) 15%" in rule, cls
+        assert (f"color-mix(in srgb, var({text_key}) 55%, var(--ink))"
+                in rule), cls
 
 
 def test_contrast_named_pairs_living_css():
