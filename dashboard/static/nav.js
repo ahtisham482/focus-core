@@ -353,3 +353,36 @@
     boot();
   }
 }());
+
+// UX v2: grouped nav dropdowns — caret toggles .open (touch), Escape and
+// outside clicks close. Hover/keyboard are handled by CSS :hover/:focus-within.
+(function () {
+  var groups = document.querySelectorAll('.nav-group');
+  function closeAll() {
+    groups.forEach(function (g) {
+      g.classList.remove('open');
+      var c = g.querySelector('.nav-caret');
+      if (c) c.setAttribute('aria-expanded', 'false');
+    });
+  }
+  groups.forEach(function (g) {
+    var caret = g.querySelector('.nav-caret');
+    if (!caret) return;
+    caret.addEventListener('click', function (e) {
+      e.preventDefault();
+      e.stopPropagation();
+      var wasOpen = g.classList.contains('open');
+      closeAll();
+      if (!wasOpen) {
+        g.classList.add('open');
+        caret.setAttribute('aria-expanded', 'true');
+      }
+    });
+  });
+  document.addEventListener('click', function (e) {
+    if (!e.target.closest('.nav-group')) closeAll();
+  });
+  document.addEventListener('keydown', function (e) {
+    if (e.key === 'Escape') closeAll();
+  });
+}());

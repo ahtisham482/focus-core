@@ -104,3 +104,9 @@ def test_nav_dropdown_styles_use_tokens():
                   "var(--radius-card)"]:
         assert token in section, f"grouped nav section missing {token}"
     assert "overflow: visible" in section
+
+
+def test_nav_js_has_dropdown_behavior():
+    js = (pathlib.Path(__file__).resolve().parent.parent
+          / "dashboard" / "static" / "nav.js").read_text()
+    assert "nav-caret" in js and "Escape" in js
