@@ -86,3 +86,14 @@ def test_layout_renders_grouped_nav():
 def test_review_link_keeps_day_param():
     html = layout("Dashboard", "<p>Hello</p>", day="2026-10-13", active="review")
     assert "href='/activities?day=2026-10-13'" in html
+
+
+def test_nav_dropdown_styles_use_tokens():
+    css = (pathlib.Path(__file__).resolve().parent.parent
+           / "dashboard" / "static" / "style.css").read_text()
+    for sel in [".nav-group", ".nav-group-label", ".nav-dropdown",
+                ".nav-group.open .nav-dropdown",
+                ".nav-group:hover .nav-dropdown",
+                ".nav-group:focus-within .nav-dropdown"]:
+        assert sel in css, f"style.css missing {sel}"
+    assert "var(--surface)" in css and "var(--shadow-lift)" in css

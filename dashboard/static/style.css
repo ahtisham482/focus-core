@@ -2413,3 +2413,26 @@ button.wk-big {
   .page-main .lv-tabs a.on { color: var(--accent-strong, var(--accent)); }
   .page-main .lv-tabs a svg { width: 22px; height: 22px; }
 }
+
+/* UX v2: grouped nav */
+.topnav { display: flex; align-items: center; gap: var(--sp-1);
+  background: var(--surface); border-bottom: 1px solid var(--line);
+  padding: 0 var(--sp-3); }
+.nav-group { position: relative; }
+.nav-group-label { display: inline-block; padding: var(--sp-2) var(--sp-1);
+  color: var(--ink); text-decoration: none; font-weight: 600; }
+.nav-group.active-group .nav-group-label { color: var(--gold-deep); }
+.nav-caret { background: none; border: none; cursor: pointer;
+  color: var(--muted); padding: var(--sp-1); }
+.nav-dropdown { display: none; position: absolute; top: 100%; left: 0;
+  min-width: 220px; background: var(--surface);
+  border: 1px solid var(--line); border-radius: var(--radius-card);
+  box-shadow: var(--shadow-lift); padding: var(--sp-1); z-index: 50; }
+.nav-dropdown a { display: flex; align-items: center; gap: var(--sp-1);
+  padding: var(--sp-1) var(--sp-2); border-radius: var(--radius-input);
+  color: var(--ink); text-decoration: none; }
+.nav-dropdown a:hover { background: var(--bg); }
+.nav-dropdown a.active { color: var(--gold-deep); font-weight: 700; }
+.nav-group:hover .nav-dropdown,
+.nav-group:focus-within .nav-dropdown,
+.nav-group.open .nav-dropdown { display: block; }
