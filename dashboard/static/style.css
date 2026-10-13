@@ -1394,18 +1394,8 @@ button.chip:hover {
   gap: 16px;
   margin: 4px 0 16px;
 }
-.hm-stat-num {
-  font-size: 2.5rem;
-  font-weight: 700;
-  letter-spacing: -0.02em;
-  font-variant-numeric: tabular-nums;
-}
-.hm-stat-lbl {
-  color: var(--ink-muted);
-  font-size: var(--text-sm);
-  letter-spacing: .1em;
-  text-transform: uppercase;
-}
+/* UX v2: .hm-stat-num/.hm-stat-lbl were replaced by .stat-num/.stat-label
+   (see "UX v2: home" section) — the old rules are removed. */
 .hm-links { margin: 16px 0 0; }
 
 /* Spacer so the fixed mobile tab bar never covers content (mobile only) */
@@ -2440,7 +2430,15 @@ input.input-v2::placeholder, textarea.input-v2::placeholder {
 /* Scoped to (0,2,1) to beat living.css's .lv-ring svg (0,1,1): living.css
    loads later via extra_css and would otherwise size the ring at 96px and
    double-rotate it (its svg-level rotate(-90deg) plus the circle's). */
-.lv-ring svg.progress-ring { width: 120px; height: 120px; transform: none; }
+.lv-ring svg.progress-ring { width: 120px; height: 120px; transform: none;
+  animation: progress-ring-in 0.6s ease-out both; }
+@keyframes progress-ring-in {
+  from { opacity: 0; transform: scale(0.92); }
+  to { opacity: 1; transform: none; }
+}
+@media (max-width: 820px) {
+  .lv-ring svg.progress-ring { width: 84px; height: 84px; }
+}
 .progress-ring .ring-bg { fill: none; stroke: var(--line); stroke-width: 3; }
 .progress-ring .ring-fg { fill: none; stroke: var(--gold); stroke-width: 3;
   stroke-linecap: round; transform: rotate(-90deg); transform-origin: center; }

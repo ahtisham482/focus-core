@@ -363,23 +363,8 @@ body.living footer.page-footer {
   display: block;
   margin: 0 auto;
 }
-.lv-ring .track {
-  fill: none;
-  stroke: var(--line);
-  stroke-width: 10;
-}
-.lv-ring .fill {
-  fill: none;
-  stroke: var(--ember);
-  stroke-width: 10;
-  stroke-linecap: round;
-  /* closes from empty via `from` keyframe; the inline dashoffset is the truth */
-  animation: lv-ring-close 1.2s var(--spring) both;
-  animation-delay: var(--d, 560ms);
-}
-@keyframes lv-ring-close {
-  from { stroke-dashoffset: 326.7; }
-}
+/* UX v2: .lv-ring .track/.fill and lv-ring-close were replaced by the
+   .progress-ring SVG (ring-bg/ring-fg) — the old rules are removed. */
 .lv-ring-name {
   font-size: 0.8125rem;
   color: var(--ink2);
