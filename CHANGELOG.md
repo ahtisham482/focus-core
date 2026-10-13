@@ -1,5 +1,16 @@
 # Changelog
 
+## [v1.17.0] — 2026-10-13 (UX redesign v2: warm premium)
+Full visual redesign of every dashboard screen:
+- Warm-premium design tokens (cream/gold) with light and dark themes.
+- Grouped top navigation (Track / Focus / Work / System) with dropdowns; Focus stays one click away.
+- Shared component kit: buttons, cards, inputs, empty states, typography scale.
+- Flagship treatment for Home (focus progress ring), Day (category-colored timeline), and Focus.
+- Timesheet: native date/time pickers replace raw ISO text; form wraps cleanly.
+- Invoices: status pills (draft/sent/paid/void/overdue) with WCAG-AA contrast, thousands-separated amounts.
+- Report, Coaching, Intelligence, Goals, Review, Shield, Alerts, Backup, and Welcome pages polished with the shared card language.
+- 1,258 tests green, lint clean, every screen rendered and inspected at 1440×900 in light and dark mode.
+
 ## [v1.14.0] — 2026-09-27 (Phase 12: Deep Time Visual Analytics & Executive Reports)
 Comprehensive Deep Time visual intelligence overhaul for `/intelligence` and `/intelligence/report`:
 - 24-hour SVG depth timeline chart with chronotype peak window overlays and fixed 24-hour binning capped at ~120 rects.

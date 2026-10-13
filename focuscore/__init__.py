@@ -1,3 +1,3 @@
 """focus-core: a local-first, generic RescueTime-style tracking core (Phase 1)."""
-__version__ = "1.16.0"
+__version__ = "1.17.0"
 
