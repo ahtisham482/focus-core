@@ -7,6 +7,7 @@ wherever the folder is placed -- no absolute paths anywhere.
 
 import sqlite3
 import logging
+import time as _time
 from datetime import date, datetime, timedelta
 from pathlib import Path
 from typing import Any
@@ -300,6 +301,7 @@ def save_events(
             ],
         )
         conn.commit()
+        _invalidate_day_summary(day, path)
     finally:
         conn.close()
 
@@ -407,9 +409,24 @@ def get_categories(
     return merged
 
 
+_DAY_ACTIVITIES_CACHE: dict = {}
+_DAY_ACTIVITIES_CACHE_TTL = 30.0  # seconds
+
+
 def get_day_activities(
     day: str, path: str | Path | None = None
 ) -> list[dict[str, Any]]:
+    """List one day's activities, titles/URLs decrypted.
+
+    Results are cached in memory for 30s; invalidated by
+    _invalidate_day_summary() after writing activities.
+    """
+    cache_key = (str(_resolve_db_path(path)), day)
+    now = _time.monotonic()
+    if cache_key in _DAY_ACTIVITIES_CACHE:
+        result, expires = _DAY_ACTIVITIES_CACHE[cache_key]
+        if now < expires:
+            return result
     init_db(path)
     conn = get_db(path)
     try:
@@ -424,6 +441,7 @@ def get_day_activities(
             opened["title"] = columncrypto.unprotect_text(opened["title"])
             opened["url"] = columncrypto.unprotect_text(opened["url"])
             rows.append(opened)
+        _DAY_ACTIVITIES_CACHE[cache_key] = (rows, now + _DAY_ACTIVITIES_CACHE_TTL)
         return rows
     finally:
         conn.close()
@@ -456,16 +474,36 @@ def get_activities_range(
         conn.close()
 
 
+_DAY_SUMMARY_CACHE: dict = {}
+_DAY_SUMMARY_CACHE_TTL = 30.0  # seconds
+
+
+def _invalidate_day_summary(day: str, path) -> None:
+    """Drop cached day data (call after writing activities)."""
+    key = (str(_resolve_db_path(path)), day)
+    _DAY_SUMMARY_CACHE.pop(key, None)
+    _DAY_ACTIVITIES_CACHE.pop(key, None)
+
+
 def get_day_summary(
     day: str, path: str | Path | None = None
 ) -> dict[str, Any]:
     """Aggregate one day.
+
+    Results are cached in memory for 30s; invalidated by
+    _invalidate_day_summary() after writing activities.
 
     Returns {"seconds_by_level": {-2:.., -1:.., 0:.., 1:.., 2:..},
              "seconds_by_category": {name: seconds},
              "uncategorized": [{match_key, app, title, seconds}...],
              "afk_seconds": float, "total_seconds": float}
     """
+    cache_key = (str(_resolve_db_path(path)), day)
+    now = _time.monotonic()
+    if cache_key in _DAY_SUMMARY_CACHE:
+        result, expires = _DAY_SUMMARY_CACHE[cache_key]
+        if now < expires:
+            return result
     init_db(path)
     conn = get_db(path)
     try:
@@ -497,7 +535,7 @@ def get_day_summary(
             "SELECT afk_seconds, total_seconds FROM day_stats WHERE day = ?",
             (day,),
         ).fetchone()
-        return {
+        result = {
             "seconds_by_level": seconds_by_level,
             "seconds_by_category": seconds_by_category,
             "uncategorized": sorted(
@@ -505,6 +543,8 @@ def get_day_summary(
             "afk_seconds": float(stats["afk_seconds"]) if stats else 0.0,
             "total_seconds": float(stats["total_seconds"]) if stats else 0.0,
         }
+        _DAY_SUMMARY_CACHE[cache_key] = (result, now + _DAY_SUMMARY_CACHE_TTL)
+        return result
     finally:
         conn.close()
 
@@ -1473,13 +1513,33 @@ def day_is_locked(
 
 # ---------------------------------------------------------------------------
 # Settings (Phase 7) -- simple key/value store, created by migration 5.
+# Cached in memory: settings are read far more often than written.
 # ---------------------------------------------------------------------------
+
+_SETTINGS_CACHE: dict = {}
+_SETTINGS_CACHE_TTL = 60.0  # seconds
+
+
+def _settings_cache_key(key: str, path) -> tuple:
+    # Resolve via _resolve_db_path so explicit and default paths
+    # map to the same cache entry.
+    return (str(_resolve_db_path(path)), key)
+
 
 def get_setting(
     key: str, default: Any = None,
     path: str | Path | None = None
 ) -> Any:
-    """Read a setting; returns default when missing. Never raises."""
+    """Read a setting; returns default when missing. Never raises.
+
+    Results are cached in memory for 60s; set_setting() invalidates.
+    """
+    cache_key = _settings_cache_key(key, path)
+    now = _time.monotonic()
+    if cache_key in _SETTINGS_CACHE:
+        value, expires = _SETTINGS_CACHE[cache_key]
+        if now < expires:
+            return value
     try:
         init_db(path)
         conn = get_db(path)
@@ -1487,7 +1547,9 @@ def get_setting(
             row = conn.execute(
                 "SELECT value FROM settings WHERE key = ?", (key,)
             ).fetchone()
-            return row["value"] if row else default
+            value = row["value"] if row else default
+            _SETTINGS_CACHE[cache_key] = (value, now + _SETTINGS_CACHE_TTL)
+            return value
         finally:
             conn.close()
     except Exception:
@@ -1498,6 +1560,8 @@ def set_setting(
     key: str, value: Any, path: str | Path | None = None
 ) -> None:
     """Write a setting (upsert). Never raises."""
+    # Invalidate the cache entry so the next read sees the new value.
+    _SETTINGS_CACHE.pop(_settings_cache_key(key, path), None)
     try:
         init_db(path)
         conn = get_db(path)
